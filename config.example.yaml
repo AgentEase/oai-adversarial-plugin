@@ -67,14 +67,15 @@ plugins:
           # this stop being served until a fresh one arrives.
           ttl-minutes: 55
 
-          # Retry policy for one manual round per model: N attempts per
-          # egress, then rotate; the round cap is computed automatically as
-          # (number of egress entries) x N. Success stores the baseline;
-          # failure only annotates the dashboard (cool-down hint), and
-          # nothing restarts automatically.
+          # Retry policy for one manual round per model: plain egresses get N
+          # attempts each, then rotate; rotating pools (# pool:) contribute
+          # their own pool-attempts budget instead (see below). The automatic
+          # round cap = (plain count x N) + (pools x pool-attempts). Success
+          # stores the baseline; failure only annotates the dashboard
+          # (cool-down hint), and nothing restarts automatically.
           probe-interval-seconds: 5
           attempts-per-proxy: 3
-          # max-attempts-per-round: 0   # 0/absent = auto (egress count x 3)
+          # max-attempts-per-round: 0   # 0/absent = auto (see formula above)
           cooldown-minutes: 20
           # ---- egress pool rotation (IPv4/IPv6 mixed friendly) -----------
           # Two temporary removals apply to plain (fixed-endpoint) egresses,
@@ -101,6 +102,12 @@ plugins:
           # accumulating for the dashboard, but no cool-down is applied.
           # Mark such an entry with a trailing comment in the proxies file:
           #   socks5h://10.255.1.1:18321  # pool:ipv6
+          # Rotating pools also get an independent per-round budget below:
+          # every attempt draws a fresh random source address, so one round
+          # may sample up to pool-attempts times (default 100) to find a
+          # healthy 292-byte state - far more lottery tickets than a fixed
+          # endpoint deserves, and success still stops the round early.
+          pool-attempts: 100
           # exit-pool-fail-threshold is kept for backward compatibility only;
           # it no longer participates in the cool-down decision.
           exit-pool-fail-threshold: 10

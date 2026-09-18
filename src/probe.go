@@ -47,6 +47,7 @@ const (
 	probeDefaultsExitPoolFailThreshold = 10
 	probeDefaultsExitMinActive = 1
 	probeDefaultsExitSuccessCooldownMinutes = 30
+	probeDefaultsPoolAttempts = 100
 	probeDefaultsPrefetchMinutes = 3
 	prefetchRetryWindow = 90 * time.Second
 	probeDefaultsTimeoutSeconds  = 60
@@ -75,6 +76,7 @@ type probeConfig struct {
 	ExitPoolFailThreshold int
 	ExitMinActive       int
 	ExitSuccessCooldown time.Duration
+	PoolAttempts        int
 	Prefetch            time.Duration
 	SuspectThreshold    int
 	Timeout             time.Duration
@@ -104,6 +106,7 @@ type probeConfigYAML struct {
 	ExitPoolFailThreshold *int `yaml:"exit-pool-fail-threshold"`
 	ExitMinActive       *int  `yaml:"exit-min-active"`
 	ExitSuccessCooldownMinutes *int `yaml:"exit-success-cooldown-minutes"`
+	PoolAttempts        *int  `yaml:"pool-attempts"`
 	PrefetchMinutes     *int  `yaml:"prefetch-minutes"`
 	SuspectThreshold *int     `yaml:"suspect-threshold"`
 	TimeoutSeconds   *int     `yaml:"timeout-seconds"`
@@ -260,6 +263,7 @@ func parseProbeConfig(block probeConfigYAML) probeConfig {
 		ExitPoolFailThreshold: probeDefaultsExitPoolFailThreshold,
 		ExitMinActive:       probeDefaultsExitMinActive,
 		ExitSuccessCooldown: time.Duration(probeDefaultsExitSuccessCooldownMinutes) * time.Minute,
+		PoolAttempts:        probeDefaultsPoolAttempts,
 		Prefetch:            time.Duration(probeDefaultsPrefetchMinutes) * time.Minute,
 		SuspectThreshold:    probeDefaultsSuspectThreshold,
 		Timeout:             time.Duration(probeDefaultsTimeoutSeconds) * time.Second,
@@ -310,6 +314,9 @@ func parseProbeConfig(block probeConfigYAML) probeConfig {
 	}
 	if block.ExitSuccessCooldownMinutes != nil && *block.ExitSuccessCooldownMinutes >= 0 {
 		cfg.ExitSuccessCooldown = time.Duration(*block.ExitSuccessCooldownMinutes) * time.Minute
+	}
+	if block.PoolAttempts != nil && *block.PoolAttempts >= 0 {
+		cfg.PoolAttempts = *block.PoolAttempts
 	}
 	if block.PrefetchMinutes != nil && *block.PrefetchMinutes >= 0 {
 		cfg.Prefetch = time.Duration(*block.PrefetchMinutes) * time.Minute
@@ -828,9 +835,12 @@ func degradedRejectMessage(models ...string) string {
 }
 
 // effectiveMaxAttempts resolves the per-round attempt cap. Zero means auto:
-// every egress is tried attempts-per-proxy times (e.g. 3 egresses × 3 tries
-// = a round only gives up after all hops failed their full share).
-func effectiveMaxAttempts(cfg probeConfig, proxyCount int) int {
+// each plain egress contributes attempts-per-proxy tries, while rotating
+// pools ("# pool:..." entries) contribute their own pool-attempts budget
+// (default 100) because every draw there is an independent lottery with a
+// fresh random source address - a failing streak says nothing about the
+// endpoint. An explicit max-attempts-per-round still overrides everything.
+func effectiveMaxAttempts(cfg probeConfig, proxies []string) int {
 	if cfg.MaxAttemptsPerRound > 0 {
 		return cfg.MaxAttemptsPerRound
 	}
@@ -838,10 +848,45 @@ func effectiveMaxAttempts(cfg probeConfig, proxyCount int) int {
 	if perHop <= 0 {
 		perHop = probeDefaultsAttemptsPerHop
 	}
-	if total := proxyCount * perHop; total > 0 {
+	poolBudget := poolAttemptsFor(cfg)
+	total := 0
+	for _, spec := range proxies {
+		if cfg.ProxyPools[spec] {
+			total += poolBudget
+		} else {
+			total += perHop
+		}
+	}
+	if total > 0 {
 		return total
 	}
 	return probeDefaultsMaxAttempts
+}
+
+// poolAttemptsFor resolves the per-round budget of one rotating pool (0
+// disables the pool in the rotation).
+func poolAttemptsFor(cfg probeConfig) int {
+	if cfg.PoolAttempts > 0 {
+		return cfg.PoolAttempts
+	}
+	return probeDefaultsPoolAttempts
+}
+
+// pickRotation returns the next usable egress that still has budget, walking
+// rotation order from cursor; ok=false when every usable egress has spent its
+// share of the round budget (the round is then over). The next cursor is
+// returned too, so the round-robin keeps rotating while shares last: plain
+// egresses are sampled first alongside the pool, and once their small shares
+// are exhausted a large rotating pool keeps drawing its remaining budget.
+func pickRotation(rotation []string, budgets map[string]int, cursor int) (string, int, bool) {
+	for offset := 0; offset < len(rotation); offset++ {
+		index := (cursor + offset) % len(rotation)
+		spec := rotation[index]
+		if budgets[spec] > 0 {
+			return spec, (index + 1) % len(rotation), true
+		}
+	}
+	return "", cursor, false
 }
 
 // noteBusinessDegradation marks a model immediately upon a single unhealthy
@@ -1112,7 +1157,18 @@ func (e *probeEngine) probeModel(model string, cfg probeConfig, stop chan struct
 		delete(e.probing, model)
 		e.mu.Unlock()
 	}()
-	maxAttempts := effectiveMaxAttempts(cfg, len(proxies))
+	maxAttempts := effectiveMaxAttempts(cfg, proxies)
+	budgets := make(map[string]int, len(proxies))
+	for _, spec := range proxies {
+		if cfg.ProxyPools[spec] {
+			budgets[spec] = poolAttemptsFor(cfg)
+		} else {
+			budgets[spec] = cfg.AttemptsPerHop
+			if budgets[spec] <= 0 {
+				budgets[spec] = probeDefaultsAttemptsPerHop
+			}
+		}
+	}
 	attempts := 0
 	lastError := ""
 	lastLength := 0
@@ -1127,8 +1183,13 @@ func (e *probeEngine) probeModel(model string, cfg probeConfig, stop chan struct
 		if len(rotation) == 0 {
 			break
 		}
-		proxySpec := rotation[cursor%len(rotation)]
-		cursor++
+		proxySpec, next, ok := pickRotation(rotation, budgets, cursor)
+		if !ok {
+			// Every usable egress has spent its share of the round budget.
+			break
+		}
+		cursor = next
+		budgets[proxySpec]--
 		attempts++
 		record, value := e.probeOnce(model, proxySpec, cfg)
 		e.appendRecord(record)
@@ -1749,7 +1810,8 @@ func probeSummary() map[string]any {
 		"scan_seconds": int(cfg.ScanInterval / time.Second),
 		"interval_seconds": int(cfg.ProbeInterval / time.Second),
 		"attempts_per_proxy": cfg.AttemptsPerHop,
-		"max_attempts_per_round": effectiveMaxAttempts(cfg, len(cfg.Proxies)),
+		"pool_attempts": poolAttemptsFor(cfg),
+		"max_attempts_per_round": effectiveMaxAttempts(cfg, cfg.Proxies),
 		"cooldown_minutes": int(cfg.Cooldown / time.Minute),
 		"business":        businessMarks,
 		"suspect_threshold": cfg.SuspectThreshold,

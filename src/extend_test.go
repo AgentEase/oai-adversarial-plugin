@@ -1048,10 +1048,89 @@ func TestPoolNeverBenched(t *testing.T) {
 		t.Fatal("healthy capture must clear the pool counters")
 	}
 }
+// TestPoolBudgetShare verifies the v1.5.19 adaptive per-round budget: plain
+// egresses contribute attempts-per-proxy tries each, rotating pools
+// contribute their own pool-attempts budget (default 100), an explicit
+// max-attempts-per-round still overrides everything, and pool-attempts: 0
+// disables the pool contribution.
+func TestPoolBudgetShare(t *testing.T) {
+	enabled := true
+	cfg := parseProbeConfig(probeConfigYAML{Enabled: &enabled, Models: []string{"gpt-6-astra"}})
+	if cfg.PoolAttempts != 100 {
+		t.Fatalf("pool budget default wrong: %d", cfg.PoolAttempts)
+	}
+	pool := "socks5h://10.255.1.1:18321"
+	cfg.ProxyPools = map[string]bool{pool: true}
+	proxies := []string{"direct", "socks5://a:b@1.2.3.4:443", pool}
+	if got := effectiveMaxAttempts(cfg, proxies); got != 3+3+100 {
+		t.Fatalf("auto cap must weight pools separately: %d", got)
+	}
+	// All plain exits: legacy auto behaviour stays (count x per-hop).
+	plain := []string{"direct", "socks5://a:b@1.2.3.4:443"}
+	if got := effectiveMaxAttempts(cfg, plain); got != 6 {
+		t.Fatalf("plain-only auto cap wrong: %d", got)
+	}
+	// Explicit override wins.
+	cfg.MaxAttemptsPerRound = 7
+	if got := effectiveMaxAttempts(cfg, proxies); got != 7 {
+		t.Fatalf("explicit cap must override: %d", got)
+	}
+	cfg.MaxAttemptsPerRound = 0
+	// Custom pool-attempts is honoured.
+	cfg.PoolAttempts = 40
+	if got := effectiveMaxAttempts(cfg, proxies); got != 3+3+40 {
+		t.Fatalf("custom pool budget wrong: %d", got)
+	}
+}
+
+// TestPickRotationBudgets drives the round-robin with per-egress budgets: the
+// walk rotates while plain shares last, then skips exhausted egresses so a
+// large pool keeps drawing its remaining budget, and the round closes only
+// once every usable egress is spent.
+func TestPickRotationBudgets(t *testing.T) {
+	direct := "direct"
+	pool := "socks5h://10.255.1.1:18321"
+	rotation := []string{direct, pool}
+	budgets := map[string]int{direct: 2, pool: 4}
+	cursor := 0
+	var sequence []string
+	for {
+		spec, next, ok := pickRotation(rotation, budgets, cursor)
+		if !ok {
+			break
+		}
+		cursor = next
+		budgets[spec]--
+		sequence = append(sequence, spec)
+	}
+	if len(sequence) != 6 {
+		t.Fatalf("every share must be spent exactly once: %v", sequence)
+	}
+	// The first three picks rotate through both egresses; the tail is the
+	// pool's remaining budget only.
+	for i, spec := range sequence[:3] {
+		if i%2 == 0 && spec != direct {
+			t.Fatalf("round-robin phase must alternate: %v", sequence)
+		}
+		if i%2 == 1 && spec != pool {
+			t.Fatalf("round-robin phase must alternate: %v", sequence)
+		}
+	}
+	for _, spec := range sequence[3:] {
+		if spec != pool {
+			t.Fatalf("tail must be the pool's leftover budget: %v", sequence)
+		}
+	}
+	// A fully spent set reports the round as over.
+	if _, _, ok := pickRotation(rotation, map[string]int{direct: 0, pool: 0}, 0); ok {
+		t.Fatal("a spent rotation must end the round")
+	}
+}
+
 func TestProbeSummaryShape(t *testing.T) {
 	summary := probeSummary()
 	for _, key := range []string{"enabled", "models", "proxies", "proxies_state", "pool_total", "pool_active",
-		"exit_fail_threshold", "exit_pool_fail_threshold", "exit_cooldown_minutes", "values", "history", "ttl_minutes", "window_minutes", "running", "seeded"} {
+		"exit_fail_threshold", "exit_pool_fail_threshold", "exit_cooldown_minutes", "values", "history", "ttl_minutes", "window_minutes", "running", "seeded", "pool_attempts"} {
 		if _, ok := summary[key]; !ok {
 			t.Fatalf("probe summary missing %s: %+v", key, summary)
 		}
