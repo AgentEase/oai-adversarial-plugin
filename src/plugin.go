@@ -12,7 +12,7 @@ import (
 
 const (
 	pluginID                   = "timezone-override"
-	pluginVersion              = "1.5.7"
+	pluginVersion              = "1.5.9"
 	historyLimit               = 200
 	schemaVersion              = 6
 	streamChunkHeaderInitIndex = -1
@@ -145,6 +145,7 @@ type managementResponse struct {
 func handleMethod(method string, raw []byte) (any, error) {
 	switch method {
 	case "plugin.register", "plugin.reconfigure":
+		ensurePersistence()
 		configureTurnStateOverrideFromLifecycle(raw)
 		return map[string]any{
 			"schema_version": schemaVersion,
@@ -190,6 +191,7 @@ func handleMethod(method string, raw []byte) (any, error) {
 		return management(raw)
 	case "plugin.shutdown":
 		probeTrackShutdown()
+		closePersistence()
 		return struct{}{}, nil
 	default:
 		return nil, fmt.Errorf("unsupported plugin method: %s", method)
@@ -255,6 +257,7 @@ func intercept(raw []byte) (interceptResponse, error) {
 }
 
 func (s *auditState) record(record auditRecord) {
+	defer markStateDirty()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if record.RequestID != "" {

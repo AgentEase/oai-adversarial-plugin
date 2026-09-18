@@ -165,11 +165,12 @@ type probeEngine struct {
 }
 
 var probeTrack = &probeEngine{
-	values:   map[string]stateEntry{},
-	failures: map[string]probeFailure{},
-	suspects: map[string]probeSuspicion{},
-	paused:   map[string]bool{},
-	probing:  map[string]bool{},
+	values:         map[string]stateEntry{},
+	failures:       map[string]probeFailure{},
+	suspects:       map[string]probeSuspicion{},
+	paused:         map[string]bool{},
+	probing:        map[string]bool{},
+	rejectDegraded: true,
 }
 
 // ---------------------------------------------------------------------------
@@ -281,6 +282,7 @@ func configureProbeTrack(block probeConfigYAML) error {
 	if cfg.Enabled {
 		probeTrack.start()
 	}
+	ensurePersistence()
 	return nil
 }
 
@@ -417,6 +419,7 @@ func (e *probeEngine) setModelPaused(model string, paused bool) {
 		delete(e.failures, model)
 	}
 	e.mu.Unlock()
+	markStateDirty()
 	if !paused {
 		e.startProbeAsync(model)
 	}
@@ -452,6 +455,7 @@ func (e *probeEngine) setRejectDegraded(enabled bool) {
 	e.mu.Lock()
 	e.rejectDegraded = enabled
 	e.mu.Unlock()
+	markStateDirty()
 }
 
 // rejectDegradedEnabled returns the current switch state.
@@ -484,6 +488,7 @@ func (e *probeEngine) noteProbeFailure(model string, record probeRecord, cfg pro
 	if degradationEvidence(record.Error) == "" {
 		return
 	}
+	markStateDirty()
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.suspects == nil {
@@ -504,6 +509,7 @@ func (e *probeEngine) clearSuspect(model string) {
 	e.mu.Lock()
 	delete(e.suspects, model)
 	e.mu.Unlock()
+	markStateDirty()
 }
 
 // degradedRejectReason reports the Chinese reason used by the degraded-model
@@ -615,6 +621,7 @@ func (e *probeEngine) probeModel(model string, cfg probeConfig, stop chan struct
 				e.proxyIndex = index
 				e.consecutive = 0
 				e.mu.Unlock()
+				markStateDirty()
 				return
 			}
 			lastError = record.Error
@@ -650,6 +657,7 @@ func (e *probeEngine) probeModel(model string, cfg probeConfig, stop chan struct
 		CooldownUntil: now.Add(cfg.Cooldown).Format(time.RFC3339Nano),
 	}
 	e.mu.Unlock()
+	markStateDirty()
 }
 
 // probeOnce sends one minimal upstream request through the given egress and
@@ -787,6 +795,7 @@ func (e *probeEngine) noteError(message string) {
 	e.probesTotal++
 	e.lastError = message
 	e.mu.Unlock()
+	markStateDirty()
 }
 
 // storeValue saves a freshly captured state as the active value for the model.
@@ -811,6 +820,7 @@ func (e *probeEngine) storeValue(model, value, proxySpec string, cfg probeConfig
 	e.mu.Lock()
 	e.values[model] = entry
 	e.mu.Unlock()
+	markStateDirty()
 }
 
 // activeValueFor returns the currently valid probe-captured state for a model.
@@ -834,6 +844,7 @@ func (e *probeEngine) activeValueFor(model string) string {
 }
 
 func (e *probeEngine) appendRecord(record probeRecord) {
+	defer markStateDirty()
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if len(e.history) >= probeHistoryLimit {
@@ -1007,4 +1018,5 @@ func probeSummary() map[string]any {
 // probeTrackShutdown is called from plugin.shutdown.
 func probeTrackShutdown() {
 	probeTrack.stop()
+	closePersistence()
 }

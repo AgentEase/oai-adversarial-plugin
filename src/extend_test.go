@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -414,6 +415,70 @@ func TestInterceptDegradedRejection(t *testing.T) {
 	}
 	if resp.Terminate {
 		t.Fatalf("switch off must not terminate: %+v", resp)
+	}
+}
+
+// TestPersistenceRoundTrip saves a snapshot and restores it into a fresh
+// engine + audit state, covering values, failures, suspicions, paused models,
+// the rejection switch, counters, probe history and audit records.
+func TestPersistenceRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("LKS_TZ_STATE_FILE", filepath.Join(dir, "state.json"))
+
+	probeTrack = &probeEngine{values: map[string]stateEntry{}, failures: map[string]probeFailure{},
+		suspects: map[string]probeSuspicion{}, paused: map[string]bool{}, probing: map[string]bool{}}
+	cfg := parseProbeConfig(probeConfigYAML{})
+	probeTrack.cfg.Config = cfg
+	probeTrack.setRejectDegraded(false)
+	probeTrack.setModelPaused("gpt-5.6-terra", true)
+	probeTrack.storeValue("gpt-6-astra", "sample-state-0001", "direct", cfg)
+	probeTrack.noteError("state length 312 != 292 (suspected degraded)")
+	probeTrack.noteProbeFailure("gpt-5.6-luna", probeRecord{Error: "state length 312 != 292 (suspected degraded)"}, cfg)
+	probeTrack.failures["gpt-5.6-sol"] = probeFailure{Model: "gpt-5.6-sol", Attempts: 30, Rounds: 10,
+		LastError: "state length 312 != 292 (suspected degraded)", FailedAt: "2026-09-18T02:20:00Z"}
+	probeTrack.appendRecord(probeRecord{Time: "2026-09-18T02:20:00Z", Model: "gpt-6-astra", Success: true})
+	history = auditState{}
+	history.record(auditRecord{RequestID: "persist-1", Model: "gpt-6-astra",
+		conversion: conversion{Target: targetTimezone, Action: "inserted"},
+		Time:       "2026-09-18T02:21:00Z"})
+	savePersistedState()
+
+	// Simulate a fresh plugin instance: wipe everything.
+	probeTrack = &probeEngine{values: map[string]stateEntry{}, failures: map[string]probeFailure{},
+		suspects: map[string]probeSuspicion{}, paused: map[string]bool{}, probing: map[string]bool{},
+		rejectDegraded: true}
+	probeTrack.cfg.Config = cfg
+	history = auditState{}
+	loadPersistedState()
+
+	if probeTrack.rejectDegradedEnabled() {
+		t.Fatal("switch must restore the saved off state")
+	}
+	if !probeTrack.paused["gpt-5.6-terra"] {
+		t.Fatal("paused model must be restored")
+	}
+	if entry, ok := probeTrack.values["gpt-6-astra"]; !ok || entry.Value != "sample-state-0001" {
+		t.Fatalf("value must be restored: %+v", entry)
+	}
+	if _, ok := probeTrack.failures["gpt-5.6-sol"]; !ok {
+		t.Fatal("failure annotation must be restored")
+	}
+	if suspicion, ok := probeTrack.suspects["gpt-5.6-luna"]; !ok || suspicion.Failures != 1 {
+		t.Fatalf("suspicion must be restored: %+v", suspicion)
+	}
+	if probeTrack.probesTotal != 1 {
+		t.Fatalf("probe counters must be restored: %d", probeTrack.probesTotal)
+	}
+	if len(probeTrack.history) != 1 {
+		t.Fatalf("probe history must be restored: %d", len(probeTrack.history))
+	}
+	snapshot := history.snapshot()
+	if snapshot["total"] != uint64(1) {
+		t.Fatalf("audit total must be restored: %v", snapshot["total"])
+	}
+	records := snapshot["records"].([]auditRecord)
+	if len(records) != 1 || records[0].RequestID != "persist-1" {
+		t.Fatalf("audit records must be restored: %+v", records)
 	}
 }
 
