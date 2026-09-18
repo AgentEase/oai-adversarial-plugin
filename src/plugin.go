@@ -12,7 +12,7 @@ import (
 
 const (
 	pluginID                   = "timezone-override"
-	pluginVersion              = "1.5.12"
+	pluginVersion              = "1.5.13"
 	historyLimit               = 200
 	schemaVersion              = 6
 	streamChunkHeaderInitIndex = -1
@@ -385,14 +385,14 @@ func management(raw []byte) (managementResponse, error) {
 
 // probeControl handles POST /timezone-override/probe-control:
 //
-//	{"model": "gpt-5.6-luna", "action": "pause"|"resume"}
+//	{"model": "gpt-5.6-luna", "action": "pause"|"resume"|"probe-model"}
 //	{"action": "reject-degraded", "enabled": true|false}
 //	{"action": "start-round"}   # start one user-initiated probe round
 //	{"action": "stop-round"}    # stop the running probe round
 //
-// Pause removes the model from manual rounds; resume clears the stale
-// annotation. Probing never starts automatically: start-round
-// walks the model list in priority order, and stop-round cancels it.
+// Pause removes the model from rounds; resume clears the stale annotation
+// and probes that model once in the background; probe-model starts one
+// single-model probe immediately (independent of the sequential round).
 func probeControl(body []byte) (managementResponse, error) {
 	var req struct {
 		Model   string `json:"model"`
@@ -411,6 +411,12 @@ func probeControl(body []byte) (managementResponse, error) {
 			return jsonErrorResponse(http.StatusBadRequest, "缺少 model 字段"), nil
 		}
 		probeTrack.setModelPaused(model, action == "pause")
+	case "probe-model":
+		model := strings.TrimSpace(req.Model)
+		if model == "" {
+			return jsonErrorResponse(http.StatusBadRequest, "缺少 model 字段"), nil
+		}
+		probeTrack.probeModelAsync(model)
 	case "reject-degraded":
 		if req.Enabled == nil {
 			return jsonErrorResponse(http.StatusBadRequest, "缺少 enabled 字段"), nil

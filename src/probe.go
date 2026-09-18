@@ -394,9 +394,9 @@ func (e *probeEngine) probeSuppressed(model string) bool {
 }
 
 // setModelPaused pauses or resumes a model from the dashboard. Pausing keeps
-// the model out of manual rounds while preserving its value and failure
-// record; resuming clears the stale annotation. Probing itself is never
-// started automatically - that is what the round control is for.
+// the model out of rounds while preserving its value and failure record;
+// resuming clears the stale annotation and immediately starts one probe for
+// the model in the background (the user explicitly asked for it).
 func (e *probeEngine) setModelPaused(model string, paused bool) {
 	e.mu.Lock()
 	if e.paused == nil {
@@ -410,6 +410,29 @@ func (e *probeEngine) setModelPaused(model string, paused bool) {
 	}
 	e.mu.Unlock()
 	markStateDirty()
+	if !paused {
+		e.probeModelAsync(model)
+	}
+}
+
+// probeModelAsync launches one background probe round for a single model on
+// explicit user request (the row's "probe now" control or resuming a paused
+// model). It is independent of the sequential round control: different models
+// may be probed concurrently, and a model that is already being probed is
+// never started twice.
+func (e *probeEngine) probeModelAsync(model string) {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return
+	}
+	e.mu.Lock()
+	cfg := e.cfg.Config
+	busy := e.probing[model]
+	e.mu.Unlock()
+	if !cfg.Enabled || busy {
+		return
+	}
+	go e.probeModel(model, cfg, make(chan struct{}))
 }
 
 // pausedModels lists the models currently paused from the dashboard.

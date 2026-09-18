@@ -309,15 +309,21 @@
         badge.title='该基线的真实有效期已结束（按 token 内嵌签发时间戳 + 有效期时长推算）；到期后不再对外提供本值，直到获得新的健康值';
         ttl.append(badge);
       }
-      vfrag.append(tr);
       const control=cell(tr,'');
       const toggle=document.createElement('button');
       toggle.type='button';
       toggle.className='icon-btn'+(isPaused?' paused':'');
       toggle.textContent=isPaused?'▶':'⏸';
-      toggle.title=isPaused?'启动：清除降智标注（探测仅为手动模式，不会自动开始）':'暂停：移出探测轮队列（已有基线值仍继续使用）';
+      toggle.title=isPaused?'启动：清除暂停标记并立即探测该模型':'暂停：暂时移出探测轮（已有基线值仍继续使用）';
       toggle.addEventListener('click',async()=>{toggle.disabled=true;if(await probeControl({model:entry.model,action:isPaused?'resume':'pause'}))refresh();else toggle.disabled=false;});
       control.append(toggle);
+      const probeNow=document.createElement('button');
+      probeNow.type='button';
+      probeNow.className='icon-btn';
+      probeNow.textContent='⟳';
+      probeNow.title='立即探测：单独获取该模型的新状态值（模型一致 + 292 字节时更新持久化基线；可与其他模型同时进行）';
+      probeNow.addEventListener('click',async()=>{probeNow.disabled=true;if(await probeControl({model:entry.model,action:'probe-model'})){setTimeout(refresh,1500);}else probeNow.disabled=false;});
+      control.append(probeNow);
       vfrag.append(tr);
     }
     if(!values.length){const tr=document.createElement('tr');const td=cell(tr,'暂无基线值。可点击「开始探测」手动获取；业务流量观测到健康状态（模型一致 + 292 字节）时也会自动入库。','empty');td.colSpan=7;vfrag.append(tr);}

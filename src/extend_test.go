@@ -615,6 +615,59 @@ func TestManualRoundControl(t *testing.T) {
 	}
 }
 
+// TestSingleModelProbe covers the per-row "probe now" control: it refuses to
+// start while the track is disabled, never double-starts a model that is
+// already probing, and may run independently of the sequential round.
+func TestSingleModelProbe(t *testing.T) {
+	enabled := false
+	one := 1
+	probeTrack = &probeEngine{values: map[string]stateEntry{}, failures: map[string]probeFailure{},
+		lastAttempt: map[string]time.Time{},
+		paused:      map[string]bool{}, probing: map[string]bool{}}
+	probeTrack.cfg.Config = parseProbeConfig(probeConfigYAML{
+		Enabled:          &enabled,
+		Models:           []string{"gpt-6-astra"},
+		IntervalSeconds:  &one,
+		AttemptsPerHop:   &one,
+		MaxAttemptsRound: &one,
+	})
+
+	// Disabled track: the request is a no-op.
+	probeTrack.probeModelAsync("gpt-6-astra")
+	if probeTrack.probing["gpt-6-astra"] {
+		t.Fatal("disabled track must not start a probe")
+	}
+
+	// An already-probing model is never started twice.
+	probeTrack.cfg.Config.Enabled = true
+	probeTrack.probing["gpt-6-astra"] = true
+	probeTrack.probeModelAsync("gpt-6-astra")
+	if !probeTrack.probing["gpt-6-astra"] {
+		t.Fatal("existing in-flight probe state lost")
+	}
+	delete(probeTrack.probing, "gpt-6-astra")
+
+	// The async entry launches exactly one round (credential missing fails
+	// fast and records an annotation, exercising the whole path).
+	probeTrack.probeModelAsync("gpt-6-astra")
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		probeTrack.mu.Lock()
+		busy := probeTrack.probing["gpt-6-astra"]
+		probeTrack.mu.Unlock()
+		if !busy {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	probeTrack.mu.Lock()
+	busy := probeTrack.probing["gpt-6-astra"]
+	probeTrack.mu.Unlock()
+	if busy {
+		t.Fatal("single-model round must finish")
+	}
+}
+
 // TestSeedBaselinesFromAudit restores missing baseline values from the
 // deployment seeds file and the newest healthy (292-byte, decodable) audit
 // records - the "last recorded 292-byte value as the initial baseline" rule.
