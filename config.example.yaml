@@ -68,19 +68,20 @@ plugins:
           scan-interval-seconds: 30
           probe-interval-seconds: 5
 
-          # Retry policy: N attempts per egress, then rotate; the whole round
-          # gives up after max-attempts-per-round attempts and the model is
-          # annotated as failed on the dashboard. New rounds for that model
-          # start only after cooldown-minutes have passed, so a persistent
-          # upstream degradation does not burn quota in a tight loop.
+          # Retry policy: N attempts per egress, then rotate; the round cap
+          # is computed automatically as (number of egress entries) x N, so a
+          # round only gives up after every IP had its full share of tries.
+          # Set max-attempts-per-round to a positive number to override.
+          # The model is annotated as failed on the dashboard after the cap
+          # and new rounds wait cooldown-minutes; success clears everything.
+          attempts-per-proxy: 3
+          # max-attempts-per-round: 0   # 0/absent = auto (egress count x 3)
+          cooldown-minutes: 20
           # Degraded-model rejection is ON by default and restored from the
           # state snapshot across reloads; toggle it from the dashboard.
           # suspect-threshold: in-round degradation-evidence failures needed
           # before the rejection switch treats the model as degraded (early
           # trigger; the full annotation still wins once the round completes).
-          attempts-per-proxy: 3
-          max-attempts-per-round: 30
-          cooldown-minutes: 20
           suspect-threshold: 3
 
           # Upstream request settings for each probe.

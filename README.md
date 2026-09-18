@@ -154,7 +154,7 @@ plugins:
 | `scan-interval-seconds` | int | 30 | TTL 扫描周期 |
 | `probe-interval-seconds` | int | 5 | 探测重试间隔 |
 | `attempts-per-proxy` | int | 3 | 单出口连续尝试次数（之后轮换） |
-| `max-attempts-per-round` | int | 30 | 单轮总尝试上限（超限标注失败） |
+| `max-attempts-per-round` | int | 0（自动） | 单轮总尝试上限；`0` 表示按「出口数 × 每出口尝试次数」自动计算（默认 3 出口 × 3 次 = 9），超限标注失败 |
 | `cooldown-minutes` | int | 20 | 单轮失败后的冷却时间；到期自动开启新一轮 |
 | `suspect-threshold` | int | 3 | 轮内降智证据失败达到该次数后提前触发降智拒绝（打满后转正式判定） |
 | `timeout-seconds` | int | 60 | 单次探测超时 |

@@ -187,7 +187,7 @@ func parseProbeConfig(block probeConfigYAML) probeConfig {
 		ScanInterval:        time.Duration(probeDefaultsScanSeconds) * time.Second,
 		ProbeInterval:       time.Duration(probeDefaultsIntervalSeconds) * time.Second,
 		AttemptsPerHop:      probeDefaultsAttemptsPerHop,
-		MaxAttemptsPerRound: probeDefaultsMaxAttempts,
+		MaxAttemptsPerRound: 0, // 0 = auto: egress count × attempts-per-proxy
 		Cooldown:            time.Duration(probeDefaultsCooldownMinutes) * time.Minute,
 		SuspectThreshold:    probeDefaultsSuspectThreshold,
 		Timeout:             time.Duration(probeDefaultsTimeoutSeconds) * time.Second,
@@ -565,6 +565,23 @@ func degradedRejectMessage(models ...string) string {
 	return ""
 }
 
+// effectiveMaxAttempts resolves the per-round attempt cap. Zero means auto:
+// every egress is tried attempts-per-proxy times (e.g. 3 egresses × 3 tries
+// = a round only gives up after all hops failed their full share).
+func effectiveMaxAttempts(cfg probeConfig, proxyCount int) int {
+	if cfg.MaxAttemptsPerRound > 0 {
+		return cfg.MaxAttemptsPerRound
+	}
+	perHop := cfg.AttemptsPerHop
+	if perHop <= 0 {
+		perHop = probeDefaultsAttemptsPerHop
+	}
+	if total := proxyCount * perHop; total > 0 {
+		return total
+	}
+	return probeDefaultsMaxAttempts
+}
+
 // probeModel runs the probe sequence for one model: repeated rounds of up to
 // attempts-per-proxy attempts per egress, rotating egress after each failed
 // round, until an acceptable state is captured (success clears any failure
@@ -594,10 +611,7 @@ func (e *probeEngine) probeModel(model string, cfg probeConfig, stop chan struct
 		delete(e.probing, model)
 		e.mu.Unlock()
 	}()
-	maxAttempts := cfg.MaxAttemptsPerRound
-	if maxAttempts <= 0 {
-		maxAttempts = probeDefaultsMaxAttempts
-	}
+	maxAttempts := effectiveMaxAttempts(cfg, len(proxies))
 	attempts := 0
 	lastError := ""
 	lastLength := 0
@@ -997,6 +1011,7 @@ func probeSummary() map[string]any {
 		"scan_seconds": int(cfg.ScanInterval / time.Second),
 		"interval_seconds": int(cfg.ProbeInterval / time.Second),
 		"attempts_per_proxy": cfg.AttemptsPerHop,
+		"max_attempts_per_round": effectiveMaxAttempts(cfg, len(cfg.Proxies)),
 		"cooldown_minutes": int(cfg.Cooldown / time.Minute),
 		"suspect_threshold": cfg.SuspectThreshold,
 		"suspects":        suspects,

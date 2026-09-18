@@ -190,6 +190,10 @@ func savePersistedState() {
 		os.Remove(temporary)
 		return
 	}
+	// Keep the previous snapshot as a fallback copy before replacing it.
+	if _, err := os.Stat(path); err == nil {
+		_ = os.Rename(path, path+".bak")
+	}
 	if err := os.Rename(temporary, path); err != nil {
 		os.Remove(temporary)
 		return
@@ -197,16 +201,28 @@ func savePersistedState() {
 }
 
 // loadPersistedState restores the previous snapshot into the live state.
-// Missing or malformed files keep the defaults (switch on).
+// It first tries the primary file, then the fallback copy (.bak). Counters
+// are merged with max() so a stale or partial snapshot can never make the
+// cumulative totals go backwards. Missing or malformed files keep the
+// defaults (switch on).
 func loadPersistedState() {
-	raw, err := os.ReadFile(stateFilePath())
-	if err != nil || len(raw) == 0 {
+	path := stateFilePath()
+	for _, candidate := range []string{path, path + ".bak"} {
+		raw, err := os.ReadFile(candidate)
+		if err != nil || len(raw) == 0 {
+			continue
+		}
+		var state persistedState
+		if json.Unmarshal(raw, &state) != nil {
+			continue
+		}
+		applyPersistedState(state)
 		return
 	}
-	var state persistedState
-	if json.Unmarshal(raw, &state) != nil {
-		return
-	}
+}
+
+// applyPersistedState merges a decoded snapshot into the live state.
+func applyPersistedState(state persistedState) {
 	probeTrack.mu.Lock()
 	if state.RejectDegraded != nil {
 		probeTrack.rejectDegraded = *state.RejectDegraded
@@ -245,6 +261,12 @@ func loadPersistedState() {
 	}
 	probeTrack.probesTotal = state.ProbesTotal
 	probeTrack.probesOK = state.ProbesOK
+	if state.ProbesTotal > probeTrack.probesTotal {
+		probeTrack.probesTotal = state.ProbesTotal
+	}
+	if state.ProbesOK > probeTrack.probesOK {
+		probeTrack.probesOK = state.ProbesOK
+	}
 	if len(state.ProbeHistory) > 0 {
 		probeHistoryCopy := make([]probeRecord, len(state.ProbeHistory))
 		copy(probeHistoryCopy, state.ProbeHistory)
@@ -267,5 +289,14 @@ func loadPersistedState() {
 	history.total = state.Total
 	history.inserted = state.Inserted
 	history.replaced = state.Replaced
+	if state.Total > history.total {
+		history.total = state.Total
+	}
+	if state.Inserted > history.inserted {
+		history.inserted = state.Inserted
+	}
+	if state.Replaced > history.replaced {
+		history.replaced = state.Replaced
+	}
 	history.mu.Unlock()
 }
