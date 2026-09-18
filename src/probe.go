@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -41,6 +42,9 @@ const (
 	probeDefaultsMaxAttempts     = 30
 	probeDefaultsCooldownMinutes = 20
 	probeDefaultsSuspectThreshold = 3
+	probeDefaultsExitCooldownMinutes = 180
+	probeDefaultsExitFailThreshold = 3
+	probeDefaultsExitMinActive = 1
 	probeDefaultsTimeoutSeconds  = 60
 	probeRequiredStateLength     = 292
 	probeDefaultsPrompt          = "hi"
@@ -62,6 +66,9 @@ type probeConfig struct {
 	AttemptsPerHop      int
 	MaxAttemptsPerRound int
 	Cooldown            time.Duration
+	ExitCooldown        time.Duration
+	ExitFailThreshold   int
+	ExitMinActive       int
 	SuspectThreshold    int
 	Timeout             time.Duration
 	Prompt              string
@@ -83,6 +90,9 @@ type probeConfigYAML struct {
 	AttemptsPerHop   *int     `yaml:"attempts-per-proxy"`
 	MaxAttemptsRound *int     `yaml:"max-attempts-per-round"`
 	CooldownMinutes  *int     `yaml:"cooldown-minutes"`
+	ExitCooldownMinutes *int  `yaml:"exit-cooldown-minutes"`
+	ExitFailThreshold   *int  `yaml:"exit-fail-threshold"`
+	ExitMinActive       *int  `yaml:"exit-min-active"`
 	SuspectThreshold *int     `yaml:"suspect-threshold"`
 	TimeoutSeconds   *int     `yaml:"timeout-seconds"`
 	Prompt           string   `yaml:"prompt"`
@@ -155,6 +165,18 @@ type businessDegradation struct {
 	Since  string `json:"since"`
 }
 
+// exitPenalty marks one egress temporarily removed from rotation after
+// consecutive attempts that failed to yield a healthy state (length anomaly,
+// model mismatch or transport-level errors). It is released automatically
+// once Until passes; a successful capture clears the entry immediately.
+type exitPenalty struct {
+	Proxy     string `json:"proxy"`
+	Failures  int    `json:"failures"`
+	LastError string `json:"last_error,omitempty"`
+	FirstAt   string `json:"first_at"`
+	Until     string `json:"until"`
+}
+
 type probeEngine struct {
 	mu             sync.Mutex
 	cfg            probeConfigState
@@ -162,6 +184,7 @@ type probeEngine struct {
 	failures       map[string]probeFailure
 	suspects       map[string]probeSuspicion
 	business       map[string]businessDegradation
+	exitPenalties  map[string]exitPenalty
 	lastAttempt    map[string]time.Time
 	paused         map[string]bool
 	probing        map[string]bool
@@ -183,13 +206,14 @@ type probeEngine struct {
 
 
 var probeTrack = &probeEngine{
-	values:       map[string]stateEntry{},
-	failures:     map[string]probeFailure{},
-	suspects:     map[string]probeSuspicion{},
-	business:     map[string]businessDegradation{},
-	lastAttempt:  map[string]time.Time{},
-	paused:       map[string]bool{},
-	probing:      map[string]bool{},
+	values:        map[string]stateEntry{},
+	failures:      map[string]probeFailure{},
+	suspects:      map[string]probeSuspicion{},
+	business:      map[string]businessDegradation{},
+	exitPenalties: map[string]exitPenalty{},
+	lastAttempt:   map[string]time.Time{},
+	paused:        map[string]bool{},
+	probing:       map[string]bool{},
 	rejectDegraded: true,
 }
 
@@ -209,6 +233,9 @@ func parseProbeConfig(block probeConfigYAML) probeConfig {
 		AttemptsPerHop:      probeDefaultsAttemptsPerHop,
 		MaxAttemptsPerRound: 0, // 0 = auto: egress count × attempts-per-proxy
 		Cooldown:            time.Duration(probeDefaultsCooldownMinutes) * time.Minute,
+		ExitCooldown:        time.Duration(probeDefaultsExitCooldownMinutes) * time.Minute,
+		ExitFailThreshold:   probeDefaultsExitFailThreshold,
+		ExitMinActive:       probeDefaultsExitMinActive,
 		SuspectThreshold:    probeDefaultsSuspectThreshold,
 		Timeout:             time.Duration(probeDefaultsTimeoutSeconds) * time.Second,
 		Prompt:              probeDefaultsPrompt,
@@ -241,6 +268,15 @@ func parseProbeConfig(block probeConfigYAML) probeConfig {
 	}
 	if block.CooldownMinutes != nil && *block.CooldownMinutes > 0 {
 		cfg.Cooldown = time.Duration(*block.CooldownMinutes) * time.Minute
+	}
+	if block.ExitCooldownMinutes != nil && *block.ExitCooldownMinutes >= 0 {
+		cfg.ExitCooldown = time.Duration(*block.ExitCooldownMinutes) * time.Minute
+	}
+	if block.ExitFailThreshold != nil && *block.ExitFailThreshold > 0 {
+		cfg.ExitFailThreshold = *block.ExitFailThreshold
+	}
+	if block.ExitMinActive != nil && *block.ExitMinActive > 0 {
+		cfg.ExitMinActive = *block.ExitMinActive
 	}
 	if block.SuspectThreshold != nil && *block.SuspectThreshold > 0 {
 		cfg.SuspectThreshold = *block.SuspectThreshold
@@ -664,11 +700,128 @@ func observeBusinessState(model, state, observedModel string) {
 	probeTrack.clearBusinessDegradation(model)
 }
 
-// probeModel runs the probe sequence for one model: repeated rounds of up to
-// attempts-per-proxy attempts per egress, rotating egress after each failed
-// round, until an acceptable state is captured (success clears any failure
-// mark) or max-attempts-per-round total attempts are exhausted (failure is
-// recorded for the dashboard).
+// ---------------------------------------------------------------------------
+// exit (egress) circuit breaker
+
+// availableProxies returns the rotation list for the next attempt: configured
+// egresses that are not in an active cool-down. A cool-down that has expired
+// is released here with a fresh failure window. When the usable set would drop
+// below exit-min-active, the soonest-expiring cool-downs are released early so
+// a round can always make progress; a fully empty rotation also falls back to
+// the first configured egress.
+func (e *probeEngine) availableProxies(proxies []string, now time.Time) []string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	minActive := e.cfg.Config.ExitMinActive
+	if minActive <= 0 {
+		minActive = probeDefaultsExitMinActive
+	}
+	usable := make([]string, 0, len(proxies))
+	for _, spec := range proxies {
+		penalty, ok := e.exitPenalties[spec]
+		if !ok {
+			usable = append(usable, spec)
+			continue
+		}
+		until, err := time.Parse(time.RFC3339Nano, penalty.Until)
+		if penalty.Until == "" || err != nil || !now.Before(until) {
+			if penalty.Until != "" {
+				// Cool-down finished: release with a fresh failure window.
+				penalty.Failures = 0
+				penalty.Until = ""
+				e.exitPenalties[spec] = penalty
+				markStateDirty()
+			}
+			usable = append(usable, spec)
+		}
+	}
+	if len(usable) >= minActive {
+		return usable
+	}
+	// Emergency release: free the soonest-expiring entries until the minimum
+	// active count is met, so probing can never permanently starve.
+	type hold struct {
+		spec  string
+		until time.Time
+	}
+	inUsable := func(spec string) bool {
+		for _, item := range usable {
+			if item == spec {
+				return true
+			}
+		}
+		return false
+	}
+	holds := make([]hold, 0, len(proxies))
+	for _, spec := range proxies {
+		if inUsable(spec) {
+			continue
+		}
+		if penalty, ok := e.exitPenalties[spec]; ok {
+			if until, err := time.Parse(time.RFC3339Nano, penalty.Until); err == nil {
+				holds = append(holds, hold{spec: spec, until: until})
+			}
+		}
+	}
+	sort.Slice(holds, func(i, j int) bool { return holds[i].until.Before(holds[j].until) })
+	for _, item := range holds {
+		if len(usable) >= minActive {
+			break
+		}
+		delete(e.exitPenalties, item.spec)
+		usable = append(usable, item.spec)
+		markStateDirty()
+	}
+	if len(usable) == 0 && len(proxies) > 0 {
+		usable = append(usable, proxies[0])
+	}
+	return usable
+}
+
+// noteExitOutcome records one attempt result for an egress. A healthy capture
+// clears its penalty immediately; consecutive failures reaching the configured
+// threshold remove the egress from rotation for exit-cooldown-minutes. Setting
+// exit-cooldown-minutes to 0 disables the removal (failures still accumulate
+// for the pool dashboard).
+func (e *probeEngine) noteExitOutcome(spec string, healthy bool, errorText string) {
+	if spec == "" {
+		return
+	}
+	now := time.Now().UTC()
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.exitPenalties == nil {
+		e.exitPenalties = map[string]exitPenalty{}
+	}
+	if healthy {
+		if _, ok := e.exitPenalties[spec]; ok {
+			delete(e.exitPenalties, spec)
+			markStateDirty()
+		}
+		return
+	}
+	penalty := e.exitPenalties[spec]
+	if penalty.Proxy == "" {
+		penalty = exitPenalty{Proxy: spec, FirstAt: now.Format(time.RFC3339Nano)}
+	}
+	penalty.Failures++
+	penalty.LastError = errorText
+	cfg := e.cfg.Config
+	threshold := cfg.ExitFailThreshold
+	if threshold <= 0 {
+		threshold = probeDefaultsExitFailThreshold
+	}
+	if penalty.Failures >= threshold && cfg.ExitCooldown > 0 {
+		penalty.Until = now.Add(cfg.ExitCooldown).Format(time.RFC3339Nano)
+	}
+	e.exitPenalties[spec] = penalty
+	markStateDirty()
+}
+
+// probeModel runs the probe sequence for one model: attempts are distributed
+// across the egress pool (skipping cool-down entries) until an acceptable
+// state is captured (success clears any failure mark) or the resolved attempt
+// cap is exhausted (failure is recorded for the dashboard).
 func (e *probeEngine) probeModel(model string, cfg probeConfig, stop chan struct{}) {
 	e.mu.Lock()
 	if e.probing == nil {
@@ -688,7 +841,6 @@ func (e *probeEngine) probeModel(model string, cfg probeConfig, stop chan struct
 	}
 	e.probing[model] = true
 	e.lastAttempt[model] = time.Now().UTC()
-	startIndex := e.proxyIndex % len(proxies)
 	e.mu.Unlock()
 	defer func() {
 		e.mu.Lock()
@@ -699,46 +851,45 @@ func (e *probeEngine) probeModel(model string, cfg probeConfig, stop chan struct
 	attempts := 0
 	lastError := ""
 	lastLength := 0
-	for round := 0; attempts < maxAttempts; round++ {
-		for hop := 0; hop < cfg.AttemptsPerHop && attempts < maxAttempts; hop++ {
-			index := (startIndex + round*cfg.AttemptsPerHop + hop) % len(proxies)
-			proxySpec := proxies[index]
-			select {
-			case <-stop:
-				return
-			default:
-			}
-			attempts++
-			record, value := e.probeOnce(model, proxySpec, cfg)
-			e.appendRecord(record)
-			if value != "" {
-				e.storeValue(model, value, "probe", proxySpec, cfg)
-				e.mu.Lock()
-				delete(e.failures, model)
-				delete(e.suspects, model)
-				delete(e.business, model)
-				e.proxyIndex = index
-				e.consecutive = 0
-				e.mu.Unlock()
-				markStateDirty()
-				return
-			}
-			lastError = record.Error
-			if record.StateLength > 0 {
-				lastLength = record.StateLength
-			}
-			e.noteProbeFailure(model, record, cfg)
-			select {
-			case <-time.After(cfg.ProbeInterval):
-			case <-stop:
-				return
-			}
+	cursor := 0
+	for attempts < maxAttempts {
+		select {
+		case <-stop:
+			return
+		default:
 		}
-		// Round boundary: rotate the starting egress for the next round.
-		e.mu.Lock()
-		e.consecutive++
-		e.proxyIndex = (startIndex + (round+1)*cfg.AttemptsPerHop) % len(proxies)
-		e.mu.Unlock()
+		rotation := e.availableProxies(proxies, time.Now().UTC())
+		if len(rotation) == 0 {
+			break
+		}
+		proxySpec := rotation[cursor%len(rotation)]
+		cursor++
+		attempts++
+		record, value := e.probeOnce(model, proxySpec, cfg)
+		e.appendRecord(record)
+		if value != "" {
+			e.noteExitOutcome(proxySpec, true, "")
+			e.storeValue(model, value, "probe", proxySpec, cfg)
+			e.mu.Lock()
+			delete(e.failures, model)
+			delete(e.suspects, model)
+			delete(e.business, model)
+			e.proxyIndex = 0
+			e.mu.Unlock()
+			markStateDirty()
+			return
+		}
+		lastError = record.Error
+		if record.StateLength > 0 {
+			lastLength = record.StateLength
+		}
+		e.noteExitOutcome(proxySpec, false, record.Error)
+		e.noteProbeFailure(model, record, cfg)
+		select {
+		case <-time.After(cfg.ProbeInterval):
+		case <-stop:
+			return
+		}
 	}
 	// Retries exhausted: annotate the failure for the dashboard (attempt
 	// counters, last error and a cool-down hint). Nothing restarts
@@ -1206,11 +1357,47 @@ func probeSummary() map[string]any {
 			businessMarks = append(businessMarks, mark)
 		}
 	}
+	// Egress pool state: one entry per configured proxy with its current
+	// rotation status, cool-down remainder and last error (for the pool tab).
+	poolNow := time.Now().UTC()
+	pool := make([]map[string]any, 0, len(cfg.Proxies))
+	activeCount := 0
+	for _, spec := range cfg.Proxies {
+		item := map[string]any{"proxy": spec, "active": true}
+		if penalty, ok := probeTrack.exitPenalties[spec]; ok {
+			item["failures"] = penalty.Failures
+			if penalty.LastError != "" {
+				item["last_error"] = penalty.LastError
+			}
+			if penalty.FirstAt != "" {
+				item["first_at"] = penalty.FirstAt
+			}
+			if penalty.Until != "" {
+				if until, err := time.Parse(time.RFC3339Nano, penalty.Until); err == nil {
+					item["until"] = penalty.Until
+					item["remaining_seconds"] = int64(until.Sub(poolNow).Seconds())
+					if poolNow.Before(until) {
+						item["active"] = false
+					}
+				}
+			}
+		}
+		if item["active"] == true {
+			activeCount++
+		}
+		pool = append(pool, item)
+	}
 	summary := map[string]any{
 		"enabled":      cfg.Enabled,
 		"error":        cfgState.Error,
 		"models":       append([]string(nil), cfg.Models...),
 		"proxies":      append([]string(nil), cfg.Proxies...),
+		"proxies_state": pool,
+		"pool_total":   len(cfg.Proxies),
+		"pool_active":  activeCount,
+		"exit_fail_threshold":   cfg.ExitFailThreshold,
+		"exit_cooldown_minutes": int(cfg.ExitCooldown / time.Minute),
+		"exit_min_active":       cfg.ExitMinActive,
 		"proxy_index":  probeTrack.proxyIndex,
 		"ttl_minutes":      int(cfg.TTL / time.Minute),
 		"window_minutes":   int(cfg.Window / time.Minute),

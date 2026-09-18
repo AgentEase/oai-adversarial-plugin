@@ -841,10 +841,89 @@ func synthStateToken(t time.Time) string {
 // TestProbeSummaryShape ensures the management payload carries the expected keys.
 func TestProbeSummaryShape(t *testing.T) {
 	summary := probeSummary()
-	for _, key := range []string{"enabled", "models", "proxies", "values", "history", "ttl_minutes", "window_minutes", "running", "seeded"} {
+	for _, key := range []string{"enabled", "models", "proxies", "proxies_state", "pool_total", "pool_active",
+		"exit_fail_threshold", "exit_cooldown_minutes", "values", "history", "ttl_minutes", "window_minutes", "running", "seeded"} {
 		if _, ok := summary[key]; !ok {
 			t.Fatalf("probe summary missing %s: %+v", key, summary)
 		}
+	}
+}
+
+// TestExitCircuitBreaker drives the egress pool cool-down: consecutive failures
+// remove an exit from rotation once the threshold is reached, an expiry
+// releases it with a fresh window, successes clear it, and the emergency
+// release keeps at least exit-min-active usable.
+func TestExitCircuitBreaker(t *testing.T) {
+	enabled := true
+	probeTrack = &probeEngine{values: map[string]stateEntry{}, failures: map[string]probeFailure{},
+		paused: map[string]bool{}, probing: map[string]bool{}}
+	probeTrack.cfg.Config = parseProbeConfig(probeConfigYAML{Enabled: &enabled, Models: []string{"gpt-6-astra"}})
+	cfg := probeTrack.cfg.Config
+	if cfg.ExitCooldown != 180*time.Minute || cfg.ExitFailThreshold != 3 || cfg.ExitMinActive != 1 {
+		t.Fatalf("exit defaults wrong: cooldown=%v threshold=%d min=%d", cfg.ExitCooldown, cfg.ExitFailThreshold, cfg.ExitMinActive)
+	}
+	pool := []string{"direct", "socks5h://[2001:db8::1]:1080", "socks5://a:b@1.2.3.4:443"}
+	now := time.Now().UTC()
+	if got := probeTrack.availableProxies(pool, now); len(got) != 3 {
+		t.Fatalf("all exits must start usable: %v", got)
+	}
+	// Two failures below threshold: still usable.
+	probeTrack.noteExitOutcome(pool[1], false, "state length 312 != 292 (suspected degraded)")
+	probeTrack.noteExitOutcome(pool[1], false, "state length 312 != 292 (suspected degraded)")
+	if got := probeTrack.availableProxies(pool, now); len(got) != 3 {
+		t.Fatalf("below-threshold exit must stay: %v", got)
+	}
+	// Third failure: removed from rotation.
+	probeTrack.noteExitOutcome(pool[1], false, "state length 312 != 292 (suspected degraded)")
+	got := probeTrack.availableProxies(pool, now)
+	if len(got) != 2 {
+		t.Fatalf("cooled-down exit must be skipped: %v", got)
+	}
+	for _, spec := range got {
+		if spec == pool[1] {
+			t.Fatal("penalized exit must not be in rotation")
+		}
+	}
+	penalty := probeTrack.exitPenalties[pool[1]]
+	if penalty.Failures != 3 || penalty.Until == "" {
+		t.Fatalf("penalty shape wrong: %+v", penalty)
+	}
+	until, err := time.Parse(time.RFC3339Nano, penalty.Until)
+	if err != nil || until.Sub(now) < 170*time.Minute {
+		t.Fatalf("cool-down window wrong: %v (%v)", penalty.Until, err)
+	}
+	// Expiry releases it with a fresh window.
+	probeTrack.mu.Lock()
+	probeTrack.exitPenalties[pool[1]] = exitPenalty{Proxy: pool[1], Failures: 5,
+		Until: now.Add(-time.Minute).Format(time.RFC3339Nano)}
+	probeTrack.mu.Unlock()
+	if got := probeTrack.availableProxies(pool, time.Now().UTC()); len(got) != 3 {
+		t.Fatalf("expired cool-down must be released: %v", got)
+	}
+	probeTrack.mu.Lock()
+	released := probeTrack.exitPenalties[pool[1]]
+	probeTrack.mu.Unlock()
+	if released.Failures != 0 || released.Until != "" {
+		t.Fatalf("release must reset the failure window: %+v", released)
+	}
+	// A success clears any penalty immediately.
+	probeTrack.noteExitOutcome(pool[1], false, "boom")
+	probeTrack.noteExitOutcome(pool[1], false, "boom")
+	probeTrack.noteExitOutcome(pool[1], false, "boom")
+	probeTrack.noteExitOutcome(pool[1], true, "")
+	if _, ok := probeTrack.exitPenalties[pool[1]]; ok {
+		t.Fatal("healthy capture must clear the penalty")
+	}
+	// Emergency release: with every exit cooled down, the minimum active set
+	// is freed so a round can still run.
+	for _, spec := range pool {
+		for i := 0; i < 3; i++ {
+			probeTrack.noteExitOutcome(spec, false, "failed")
+		}
+	}
+	got = probeTrack.availableProxies(pool, time.Now().UTC())
+	if len(got) < 1 {
+		t.Fatalf("emergency release must free at least the minimum active set: %v", got)
 	}
 }
 

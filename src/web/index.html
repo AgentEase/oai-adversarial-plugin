@@ -21,6 +21,7 @@
   <nav class="tabs">
     <button id="tab-records" type="button" class="tab active">请求记录</button>
     <button id="tab-router" type="button" class="tab">状态路由台</button>
+    <button id="tab-pool" type="button" class="tab">代理池</button>
   </nav>
   <section id="view-records">
     <section class="cards" aria-label="处理统计">
@@ -63,6 +64,21 @@
       <div class="table-wrap" id="probe-history-wrap"><table>
         <thead><tr><th>时间（UTC）</th><th>模型</th><th>出口</th><th>结果</th><th>耗时</th><th>说明</th></tr></thead>
         <tbody id="probe-history"></tbody>
+      </table></div>
+    </section>
+  </section>
+  <section id="view-pool" class="hidden">
+    <section class="cards" aria-label="代理池统计" style="grid-template-columns:repeat(4,1fr)">
+      <div class="card"><div class="label">出口总数</div><div class="number" id="pool-total">—</div></div>
+      <div class="card"><div class="label">可用出口</div><div class="number ok" id="pool-active">—</div></div>
+      <div class="card"><div class="label">冷却中</div><div class="number warn" id="pool-cooling">—</div></div>
+      <div class="card"><div class="label">冷却策略</div><div class="number" id="pool-policy" style="font-size:14px">—</div></div>
+    </section>
+    <section class="panel">
+      <div class="toolbar"><h2>代理出口池</h2><div class="actions"><span class="probe-note" id="pool-note">轮询探测；连续失败达阈值的出口短暂移出池子</span></div></div>
+      <div class="table-wrap" id="pool-wrap"><table>
+        <thead><tr><th>出口</th><th>类型</th><th>状态</th><th>连续失败</th><th>冷却至（UTC+8）</th><th>剩余冷却</th><th>最后错误</th></tr></thead>
+        <tbody id="pool-rows"></tbody>
       </table></div>
     </section>
   </section>
@@ -201,7 +217,45 @@
     if(!data.records.length){const tr=document.createElement('tr');const td=cell(tr,'尚无记录。发起一次请求后，这里会显示原时区、上游模型与 X-Codex-Turn-State。','empty');td.colSpan=7;fragment.append(tr);}
     el('rows').replaceChildren(fragment);el('auth-notice').classList.add('hidden');el('results').classList.remove('hidden');
     renderProbe(override.probe);
+    renderPool(override.probe);
     el('refresh-note').textContent='每 5 秒刷新';el('status').textContent='已复用 CPA 登录 · 插件 v'+data.version;
+  }
+  function renderPool(probe){
+    probe=probe||{};
+    const items=probe.proxies_state||[];
+    const total=Number(probe.pool_total||items.length||0);
+    const active=Number(probe.pool_active!==undefined?probe.pool_active:items.filter(i=>i.active!==false).length);
+    el('pool-total').textContent=total.toLocaleString('zh-CN');
+    el('pool-active').textContent=active.toLocaleString('zh-CN');
+    el('pool-cooling').textContent=Math.max(0,total-active).toLocaleString('zh-CN');
+    const threshold=probe.exit_fail_threshold||3;
+    const minutes=probe.exit_cooldown_minutes!==undefined?probe.exit_cooldown_minutes:180;
+    const minActive=probe.exit_min_active||1;
+    el('pool-policy').textContent=threshold+' 次失败 → 冷却 '+(minutes>0?minutes+' 分钟':'关闭')+'（保底 '+minActive+' 个可用）';
+    const frag=document.createDocumentFragment();
+    for(const item of items){
+      const tr=document.createElement('tr');
+      const spec=String(item.proxy||'—');
+      cell(tr,proxyLabel(spec),'model');
+      let kind='IPv4';
+      const hostPart=(spec.match(/:\/\/(\[?[^\]@\/]+\]?)/)||[])[1]||spec;
+      if(hostPart.indexOf('[')===0||(hostPart.split(':').length>2&&hostPart.indexOf('.')<0))kind='IPv6';
+      cell(tr,spec==='direct'?'本地直出':kind);
+      const state=cell(tr,'');
+      const badge=document.createElement('span');
+      const cooling=item.active===false;
+      badge.className='badge '+(cooling?'state-warn':'state-ok');
+      badge.textContent=cooling?'冷却中':'可用';
+      state.append(badge);
+      cell(tr,String(item.failures||0));
+      cell(tr,item.until?fmtBeijing(item.until):'—','time');
+      const remaining=Number(item.remaining_seconds);
+      cell(tr,cooling&&!isNaN(remaining)?fmtDuration(remaining):(cooling?'—':'—'),'');
+      const err=cell(tr,item.last_error||'—');err.title=item.last_error||'';
+      frag.append(tr);
+    }
+    if(!items.length){const tr=document.createElement('tr');const td=cell(tr,'暂无出口配置。','empty');td.colSpan=7;frag.append(tr);}
+    el('pool-rows').replaceChildren(frag);
   }
   function renderProbe(probe){
     probe=probe||{};
@@ -354,12 +408,15 @@
     el('probe-history').replaceChildren(hfrag);
   }
   function switchTab(name){
-    const showRouter=name==='router';
-    if(showRouter){el('tab-router').classList.add('active');el('tab-records').classList.remove('active');el('view-router').classList.remove('hidden');el('view-records').classList.add('hidden');}
-    else{el('tab-records').classList.add('active');el('tab-router').classList.remove('active');el('view-records').classList.remove('hidden');el('view-router').classList.add('hidden');}
+    for(const key of ['records','router','pool']){
+      const active=key===name;
+      el('tab-'+key).classList.toggle('active',active);
+      el('view-'+key).classList.toggle('hidden',!active);
+    }
   }
   el('tab-records').addEventListener('click',()=>switchTab('records'));
   el('tab-router').addEventListener('click',()=>switchTab('router'));
+  el('tab-pool').addEventListener('click',()=>switchTab('pool'));
   async function refresh(){
     const managementKey=readManagementKey();
     if(!managementKey){requireLogin();return;}
