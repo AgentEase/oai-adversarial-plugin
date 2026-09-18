@@ -526,3 +526,40 @@ func TestAuditUpsertPreservesObservations(t *testing.T) {
 		t.Fatalf("observations lost on upsert: %+v", record)
 	}
 }
+
+// TestTurnStateInjectedLengthRecorded verifies the byte length written into
+// the header is recorded, so the dashboard can show the field size even when
+// no turn-state was observed on the request or response path.
+func TestTurnStateInjectedLengthRecorded(t *testing.T) {
+	history = auditState{}
+	turnStateOverride = atomic.Value{}
+	t.Cleanup(func() { turnStateOverride = atomic.Value{} })
+	if err := configureTurnStateOverride([]byte(`turn-state-override:
+  enabled: true
+  models: ["gpt-6-astra"]
+  value: "REWRITTEN-STATE"
+  force: true
+`)); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(interceptRequest{
+		RequestID: "req-inj", ToFormat: "codex", Model: "gpt-6-astra",
+		Body: []byte(`{"input":"hello"}`),
+	})
+	if _, err := intercept(raw); err != nil {
+		t.Fatal(err)
+	}
+	record := history.snapshot()["records"].([]auditRecord)[0]
+	if record.TurnStateLength != 0 {
+		t.Fatalf("no observed turn-state expected: %+v", record)
+	}
+	if record.TurnStateOverride != "applied-config" || record.TurnStateInjectedLength != len("REWRITTEN-STATE") {
+		t.Fatalf("injected length must be recorded: %+v", record)
+	}
+	// A retry keeps the recorded injection length.
+	history.record(auditRecord{RequestID: "req-inj", Model: "gpt-6-astra", conversion: conversion{Target: targetTimezone, Action: "unchanged"}})
+	after := history.snapshot()["records"].([]auditRecord)[0]
+	if after.TurnStateInjectedLength != len("REWRITTEN-STATE") {
+		t.Fatalf("injected length lost on retry: %+v", after)
+	}
+}

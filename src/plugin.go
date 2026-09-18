@@ -12,7 +12,7 @@ import (
 
 const (
 	pluginID                   = "timezone-override"
-	pluginVersion              = "1.5.2"
+	pluginVersion              = "1.5.3"
 	historyLimit               = 200
 	schemaVersion              = 6
 	streamChunkHeaderInitIndex = -1
@@ -116,6 +116,7 @@ type auditRecord struct {
 	TurnStateValue   string `json:"turn_state_value,omitempty"`
 	TurnStateTruncated bool `json:"turn_state_truncated,omitempty"`
 	TurnStateOverride  string `json:"turn_state_override,omitempty"`
+	TurnStateInjectedLength int `json:"turn_state_injected_length,omitempty"`
 }
 
 type auditState struct {
@@ -209,11 +210,15 @@ func intercept(raw []byte) (interceptResponse, error) {
 		}, nil
 	}
 	overrideHeaders, overrideStatus := applyTurnStateOverride(req.Model, req.RequestedModel, req.Headers)
+	injectedLength := 0
+	if overrideHeaders != nil {
+		injectedLength = len(overrideHeaders.Get(turnStateHeader))
+	}
 	history.record(auditRecord{
 		conversion: result, RequestID: req.RequestID, TraceID: req.TraceID,
 		Model: req.Model, RequestedModel: req.RequestedModel,
 		Time:              time.Now().UTC().Format(time.RFC3339Nano),
-		TurnStateOverride: overrideStatus,
+		TurnStateOverride: overrideStatus, TurnStateInjectedLength: injectedLength,
 	})
 	history.observeTurnState(req.RequestID, headerValue(req.Headers, turnStateHeader), "request")
 	response := interceptResponse{}
@@ -238,6 +243,9 @@ func (s *auditState) record(record auditRecord) {
 			// request-level view is refreshed so a retry never resets it.
 			if record.TurnStateOverride != "" {
 				existing.TurnStateOverride = record.TurnStateOverride
+				if record.TurnStateInjectedLength > 0 {
+					existing.TurnStateInjectedLength = record.TurnStateInjectedLength
+				}
 			}
 			if record.Action != "" || len(record.Original) > 0 || record.Model != "" {
 				existing.conversion = record.conversion

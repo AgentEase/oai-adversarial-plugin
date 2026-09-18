@@ -16,7 +16,7 @@
 <main>
   <header>
     <div><div class="eyebrow">CPA / O-ADVERSARIAL-PLUGIN</div><h1>O/对抗插件</h1><p>请求时区、上游模型一致性、Turn-State 观测覆写与探测轨状态。</p></div>
-    <div class="chip-grid"><div class="target"><span class="dot"></span><code>America/Los_Angeles</code></div><div class="target" title="请求侧 X-Codex-Turn-State 覆写状态"><span class="dot" id="override-dot"></span><code id="override-label">覆写：—</code></div><div class="target" title="探测轨状态"><span class="dot" id="probe-dot"></span><code id="probe-label">探测：—</code></div></div>
+    <div class="chip-grid"><div class="target"><span class="dot"></span><code>America/Los_Angeles</code></div><div class="target hidden" id="override-chip" title="请求侧 X-Codex-Turn-State 覆写状态"><span class="dot" id="override-dot"></span><code id="override-label">覆写：—</code></div><div class="target" title="探测轨状态"><span class="dot" id="probe-dot"></span><code id="probe-label">探测：—</code></div></div>
   </header>
   <nav class="tabs">
     <button id="tab-records" type="button" class="tab active">请求记录</button>
@@ -103,7 +103,7 @@
   function requireLogin(message='未找到已保存的 CPA 登录状态。请在管理页登录并启用“记住密码”，本页会自动连接。'){
     el('auth-message').textContent=message;el('auth-notice').classList.remove('hidden');el('results').classList.add('hidden');
     el('rows').replaceChildren();for(const key of ['total','replaced','inserted','mismatches','turnstates','overridden'])el(key).textContent='—';
-    el('override-label').textContent='覆写：—';el('override-dot').style.background='var(--muted)';
+    el('override-chip').classList.add('hidden');
     el('probe-label').textContent='探测：—';el('probe-dot').style.background='var(--muted)';
     el('refresh').disabled=true;el('refresh-note').textContent='等待 CPA 登录';el('status').textContent='';
   }
@@ -136,12 +136,15 @@
     el('overridden').textContent=Number(data.overridden||0).toLocaleString('zh-CN');
     el('turnstates').textContent=Number(data.records.filter(r=>r.turn_state_length>0).length).toLocaleString('zh-CN');
     const override=data.turn_state_override||{};
-    if(override.enabled){
-      el('override-label').textContent='覆写：'+(override.models||[]).join('、')+(override.force?'（强制）':'（仅补充）');
-      el('override-dot').style.background='#d97706';
-    }else if(override.error){
+    const overrideChip=el('override-chip');
+    if(override.error){
+      // Configuration errors must stay visible; the steady rewrite state stays hidden.
+      overrideChip.classList.remove('hidden');
       el('override-label').textContent='覆写：配置错误';el('override-dot').style.background='#dc2626';
+    }else if(override.enabled){
+      overrideChip.classList.add('hidden');
     }else{
+      overrideChip.classList.remove('hidden');
       el('override-label').textContent='覆写：关闭';el('override-dot').style.background='var(--muted)';
     }
     const fragment=document.createDocumentFragment();
@@ -167,7 +170,12 @@
         const detail=(record.turn_state_value||record.turn_state_preview||'')+(record.turn_state_truncated?'（已截断）':'');
         turnstate.title=detail+(record.turn_state_source?('　（'+ (sources[record.turn_state_source]||record.turn_state_source) +'）'):'');
       }else if(record.turn_state_override==='applied'||record.turn_state_override==='applied-config'){
-        turnstate.textContent='已覆写';const b=document.createElement('span');b.className='badge override';b.textContent='待上游';turnstate.append(b);
+        const injected=Number(record.turn_state_injected_length||0);
+        if(injected>0){turnstate.textContent=injected.toLocaleString('zh-CN')+' 字节';}
+        const b=document.createElement('span');b.className='badge override';
+        b.textContent=record.turn_state_override==='applied-config'?'已覆写（配置值）':'已覆写';
+        turnstate.append(b);
+        if(injected>0){turnstate.title='插件注入 '+injected+' 字节（'+(record.turn_state_override==='applied-config'?'配置值':'探测值')+'）';}
       }else{turnstate.textContent='未观测';turnstate.classList.add('none');}
       if(record.trace_id) tr.title='Trace ID: '+record.trace_id;
       fragment.append(tr);
