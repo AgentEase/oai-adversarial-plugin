@@ -216,11 +216,13 @@
     el('probe-priority').textContent=models.length?models[0]:'—';
     el('probe-counts').textContent=Number(probe.probes_ok||0).toLocaleString('zh-CN')+' / '+Number(probe.probes_total||0).toLocaleString('zh-CN');
     el('probe-activity').textContent=probe.last_activity||probe.last_error||'—';
-    el('probe-times').textContent='TTL '+(probe.ttl_minutes||55)+'m · 窗口 '+(probe.window_minutes||5)+'m · 扫描 '+(probe.scan_seconds||30)+'s · 间隔 '+(probe.interval_seconds||5)+'s · 每出口尝试 '+(probe.attempts_per_proxy||3)+' 次 · 失败冷却 '+(probe.cooldown_minutes||20)+'m';
+    el('probe-times').textContent='TTL '+(probe.ttl_minutes||55)+'m · 窗口 '+(probe.window_minutes||5)+'m · 扫描 '+(probe.scan_seconds||30)+'s · 间隔 '+(probe.interval_seconds||5)+'s · 每出口尝试 '+(probe.attempts_per_proxy||3)+' 次 · 失败冷却 '+(probe.cooldown_minutes||20)+'m · 疑似阈值 '+(probe.suspect_threshold||3)+' 次';
     const values=probe.values||[];
     const failureByModel={};
     for(const failure of (probe.failures||[])){failureByModel[failure.model]=failure;}
     const pausedSet=new Set(probe.paused||[]);
+    const suspectByModel={};
+    for(const suspicion of (probe.suspects||[])){suspectByModel[suspicion.model]=suspicion;}
     const rejectBtn=el('reject-toggle');
     if(probe.reject_degraded){rejectBtn.classList.add('on');rejectBtn.textContent='降智请求拒绝：已开启';}
     else{rejectBtn.classList.remove('on');rejectBtn.textContent='降智请求拒绝：已关闭';}
@@ -243,6 +245,7 @@
       const isPaused=pausedSet.has(entry.model);
       if(isPaused) tr.classList.add('paused-row');
       const failure=failureByModel[entry.model];
+      const suspicion=suspectByModel[entry.model];
       if(failure){
         const badge=document.createElement('span');
         badge.className='badge state-fail';
@@ -254,6 +257,12 @@
           badge.textContent='重试 '+failure.attempts+' 次失败 · 新一轮待启';
         }
         badge.title=(failure.last_error||'')+'（'+failure.rounds+' 轮，最后于 '+(failure.failed_at||'').replace('T',' ').slice(0,19)+' UTC；冷却结束自动开启新一轮）';
+        ttl.append(badge);
+      }else if(suspicion){
+        const badge=document.createElement('span');
+        badge.className='badge state-warn';
+        badge.textContent='疑似降智 · 本轮 '+suspicion.failures+' 次失败';
+        badge.title='探测轮进行中已连续出现降智证据失败；达到阈值后降智请求拒绝即可拦截（尚未达到正式判定）';
         ttl.append(badge);
       }else{
         ttl.textContent=remainingText(entry.expires_at);

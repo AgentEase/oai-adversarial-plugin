@@ -73,9 +73,13 @@ plugins:
           # annotated as failed on the dashboard. New rounds for that model
           # start only after cooldown-minutes have passed, so a persistent
           # upstream degradation does not burn quota in a tight loop.
+          # suspect-threshold: in-round degradation-evidence failures needed
+          # before the rejection switch treats the model as degraded (early
+          # trigger; the full annotation still wins once the round completes).
           attempts-per-proxy: 3
           max-attempts-per-round: 30
           cooldown-minutes: 20
+          suspect-threshold: 3
 
           # Upstream request settings for each probe.
           timeout-seconds: 60

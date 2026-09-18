@@ -38,6 +38,7 @@ const (
 	probeDefaultsAttemptsPerHop  = 3
 	probeDefaultsMaxAttempts     = 30
 	probeDefaultsCooldownMinutes = 20
+	probeDefaultsSuspectThreshold = 3
 	probeDefaultsTimeoutSeconds  = 60
 	probeRequiredStateLength     = 292
 	probeDefaultsPrompt          = "hi"
@@ -59,6 +60,7 @@ type probeConfig struct {
 	AttemptsPerHop      int
 	MaxAttemptsPerRound int
 	Cooldown            time.Duration
+	SuspectThreshold    int
 	Timeout             time.Duration
 	Prompt              string
 	UpstreamURL         string
@@ -79,6 +81,7 @@ type probeConfigYAML struct {
 	AttemptsPerHop   *int     `yaml:"attempts-per-proxy"`
 	MaxAttemptsRound *int     `yaml:"max-attempts-per-round"`
 	CooldownMinutes  *int     `yaml:"cooldown-minutes"`
+	SuspectThreshold *int     `yaml:"suspect-threshold"`
 	TimeoutSeconds   *int     `yaml:"timeout-seconds"`
 	Prompt           string   `yaml:"prompt"`
 	UpstreamURL      string   `yaml:"upstream-url"`
@@ -128,11 +131,24 @@ type probeFailure struct {
 	CooldownUntil string `json:"cooldown_until,omitempty"`
 }
 
+// probeSuspicion marks a model whose current probe round has accumulated
+// enough degradation-evidence failures to be treated as degraded for the
+// rejection switch before the round completes. It is cleared by a successful
+// probe or promoted to a full probeFailure annotation when the round is
+// exhausted.
+type probeSuspicion struct {
+	Model     string `json:"model"`
+	Failures  int    `json:"failures"`
+	LastError string `json:"last_error,omitempty"`
+	Since     string `json:"since"`
+}
+
 type probeEngine struct {
 	mu             sync.Mutex
 	cfg            probeConfigState
 	values         map[string]stateEntry
 	failures       map[string]probeFailure
+	suspects       map[string]probeSuspicion
 	paused         map[string]bool
 	probing        map[string]bool
 	rejectDegraded bool
@@ -151,6 +167,7 @@ type probeEngine struct {
 var probeTrack = &probeEngine{
 	values:   map[string]stateEntry{},
 	failures: map[string]probeFailure{},
+	suspects: map[string]probeSuspicion{},
 	paused:   map[string]bool{},
 	probing:  map[string]bool{},
 }
@@ -171,6 +188,7 @@ func parseProbeConfig(block probeConfigYAML) probeConfig {
 		AttemptsPerHop:      probeDefaultsAttemptsPerHop,
 		MaxAttemptsPerRound: probeDefaultsMaxAttempts,
 		Cooldown:            time.Duration(probeDefaultsCooldownMinutes) * time.Minute,
+		SuspectThreshold:    probeDefaultsSuspectThreshold,
 		Timeout:             time.Duration(probeDefaultsTimeoutSeconds) * time.Second,
 		Prompt:              probeDefaultsPrompt,
 		UpstreamURL:         probeDefaultsUpstreamURL,
@@ -202,6 +220,9 @@ func parseProbeConfig(block probeConfigYAML) probeConfig {
 	}
 	if block.CooldownMinutes != nil && *block.CooldownMinutes > 0 {
 		cfg.Cooldown = time.Duration(*block.CooldownMinutes) * time.Minute
+	}
+	if block.SuspectThreshold != nil && *block.SuspectThreshold > 0 {
+		cfg.SuspectThreshold = *block.SuspectThreshold
 	}
 	if block.TimeoutSeconds != nil && *block.TimeoutSeconds > 0 {
 		cfg.Timeout = time.Duration(*block.TimeoutSeconds) * time.Second
@@ -440,10 +461,56 @@ func (e *probeEngine) rejectDegradedEnabled() bool {
 	return e.rejectDegraded
 }
 
+// degradationEvidence maps a probe failure message to its Chinese degradation
+// reason, or returns "" when the failure is not degradation evidence (rate
+// limits, timeouts and network errors do not count).
+func degradationEvidence(message string) string {
+	switch {
+	case strings.Contains(message, "state length"):
+		return "上游状态长度异常（疑似风控降级）"
+	case strings.Contains(message, "model mismatch"):
+		return "上游请求被路由至其它模型（模型不一致）"
+	}
+	return ""
+}
+
+// noteProbeFailure advances the early "suspected degraded" tracking for one
+// in-round failure. Only degradation-evidence failures count; the running
+// count is kept (even below the threshold) so the series continues, and once
+// the configured threshold is reached the model becomes rejection-eligible
+// before the round completes. A successful probe or a completed round clears
+// it (success) or promotes it (exhausted round).
+func (e *probeEngine) noteProbeFailure(model string, record probeRecord, cfg probeConfig) {
+	if degradationEvidence(record.Error) == "" {
+		return
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.suspects == nil {
+		e.suspects = map[string]probeSuspicion{}
+	}
+	suspicion := e.suspects[model]
+	if suspicion.Failures == 0 {
+		suspicion = probeSuspicion{Model: model, Since: time.Now().UTC().Format(time.RFC3339Nano)}
+	}
+	suspicion.Failures++
+	suspicion.LastError = record.Error
+	e.suspects[model] = suspicion
+}
+
+// clearSuspect removes the early suspicion for a model (probe success or a
+// completed round that produced a full annotation).
+func (e *probeEngine) clearSuspect(model string) {
+	e.mu.Lock()
+	delete(e.suspects, model)
+	e.mu.Unlock()
+}
+
 // degradedRejectReason reports the Chinese reason used by the degraded-model
-// rejection when the switch is enabled and the model's latest failed round
-// carries degradation evidence (length anomaly or model mismatch). Rate
-// limits, timeouts and network errors do not count as degradation.
+// rejection when the switch is enabled. Full failure annotations win; on top
+// of them, in-round suspicions that crossed suspect-threshold are eligible so
+// the rejection starts about fifteen seconds after degradation appears
+// instead of waiting for the whole round.
 func (e *probeEngine) degradedRejectReason(model string) string {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -455,11 +522,23 @@ func (e *probeEngine) degradedRejectReason(model string) string {
 		if !strings.HasPrefix(candidate, strings.ToLower(key)) {
 			continue
 		}
-		switch {
-		case strings.Contains(failure.LastError, "state length"):
-			return "上游状态长度异常（疑似风控降级）"
-		case strings.Contains(failure.LastError, "model mismatch"):
-			return "上游请求被路由至其它模型（模型不一致）"
+		if reason := degradationEvidence(failure.LastError); reason != "" {
+			return reason
+		}
+	}
+	for key, suspicion := range e.suspects {
+		if !strings.HasPrefix(candidate, strings.ToLower(key)) {
+			continue
+		}
+		threshold := e.cfg.Config.SuspectThreshold
+		if threshold <= 0 {
+			threshold = probeDefaultsSuspectThreshold
+		}
+		if suspicion.Failures < threshold {
+			continue
+		}
+		if reason := degradationEvidence(suspicion.LastError); reason != "" {
+			return fmt.Sprintf("%s（本轮已连续 %d 次失败，尚未达到正式判定）", reason, suspicion.Failures)
 		}
 	}
 	return ""
@@ -532,6 +611,7 @@ func (e *probeEngine) probeModel(model string, cfg probeConfig, stop chan struct
 				e.storeValue(model, value, proxySpec, cfg)
 				e.mu.Lock()
 				delete(e.failures, model)
+				delete(e.suspects, model)
 				e.proxyIndex = index
 				e.consecutive = 0
 				e.mu.Unlock()
@@ -541,6 +621,7 @@ func (e *probeEngine) probeModel(model string, cfg probeConfig, stop chan struct
 			if record.StateLength > 0 {
 				lastLength = record.StateLength
 			}
+			e.noteProbeFailure(model, record, cfg)
 			select {
 			case <-time.After(cfg.ProbeInterval):
 			case <-stop:
@@ -554,9 +635,11 @@ func (e *probeEngine) probeModel(model string, cfg probeConfig, stop chan struct
 		e.mu.Unlock()
 	}
 	// Retries exhausted: annotate the failure for the dashboard and start the
-	// cooldown window; the next round is suppressed until it elapses.
+	// cooldown window; the next round is suppressed until it elapses. The
+	// in-round suspicion is promoted to the full annotation.
 	now := time.Now().UTC()
 	e.mu.Lock()
+	delete(e.suspects, model)
 	e.failures[model] = probeFailure{
 		Model:         model,
 		Attempts:      attempts,
@@ -882,6 +965,16 @@ func probeSummary() map[string]any {
 			paused = append(paused, model)
 		}
 	}
+	var suspects []probeSuspicion
+	threshold := cfg.SuspectThreshold
+	if threshold <= 0 {
+		threshold = probeDefaultsSuspectThreshold
+	}
+	for _, model := range cfg.Models {
+		if suspicion, ok := probeTrack.suspects[model]; ok && suspicion.Failures >= threshold {
+			suspects = append(suspects, suspicion)
+		}
+	}
 	summary := map[string]any{
 		"enabled":      cfg.Enabled,
 		"error":        cfgState.Error,
@@ -894,6 +987,8 @@ func probeSummary() map[string]any {
 		"interval_seconds": int(cfg.ProbeInterval / time.Second),
 		"attempts_per_proxy": cfg.AttemptsPerHop,
 		"cooldown_minutes": int(cfg.Cooldown / time.Minute),
+		"suspect_threshold": cfg.SuspectThreshold,
+		"suspects":        suspects,
 		"paused":           paused,
 		"reject_degraded":  probeTrack.rejectDegraded,
 		"running":      probeTrack.running,

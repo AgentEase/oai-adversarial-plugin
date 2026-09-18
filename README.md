@@ -156,6 +156,7 @@ plugins:
 | `attempts-per-proxy` | int | 3 | 单出口连续尝试次数（之后轮换） |
 | `max-attempts-per-round` | int | 30 | 单轮总尝试上限（超限标注失败） |
 | `cooldown-minutes` | int | 20 | 单轮失败后的冷却时间；到期自动开启新一轮 |
+| `suspect-threshold` | int | 3 | 轮内降智证据失败达到该次数后提前触发降智拒绝（打满后转正式判定） |
 | `timeout-seconds` | int | 60 | 单次探测超时 |
 | `prompt` | string | `"hi"` | 探测请求内容（最小化消耗） |
 | `upstream-url` | string | chatgpt.com/backend-api/codex/responses | 上游探测端点 |

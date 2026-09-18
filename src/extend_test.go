@@ -269,10 +269,12 @@ func TestProbePauseAndResume(t *testing.T) {
 
 // TestDegradedRejectDecision drives the degraded-model rejection switch:
 // only length anomalies and model mismatches count as degradation, and only
-// while the switch is on.
+// while the switch is on. In-round suspicions crossing suspect-threshold are
+// rejection-eligible before the round completes.
 func TestDegradedRejectDecision(t *testing.T) {
 	probeTrack = &probeEngine{values: map[string]stateEntry{}, failures: map[string]probeFailure{},
-		paused: map[string]bool{}, probing: map[string]bool{}}
+		suspects: map[string]probeSuspicion{}, paused: map[string]bool{}, probing: map[string]bool{}}
+	probeTrack.cfg.Config = parseProbeConfig(probeConfigYAML{})
 	if message := degradedRejectMessage("gpt-6-astra"); message != "" {
 		t.Fatalf("switch off must allow everything: %q", message)
 	}
@@ -294,6 +296,47 @@ func TestDegradedRejectDecision(t *testing.T) {
 	probeTrack.failures["gpt-5.6-sol"] = probeFailure{LastError: "status 429: rate limit exceeded"}
 	if message := degradedRejectMessage("gpt-5.6-sol"); message != "" {
 		t.Fatalf("rate limit must not count as degradation: %q", message)
+	}
+	// Early suspicion: below the threshold passes, at the threshold rejects.
+	delete(probeTrack.failures, "gpt-5.6-terra")
+	probeTrack.suspects["gpt-5.6-terra"] = probeSuspicion{Model: "gpt-5.6-terra", Failures: 2,
+		LastError: "state length 312 != 292 (suspected degraded)"}
+	if message := degradedRejectMessage("gpt-5.6-terra"); message != "" {
+		t.Fatalf("below threshold must pass: %q", message)
+	}
+	probeTrack.suspects["gpt-5.6-terra"] = probeSuspicion{Model: "gpt-5.6-terra", Failures: 3,
+		LastError: "state length 312 != 292 (suspected degraded)"}
+	if message := degradedRejectMessage("gpt-5.6-terra"); !strings.Contains(message, "尚未达到正式判定") {
+		t.Fatalf("threshold-crossing suspicion must be rejected: %q", message)
+	}
+}
+
+// TestSuspectTracking drives the in-round suspicion counter: only degradation
+// evidence counts, the count survives below-threshold failures, success
+// clears it, and an exhausted round promotes it to the full annotation.
+func TestSuspectTracking(t *testing.T) {
+	probeTrack = &probeEngine{values: map[string]stateEntry{}, failures: map[string]probeFailure{},
+		suspects: map[string]probeSuspicion{}, paused: map[string]bool{}, probing: map[string]bool{}}
+	cfg := parseProbeConfig(probeConfigYAML{})
+	probeTrack.noteProbeFailure("gpt-6-astra", probeRecord{Error: "status 429: rate limit exceeded"}, cfg)
+	if len(probeTrack.suspects) != 0 {
+		t.Fatal("rate limit must not start a suspicion")
+	}
+	probeTrack.noteProbeFailure("gpt-6-astra", probeRecord{Error: "state length 312 != 292 (suspected degraded)"}, cfg)
+	if probeTrack.suspects["gpt-6-astra"].Failures != 1 {
+		t.Fatalf("first failure must count: %+v", probeTrack.suspects)
+	}
+	probeTrack.noteProbeFailure("gpt-6-astra", probeRecord{Error: "model mismatch: requested x got y"}, cfg)
+	if probeTrack.suspects["gpt-6-astra"].Failures != 2 {
+		t.Fatalf("count must continue below the threshold: %+v", probeTrack.suspects)
+	}
+	probeTrack.noteProbeFailure("gpt-6-astra", probeRecord{Error: "state length 312 != 292 (suspected degraded)"}, cfg)
+	if probeTrack.suspects["gpt-6-astra"].Failures != 3 {
+		t.Fatalf("third failure must reach the threshold: %+v", probeTrack.suspects)
+	}
+	probeTrack.clearSuspect("gpt-6-astra")
+	if _, ok := probeTrack.suspects["gpt-6-astra"]; ok {
+		t.Fatal("success must clear the suspicion")
 	}
 }
 
