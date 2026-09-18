@@ -323,8 +323,12 @@
       cell(tr,fmtBeijing(entry.issued_at),'time');
       cell(tr,fmtBeijing(entry.expires_at),'time');
       const ttl=cell(tr,'ttl-cell');
-      const halting=probe.halted===true;
-      const isPaused=pausedSet.has(entry.model)||halting;
+      // Row state = whether THIS model currently has probing activity
+      // (executing or queued). A running one-off probe keeps the row engaged
+      // even while the engine overall is halted; a parked model shows ▶ no
+      // matter what the global engine state is.
+      const activeSet=new Set(probe.active_models||[]);
+      const isPaused=!activeSet.has(entry.model);
       if(isPaused) tr.classList.add('paused-row');
       const failure=failureByModel[entry.model];
       const suspicion=suspectByModel[entry.model];
@@ -388,7 +392,7 @@
       toggle.type='button';
       toggle.className='icon-btn'+(isPaused?' paused':'');
       toggle.textContent=isPaused?'▶':'⏸';
-      toggle.title=isPaused?'启动：重新加入探测队列并立即探测该模型':'暂停：移出探测队列（在途探测将在尝试边界停止；已有基线值仍继续使用）';
+      toggle.title=isPaused?'启动：探测该模型一次（不影响其他模型与全局停止状态）':'暂停：移出探测队列（在途探测将在尝试边界停止；已有基线值仍继续使用）';
       toggle.addEventListener('click',async()=>{toggle.disabled=true;if(await probeControl({model:entry.model,action:isPaused?'resume':'pause'}))refresh();else toggle.disabled=false;});
       control.append(toggle);
       const probeNow=document.createElement('button');

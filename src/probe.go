@@ -685,9 +685,9 @@ func (e *probeEngine) settledBaseline(model string, cfg probeConfig, now time.Ti
 // setModelPaused pauses or resumes a model from the dashboard. Pausing keeps
 // the model out of the queue while preserving its value and failure record;
 // an in-flight probe for that model also stops at its next attempt boundary
-// (see probeModel). Resuming clears the stale annotation; if the engine is
-// running it queues one probe for the model, while a halted engine stays
-// halted and silent - only "start round" resumes automatic care for all.
+// (see probeModel). Resuming clears the stale annotation and queues one
+// forced probe for the model - it runs even while the engine is halted, but
+// the halt itself and every other model stay untouched.
 func (e *probeEngine) setModelPaused(model string, paused bool) {
 	e.mu.Lock()
 	if e.paused == nil {
@@ -702,19 +702,13 @@ func (e *probeEngine) setModelPaused(model string, paused bool) {
 	e.mu.Unlock()
 	markStateDirty()
 	if !paused {
-		// Resuming clears the pause so the model participates again. While
-		// the engine is running it is probed immediately via the unified
-		// queue; while the engine is halted (after "stop all") nothing is
-		// started and nothing is re-ignited - the model simply waits for the
-		// next explicit "start round", which is the only path that resumes
-		// automatic care for everyone. Single-model controls never wake
-		// other models.
-		e.mu.Lock()
-		engineHalted := e.halted
-		e.mu.Unlock()
-		if !engineHalted {
-			e.enqueueTask(model, false)
-		}
+		// Resuming lifts the pause and probes the model once through the
+		// unified queue. This works even while the engine is halted - it is
+		// a single-model action, so it must not stay invisible - but it
+		// never re-ignites the engine: the halt (silent hand-off watcher)
+		// stays and no other model is disturbed. The task is forced so the
+		// dequeue gate lets it run regardless of the halt.
+		e.enqueueTask(model, true)
 	}
 }
 
@@ -1752,6 +1746,28 @@ func queueModels(tasks []probeTask) []string {
 	return models
 }
 
+// activeModels lists the models that currently have probing activity -
+// executing or waiting in the queue. The dashboard uses it to keep a row in
+// its "engaged" (pause-icon) state while a one-off probe runs, even when the
+// engine itself is halted.
+func activeModels(probing map[string]bool, tasks []probeTask) []string {
+	seen := map[string]bool{}
+	models := make([]string, 0, len(probing)+len(tasks))
+	for model, busy := range probing {
+		if busy && !seen[model] {
+			seen[model] = true
+			models = append(models, model)
+		}
+	}
+	for _, task := range tasks {
+		if !seen[task.Model] {
+			seen[task.Model] = true
+			models = append(models, task.Model)
+		}
+	}
+	return models
+}
+
 // ---------------------------------------------------------------------------
 // helpers
 
@@ -2010,6 +2026,7 @@ func probeSummary() map[string]any {
 		"halted":       probeTrack.halted,
 		"queue_length": len(probeTrack.queue),
 		"queue_models": queueModels(probeTrack.queue),
+		"active_models": activeModels(probeTrack.probing, probeTrack.queue),
 		"run_started_at":  probeTrack.runStartedAt,
 		"run_finished_at": probeTrack.runFinishedAt,
 		"run_note":        probeTrack.runNote,

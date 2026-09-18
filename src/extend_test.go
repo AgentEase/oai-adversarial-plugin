@@ -1298,20 +1298,37 @@ func TestOneOffProbeDoesNotReignite(t *testing.T) {
 	if !probeTrack.prefetchGate["gpt-5.6-sol"].IsZero() {
 		t.Fatal("the halted engine must keep the watcher silent")
 	}
-	// Resuming a paused model while halted stays silent: the pause is lifted
-	// but nothing is probed and nothing re-ignites - only "start round"
-	// resumes automatic care for everyone.
+	// Resuming a paused model while halted probes that model once (so the
+	// action is visible) but never re-ignites the engine.
+	probeTrack.mu.Lock()
+	baseRecords := len(probeTrack.history)
+	probeTrack.mu.Unlock()
 	probeTrack.setModelPaused("gpt-5.6-sol", true)
 	probeTrack.setModelPaused("gpt-5.6-sol", false)
 	probeTrack.mu.Lock()
 	stillHalted = probeTrack.halted
-	queuedAfterResume := len(probeTrack.queue)
 	probeTrack.mu.Unlock()
 	if !stillHalted {
 		t.Fatal("resuming while halted must not re-ignite the engine")
 	}
-	if queuedAfterResume != 0 {
-		t.Fatal("resuming while halted must not queue a probe")
+	deadline = time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		probeTrack.mu.Lock()
+		records = len(probeTrack.history)
+		probeTrack.mu.Unlock()
+		if records > baseRecords {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if records <= baseRecords {
+		t.Fatal("resuming must run one visible probe for that model")
+	}
+	probeTrack.mu.Lock()
+	stillHalted = probeTrack.halted
+	probeTrack.mu.Unlock()
+	if !stillHalted {
+		t.Fatal("the resume probe must keep the engine halted")
 	}
 }
 
