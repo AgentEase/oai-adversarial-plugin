@@ -129,23 +129,31 @@ type probeFailure struct {
 }
 
 type probeEngine struct {
-	mu           sync.Mutex
-	cfg          probeConfigState
-	values       map[string]stateEntry
-	failures     map[string]probeFailure
-	history      []probeRecord
-	proxyIndex   int
-	consecutive  int
-	lastScan     time.Time
-	lastActivity string
-	stopCh       chan struct{}
-	running      bool
-	probesTotal  uint64
-	probesOK     uint64
-	lastError    string
+	mu             sync.Mutex
+	cfg            probeConfigState
+	values         map[string]stateEntry
+	failures       map[string]probeFailure
+	paused         map[string]bool
+	probing        map[string]bool
+	rejectDegraded bool
+	history        []probeRecord
+	proxyIndex     int
+	consecutive    int
+	lastScan       time.Time
+	lastActivity   string
+	stopCh         chan struct{}
+	running        bool
+	probesTotal    uint64
+	probesOK       uint64
+	lastError      string
 }
 
-var probeTrack = &probeEngine{values: map[string]stateEntry{}, failures: map[string]probeFailure{}}
+var probeTrack = &probeEngine{
+	values:   map[string]stateEntry{},
+	failures: map[string]probeFailure{},
+	paused:   map[string]bool{},
+	probing:  map[string]bool{},
+}
 
 // ---------------------------------------------------------------------------
 // configuration
@@ -326,6 +334,9 @@ func (e *probeEngine) scanOnce(stop chan struct{}) {
 		return
 	}
 	for _, model := range cfg.Models {
+		if e.probeSuppressed(model) {
+			continue
+		}
 		if e.needsProbe(model, cfg) {
 			e.probeModel(model, cfg, stop)
 			select {
@@ -361,6 +372,114 @@ func (e *probeEngine) needsProbe(model string, cfg probeConfig) bool {
 	return remaining <= cfg.Window
 }
 
+// probeSuppressed reports whether automatic probing for a model is held off:
+// the model was paused from the dashboard or a round is already running.
+func (e *probeEngine) probeSuppressed(model string) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.paused[model] || e.probing[model]
+}
+
+// setModelPaused pauses or resumes a model from the dashboard. Pausing keeps
+// the model out of the automatic queue while preserving its value and failure
+// record; resuming clears the stale annotation and starts one probe round in
+// the background.
+func (e *probeEngine) setModelPaused(model string, paused bool) {
+	e.mu.Lock()
+	if e.paused == nil {
+		e.paused = map[string]bool{}
+	}
+	if paused {
+		e.paused[model] = true
+	} else {
+		delete(e.paused, model)
+		delete(e.failures, model)
+	}
+	e.mu.Unlock()
+	if !paused {
+		e.startProbeAsync(model)
+	}
+}
+
+// startProbeAsync launches one probe round in the background for the manual
+// resume action. probeModel guards against overlapping rounds itself.
+func (e *probeEngine) startProbeAsync(model string) {
+	e.mu.Lock()
+	cfg := e.cfg.Config
+	e.mu.Unlock()
+	if !cfg.Enabled {
+		return
+	}
+	go e.probeModel(model, cfg, make(chan struct{}))
+}
+
+// pausedModels lists the models currently paused from the dashboard.
+func (e *probeEngine) pausedModels() []string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	models := make([]string, 0, len(e.paused))
+	for _, model := range e.cfg.Config.Models {
+		if e.paused[model] {
+			models = append(models, model)
+		}
+	}
+	return models
+}
+
+// setRejectDegraded toggles the degraded-model rejection switch.
+func (e *probeEngine) setRejectDegraded(enabled bool) {
+	e.mu.Lock()
+	e.rejectDegraded = enabled
+	e.mu.Unlock()
+}
+
+// rejectDegradedEnabled returns the current switch state.
+func (e *probeEngine) rejectDegradedEnabled() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.rejectDegraded
+}
+
+// degradedRejectReason reports the Chinese reason used by the degraded-model
+// rejection when the switch is enabled and the model's latest failed round
+// carries degradation evidence (length anomaly or model mismatch). Rate
+// limits, timeouts and network errors do not count as degradation.
+func (e *probeEngine) degradedRejectReason(model string) string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if !e.rejectDegraded {
+		return ""
+	}
+	candidate := strings.ToLower(strings.TrimSpace(model))
+	for key, failure := range e.failures {
+		if !strings.HasPrefix(candidate, strings.ToLower(key)) {
+			continue
+		}
+		switch {
+		case strings.Contains(failure.LastError, "state length"):
+			return "上游状态长度异常（疑似风控降级）"
+		case strings.Contains(failure.LastError, "model mismatch"):
+			return "上游请求被路由至其它模型（模型不一致）"
+		}
+	}
+	return ""
+}
+
+// degradedRejectMessage evaluates the switch for one request and returns the
+// Chinese 403 message when the request targets a degraded model.
+func degradedRejectMessage(models ...string) string {
+	for _, candidate := range models {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" {
+			continue
+		}
+		if reason := probeTrack.degradedRejectReason(candidate); reason != "" {
+			return fmt.Sprintf("模型 %s 当前处于风控降智状态：%s。请求已被 O/对抗插件拦截，请稍后重试或切换模型。", candidate, reason)
+		}
+	}
+	return ""
+}
+
 // probeModel runs the probe sequence for one model: repeated rounds of up to
 // attempts-per-proxy attempts per egress, rotating egress after each failed
 // round, until an acceptable state is captured (success clears any failure
@@ -368,12 +487,28 @@ func (e *probeEngine) needsProbe(model string, cfg probeConfig) bool {
 // recorded for the dashboard).
 func (e *probeEngine) probeModel(model string, cfg probeConfig, stop chan struct{}) {
 	e.mu.Lock()
+	if e.probing == nil {
+		e.probing = map[string]bool{}
+	}
+	if e.probing[model] {
+		e.mu.Unlock()
+		return
+	}
+	e.probing[model] = true
 	proxies := append([]string(nil), cfg.Proxies...)
 	startIndex := e.proxyIndex % len(proxies)
 	e.mu.Unlock()
 	if len(proxies) == 0 {
+		e.mu.Lock()
+		delete(e.probing, model)
+		e.mu.Unlock()
 		return
 	}
+	defer func() {
+		e.mu.Lock()
+		delete(e.probing, model)
+		e.mu.Unlock()
+	}()
 	maxAttempts := cfg.MaxAttemptsPerRound
 	if maxAttempts <= 0 {
 		maxAttempts = probeDefaultsMaxAttempts
@@ -741,6 +876,12 @@ func probeSummary() map[string]any {
 			failures = append(failures, failure)
 		}
 	}
+	paused := make([]string, 0, len(cfg.Models))
+	for _, model := range cfg.Models {
+		if probeTrack.paused[model] {
+			paused = append(paused, model)
+		}
+	}
 	summary := map[string]any{
 		"enabled":      cfg.Enabled,
 		"error":        cfgState.Error,
@@ -753,6 +894,8 @@ func probeSummary() map[string]any {
 		"interval_seconds": int(cfg.ProbeInterval / time.Second),
 		"attempts_per_proxy": cfg.AttemptsPerHop,
 		"cooldown_minutes": int(cfg.Cooldown / time.Minute),
+		"paused":           paused,
+		"reject_degraded":  probeTrack.rejectDegraded,
 		"running":      probeTrack.running,
 		"probes_total": probeTrack.probesTotal,
 		"probes_ok":    probeTrack.probesOK,

@@ -236,6 +236,144 @@ func TestProbeFailureShape(t *testing.T) {
 	}
 }
 
+// TestProbePauseAndResume verifies the dashboard pause/resume controls: a
+// paused model is excluded from the automatic queue while its value and
+// annotation are preserved; resume clears the annotation and re-enters it.
+func TestProbePauseAndResume(t *testing.T) {
+	state := &probeEngine{values: map[string]stateEntry{}, failures: map[string]probeFailure{},
+		paused: map[string]bool{}, probing: map[string]bool{}}
+	state.cfg.Config = parseProbeConfig(probeConfigYAML{})
+	if state.probeSuppressed("gpt-6-astra") {
+		t.Fatal("fresh model must not be suppressed")
+	}
+	state.failures["gpt-6-astra"] = probeFailure{Model: "gpt-6-astra", Attempts: 30, Rounds: 10,
+		LastError: "state length 312 != 292 (suspected degraded)"}
+	state.setModelPaused("gpt-6-astra", true)
+	if !state.probeSuppressed("gpt-6-astra") {
+		t.Fatal("paused model must be suppressed")
+	}
+	if _, ok := state.failures["gpt-6-astra"]; !ok {
+		t.Fatal("pause must keep the annotation")
+	}
+	if models := state.pausedModels(); len(models) != 1 || models[0] != "gpt-6-astra" {
+		t.Fatalf("paused list wrong: %v", models)
+	}
+	state.setModelPaused("gpt-6-astra", false)
+	if state.probeSuppressed("gpt-6-astra") {
+		t.Fatal("resumed model must re-enter the queue")
+	}
+	if _, ok := state.failures["gpt-6-astra"]; ok {
+		t.Fatal("resume must clear the stale annotation")
+	}
+}
+
+// TestDegradedRejectDecision drives the degraded-model rejection switch:
+// only length anomalies and model mismatches count as degradation, and only
+// while the switch is on.
+func TestDegradedRejectDecision(t *testing.T) {
+	probeTrack = &probeEngine{values: map[string]stateEntry{}, failures: map[string]probeFailure{},
+		paused: map[string]bool{}, probing: map[string]bool{}}
+	if message := degradedRejectMessage("gpt-6-astra"); message != "" {
+		t.Fatalf("switch off must allow everything: %q", message)
+	}
+	probeTrack.failures["gpt-6-astra"] = probeFailure{LastError: "state length 312 != 292 (suspected degraded)"}
+	if message := degradedRejectMessage("gpt-6-astra"); message != "" {
+		t.Fatalf("switch off must allow even degraded: %q", message)
+	}
+	probeTrack.setRejectDegraded(true)
+	if message := degradedRejectMessage("gpt-6-astra"); !strings.Contains(message, "风控降智") {
+		t.Fatalf("length anomaly must be rejected with a Chinese message: %q", message)
+	}
+	if message := degradedRejectMessage("gpt-6-luna"); message != "" {
+		t.Fatalf("unrelated model must pass: %q", message)
+	}
+	probeTrack.failures["gpt-5.6-luna"] = probeFailure{LastError: "model mismatch: requested gpt-5.6-luna got gpt-6-astra"}
+	if message := degradedRejectMessage("gpt-5.6-luna"); !strings.Contains(message, "模型不一致") {
+		t.Fatalf("model mismatch must be rejected: %q", message)
+	}
+	probeTrack.failures["gpt-5.6-sol"] = probeFailure{LastError: "status 429: rate limit exceeded"}
+	if message := degradedRejectMessage("gpt-5.6-sol"); message != "" {
+		t.Fatalf("rate limit must not count as degradation: %q", message)
+	}
+}
+
+// TestProbeControlEndpoint drives the POST control payloads the dashboard
+// sends: pause, resume and the reject switch.
+func TestProbeControlEndpoint(t *testing.T) {
+	probeTrack = &probeEngine{values: map[string]stateEntry{}, failures: map[string]probeFailure{},
+		paused: map[string]bool{}, probing: map[string]bool{}}
+	response, err := probeControl([]byte(`{"model":"gpt-5.6-luna","action":"pause"}`))
+	if err != nil || response.StatusCode != 200 {
+		t.Fatalf("pause failed: %+v %v", response, err)
+	}
+	if !probeTrack.paused["gpt-5.6-luna"] {
+		t.Fatal("pause must mark the model")
+	}
+	response, err = probeControl([]byte(`{"model":"gpt-5.6-luna","action":"resume"}`))
+	if err != nil || response.StatusCode != 200 {
+		t.Fatalf("resume failed: %+v %v", response, err)
+	}
+	if probeTrack.paused["gpt-5.6-luna"] {
+		t.Fatal("resume must clear the mark")
+	}
+	response, err = probeControl([]byte(`{"action":"reject-degraded","enabled":true}`))
+	if err != nil || response.StatusCode != 200 {
+		t.Fatalf("reject-degraded failed: %+v %v", response, err)
+	}
+	if !probeTrack.rejectDegradedEnabled() {
+		t.Fatal("switch must be on")
+	}
+	response, _ = probeControl([]byte(`{"action":"bogus"}`))
+	if response.StatusCode != 400 {
+		t.Fatalf("unknown action must be rejected: %+v", response)
+	}
+	response, _ = probeControl([]byte(`{"action":"pause"}`))
+	if response.StatusCode != 400 {
+		t.Fatalf("pause without a model must be rejected: %+v", response)
+	}
+}
+
+// TestInterceptDegradedRejection covers the full rejection path: with the
+// switch on and a degradation-annotated failure present, intercept() must
+// terminate the request with a 403 and a Chinese JSON message, and record
+// the rejection without attempting timezone normalization.
+func TestInterceptDegradedRejection(t *testing.T) {
+	history = auditState{}
+	probeTrack = &probeEngine{values: map[string]stateEntry{}, failures: map[string]probeFailure{},
+		paused: map[string]bool{}, probing: map[string]bool{}}
+	probeTrack.failures["gpt-6-astra"] = probeFailure{Model: "gpt-6-astra", Attempts: 30, Rounds: 10,
+		LastError: "state length 312 != 292 (suspected degraded)"}
+	probeTrack.setRejectDegraded(true)
+	raw, _ := json.Marshal(interceptRequest{
+		RequestID: "req-reject", ToFormat: "codex", Model: "gpt-6-astra",
+		Body: []byte(`{"input":"hello"}`),
+	})
+	resp, err := intercept(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !resp.Terminate || resp.StatusCode != 403 {
+		t.Fatalf("degraded model must be terminated with 403: %+v", resp)
+	}
+	if !strings.Contains(string(resp.ResponseBody), "风控降智") {
+		t.Fatalf("rejection body must be Chinese: %s", resp.ResponseBody)
+	}
+	record := history.snapshot()["records"].([]auditRecord)[0]
+	if !record.DegradedRejected {
+		t.Fatalf("rejection must be recorded: %+v", record)
+	}
+	// With the switch off the same request passes through to normalization.
+	probeTrack.setRejectDegraded(false)
+	history = auditState{}
+	resp, err = intercept(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Terminate {
+		t.Fatalf("switch off must not terminate: %+v", resp)
+	}
+}
+
 // TestProbeCooldownSuppressesNextRound verifies a failed model is not probed
 // again until its cooldown window elapses, and becomes eligible afterwards.
 func TestProbeCooldownSuppressesNextRound(t *testing.T) {

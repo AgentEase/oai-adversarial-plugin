@@ -12,7 +12,7 @@ import (
 
 const (
 	pluginID                   = "timezone-override"
-	pluginVersion              = "1.5.4"
+	pluginVersion              = "1.5.5"
 	historyLimit               = 200
 	schemaVersion              = 6
 	streamChunkHeaderInitIndex = -1
@@ -117,6 +117,7 @@ type auditRecord struct {
 	TurnStateTruncated bool `json:"turn_state_truncated,omitempty"`
 	TurnStateOverride  string `json:"turn_state_override,omitempty"`
 	TurnStateInjectedLength int `json:"turn_state_injected_length,omitempty"`
+	DegradedRejected   bool   `json:"degraded_rejected,omitempty"`
 }
 
 type auditState struct {
@@ -132,6 +133,7 @@ var history auditState
 type managementRequest struct {
 	Method string
 	Path   string
+	Body   []byte
 }
 
 type managementResponse struct {
@@ -175,7 +177,10 @@ func handleMethod(method string, raw []byte) (any, error) {
 		return observeWebSocketEvent(raw)
 	case "management.register":
 		return map[string]any{
-			"routes": []map[string]string{{"Method": "GET", "Path": "/timezone-override/requests"}},
+			"routes": []map[string]string{
+				{"Method": "GET", "Path": "/timezone-override/requests"},
+				{"Method": "POST", "Path": "/timezone-override/probe-control"},
+			},
 			"resources": []map[string]string{{
 				"Path": "/status", "Menu": "O/对抗插件",
 				"Description": "查看请求的原时区、替换结果、上游模型一致性及 X-Codex-Turn-State 观测。",
@@ -198,6 +203,26 @@ func intercept(raw []byte) (interceptResponse, error) {
 	}
 	if req.ToFormat != "codex" {
 		return interceptResponse{}, nil
+	}
+	// Degraded-model rejection: when the switch is on and the request targets
+	// a model whose latest probe round shows degradation evidence, terminate
+	// the request with a 403 and a clear Chinese message. The upstream is
+	// never called, so no timezone normalization is attempted.
+	if message := degradedRejectMessage(req.Model, req.RequestedModel); message != "" {
+		history.record(auditRecord{
+			RequestID: req.RequestID, TraceID: req.TraceID,
+			Model: req.Model, RequestedModel: req.RequestedModel,
+			Time:             time.Now().UTC().Format(time.RFC3339Nano),
+			DegradedRejected: true,
+		})
+		payload, _ := json.Marshal(map[string]any{"error": map[string]string{
+			"type": "degraded_model_rejected", "message": message,
+		}})
+		return interceptResponse{
+			Terminate: true, StatusCode: http.StatusForbidden,
+			ResponseHeaders: http.Header{"Content-Type": {"application/json; charset=utf-8"}},
+			ResponseBody:    payload,
+		}, nil
 	}
 	body, result, err := normalizeRequest(req.Body, req.SourceFormat)
 	if err != nil {
@@ -312,24 +337,89 @@ func management(raw []byte) (managementResponse, error) {
 	if err := json.Unmarshal(raw, &req); err != nil {
 		return managementResponse{}, fmt.Errorf("decode management request: %w", err)
 	}
-	if req.Method != "GET" {
-		return managementResponse{StatusCode: http.StatusMethodNotAllowed}, nil
-	}
 	switch {
 	case strings.HasSuffix(req.Path, "/status"):
+		if req.Method != http.MethodGet {
+			return managementResponse{StatusCode: http.StatusMethodNotAllowed}, nil
+		}
 		return managementResponse{
 			StatusCode: http.StatusOK,
 			Headers:    http.Header{"Content-Type": {"text/html; charset=utf-8"}, "Cache-Control": {"no-store"}},
 			Body:       dashboard,
 		}, nil
 	case strings.HasSuffix(req.Path, "/requests"):
+		if req.Method != http.MethodGet {
+			return managementResponse{StatusCode: http.StatusMethodNotAllowed}, nil
+		}
 		body, err := json.Marshal(history.snapshot())
 		return managementResponse{
 			StatusCode: http.StatusOK,
 			Headers:    http.Header{"Content-Type": {"application/json; charset=utf-8"}, "Cache-Control": {"no-store"}},
 			Body:       body,
 		}, err
+	case strings.HasSuffix(req.Path, "/probe-control"):
+		if req.Method != http.MethodPost {
+			return managementResponse{StatusCode: http.StatusMethodNotAllowed}, nil
+		}
+		return probeControl(req.Body)
 	default:
 		return managementResponse{StatusCode: http.StatusNotFound}, nil
+	}
+}
+
+// probeControl handles POST /timezone-override/probe-control:
+//
+//	{"model": "gpt-5.6-luna", "action": "pause"|"resume"}
+//	{"action": "reject-degraded", "enabled": true|false}
+//
+// Pause removes the model from the automatic probe queue; resume clears the
+// stale annotation, starts one probe round in the background and returns the
+// model to the queue. The reject switch gates the request-side interception
+// of degraded models.
+func probeControl(body []byte) (managementResponse, error) {
+	var req struct {
+		Model   string `json:"model"`
+		Action  string `json:"action"`
+		Enabled *bool  `json:"enabled"`
+	}
+	if len(body) > 0 {
+		if err := json.Unmarshal(body, &req); err != nil {
+			return jsonErrorResponse(http.StatusBadRequest, "无法解析控制请求体："+err.Error()), nil
+		}
+	}
+	switch action := strings.ToLower(strings.TrimSpace(req.Action)); action {
+	case "pause", "resume":
+		model := strings.TrimSpace(req.Model)
+		if model == "" {
+			return jsonErrorResponse(http.StatusBadRequest, "缺少 model 字段"), nil
+		}
+		probeTrack.setModelPaused(model, action == "pause")
+	case "reject-degraded":
+		if req.Enabled == nil {
+			return jsonErrorResponse(http.StatusBadRequest, "缺少 enabled 字段"), nil
+		}
+		probeTrack.setRejectDegraded(*req.Enabled)
+	default:
+		return jsonErrorResponse(http.StatusBadRequest, "不支持的操作："+action), nil
+	}
+	payload, _ := json.Marshal(map[string]any{
+		"ok":              true,
+		"paused":          probeTrack.pausedModels(),
+		"reject_degraded": probeTrack.rejectDegradedEnabled(),
+	})
+	return managementResponse{
+		StatusCode: http.StatusOK,
+		Headers:    http.Header{"Content-Type": {"application/json; charset=utf-8"}, "Cache-Control": {"no-store"}},
+		Body:       payload,
+	}, nil
+}
+
+// jsonErrorResponse builds a JSON error payload for the control endpoint.
+func jsonErrorResponse(status int, message string) managementResponse {
+	payload, _ := json.Marshal(map[string]any{"ok": false, "error": message})
+	return managementResponse{
+		StatusCode: status,
+		Headers:    http.Header{"Content-Type": {"application/json; charset=utf-8"}, "Cache-Control": {"no-store"}},
+		Body:       payload,
 	}
 }
