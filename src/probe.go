@@ -45,6 +45,8 @@ const (
 	probeDefaultsExitCooldownMinutes = 180
 	probeDefaultsExitFailThreshold = 3
 	probeDefaultsExitMinActive = 1
+	probeDefaultsPrefetchMinutes = 5
+	prefetchRetryWindow = 5 * time.Minute
 	probeDefaultsTimeoutSeconds  = 60
 	probeRequiredStateLength     = 292
 	probeDefaultsPrompt          = "hi"
@@ -69,6 +71,7 @@ type probeConfig struct {
 	ExitCooldown        time.Duration
 	ExitFailThreshold   int
 	ExitMinActive       int
+	Prefetch            time.Duration
 	SuspectThreshold    int
 	Timeout             time.Duration
 	Prompt              string
@@ -93,6 +96,7 @@ type probeConfigYAML struct {
 	ExitCooldownMinutes *int  `yaml:"exit-cooldown-minutes"`
 	ExitFailThreshold   *int  `yaml:"exit-fail-threshold"`
 	ExitMinActive       *int  `yaml:"exit-min-active"`
+	PrefetchMinutes     *int  `yaml:"prefetch-minutes"`
 	SuspectThreshold *int     `yaml:"suspect-threshold"`
 	TimeoutSeconds   *int     `yaml:"timeout-seconds"`
 	Prompt           string   `yaml:"prompt"`
@@ -185,6 +189,9 @@ type probeEngine struct {
 	suspects       map[string]probeSuspicion
 	business       map[string]businessDegradation
 	exitPenalties  map[string]exitPenalty
+	candidates     map[string]stateEntry
+	prefetchGate   map[string]time.Time
+	prefetchStop   chan struct{}
 	lastAttempt    map[string]time.Time
 	paused         map[string]bool
 	probing        map[string]bool
@@ -211,6 +218,8 @@ var probeTrack = &probeEngine{
 	suspects:      map[string]probeSuspicion{},
 	business:      map[string]businessDegradation{},
 	exitPenalties: map[string]exitPenalty{},
+	candidates:    map[string]stateEntry{},
+	prefetchGate:  map[string]time.Time{},
 	lastAttempt:   map[string]time.Time{},
 	paused:        map[string]bool{},
 	probing:       map[string]bool{},
@@ -236,6 +245,7 @@ func parseProbeConfig(block probeConfigYAML) probeConfig {
 		ExitCooldown:        time.Duration(probeDefaultsExitCooldownMinutes) * time.Minute,
 		ExitFailThreshold:   probeDefaultsExitFailThreshold,
 		ExitMinActive:       probeDefaultsExitMinActive,
+		Prefetch:            time.Duration(probeDefaultsPrefetchMinutes) * time.Minute,
 		SuspectThreshold:    probeDefaultsSuspectThreshold,
 		Timeout:             time.Duration(probeDefaultsTimeoutSeconds) * time.Second,
 		Prompt:              probeDefaultsPrompt,
@@ -277,6 +287,9 @@ func parseProbeConfig(block probeConfigYAML) probeConfig {
 	}
 	if block.ExitMinActive != nil && *block.ExitMinActive > 0 {
 		cfg.ExitMinActive = *block.ExitMinActive
+	}
+	if block.PrefetchMinutes != nil && *block.PrefetchMinutes >= 0 {
+		cfg.Prefetch = time.Duration(*block.PrefetchMinutes) * time.Minute
 	}
 	if block.SuspectThreshold != nil && *block.SuspectThreshold > 0 {
 		cfg.SuspectThreshold = *block.SuspectThreshold
@@ -335,9 +348,12 @@ func configureProbeTrack(block probeConfigYAML) error {
 	probeTrack.stopLocked()
 	probeTrack.cfg = probeConfigState{Config: cfg, Error: cfgErr}
 	probeTrack.mu.Unlock()
-	// The probe track never auto-starts. The dashboard's manual
-	// control is the only way to run it; business traffic refreshes baselines
-	// passively and the rejection switch keeps working on its own.
+	// The probe track never auto-starts. The dashboard's manual control is
+	// the only way to run full rounds; the prefetch watcher below is the one
+	// narrow automatic exception: it probes a model only while its active
+	// token's remaining validity is inside the prefetch window, parking a
+	// fresh token as candidate for a seamless hand-off.
+	probeTrack.ensurePrefetchWatcher()
 	ensurePersistence()
 	return nil
 }
@@ -447,6 +463,97 @@ func (e *probeEngine) setModelPaused(model string, paused bool) {
 	e.mu.Unlock()
 	markStateDirty()
 	if !paused {
+		e.probeModelAsync(model)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// prefetch watch (smooth hand-off)
+
+// ensurePrefetchWatcher starts the single background watcher once per process.
+// It is the only automatic probing that exists in v1.5.15+: it never refreshes
+// a value that is safely outside the prefetch window.
+func (e *probeEngine) ensurePrefetchWatcher() {
+	e.mu.Lock()
+	if e.prefetchStop != nil {
+		e.mu.Unlock()
+		return
+	}
+	stop := make(chan struct{})
+	e.prefetchStop = stop
+	e.mu.Unlock()
+	go e.prefetchWatchLoop(stop)
+}
+
+// stopPrefetchWatcher shuts the watcher down (plugin shutdown).
+func (e *probeEngine) stopPrefetchWatcher() {
+	e.mu.Lock()
+	stop := e.prefetchStop
+	e.prefetchStop = nil
+	e.mu.Unlock()
+	if stop != nil {
+		close(stop)
+	}
+}
+
+// prefetchWatchLoop scans every 30 seconds for models whose active token is
+// about to expire (remaining <= prefetch-minutes) and, only then, starts one
+// background probe to park a fresh token as the candidate. Per-model attempts
+// are throttled by prefetchRetryWindow so a failing probe cannot spin.
+func (e *probeEngine) prefetchWatchLoop(stop <-chan struct{}) {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-stop:
+			return
+		case <-ticker.C:
+			e.prefetchScan()
+		}
+	}
+}
+
+func (e *probeEngine) prefetchScan() {
+	cfg := currentProbeConfig().Config
+	if !cfg.Enabled || cfg.Prefetch <= 0 {
+		return
+	}
+	now := time.Now().UTC()
+	for _, model := range cfg.Models {
+		e.mu.Lock()
+		if e.paused[model] || e.probing[model] {
+			e.mu.Unlock()
+			continue
+		}
+		active, has := e.values[model]
+		if !has || !active.Valid || active.Value == "" {
+			e.mu.Unlock()
+			continue
+		}
+		issued, okTime := parseTurnStateTimestamp(active.Value)
+		if !okTime {
+			e.mu.Unlock()
+			continue
+		}
+		remaining := issued.Add(cfg.TTL).Sub(now)
+		if remaining > cfg.Prefetch {
+			e.mu.Unlock()
+			continue
+		}
+		// A valid candidate already parked? Nothing to do.
+		if candidate, ok := e.candidates[model]; ok && candidate.Valid && candidate.Value != "" && !entryExpired(candidate, cfg.TTL, now) {
+			e.mu.Unlock()
+			continue
+		}
+		if gate := e.prefetchGate[model]; !gate.IsZero() && now.Sub(gate) < prefetchRetryWindow {
+			e.mu.Unlock()
+			continue
+		}
+		if e.prefetchGate == nil {
+			e.prefetchGate = map[string]time.Time{}
+		}
+		e.prefetchGate[model] = now
+		e.mu.Unlock()
 		e.probeModelAsync(model)
 	}
 }
@@ -1049,7 +1156,13 @@ func (e *probeEngine) noteError(message string) {
 	markStateDirty()
 }
 
-// storeValue saves a freshly captured state as the active value for the model.
+// storeValue saves a freshly captured state for the model with two-slot
+// semantics: while the current active value is still valid it is kept serving
+// and the new value parks in the candidate slot for a seamless hand-off; once
+// the active value expires (or no active value exists) the new value becomes
+// active immediately. This is the "smooth switch" the dashboard relies on:
+// business traffic always overwrites with a currently-valid token while the
+// prefetch machinery replenishes the next one invisibly.
 func (e *probeEngine) storeValue(model, value, source, proxySpec string, cfg probeConfig) {
 	generated := ""
 	expires := ""
@@ -1068,27 +1181,76 @@ func (e *probeEngine) storeValue(model, value, source, proxySpec string, cfg pro
 		Proxy:       proxySpec,
 		Valid:       true,
 	}
+	now := time.Now().UTC()
 	e.mu.Lock()
-	e.values[model] = entry
+	if e.candidates == nil {
+		e.candidates = map[string]stateEntry{}
+	}
+	active, ok := e.values[model]
+	activeUsable := ok && active.Valid && active.Value != "" && !entryExpired(active, cfg.TTL, now)
+	if activeUsable {
+		// Keep serving the old token; park the fresh one as the next slot.
+		e.candidates[model] = entry
+	} else {
+		e.values[model] = entry
+		delete(e.candidates, model)
+	}
 	e.mu.Unlock()
 	markStateDirty()
+}
+
+// entryExpired reports whether a stored value's embedded timestamp plus the
+// TTL has passed; values without a decodable timestamp are treated as usable
+// (expiry cannot be proven).
+func entryExpired(entry stateEntry, ttl time.Duration, now time.Time) bool {
+	if ts, ok := parseTurnStateTimestamp(entry.Value); ok {
+		return !now.Before(ts.Add(ttl))
+	}
+	return false
+}
+
+// promoteCandidateLocked moves a valid candidate into the active slot when
+// the active value is missing or expired. Caller must hold e.mu; returns true
+// when state changed (caller marks dirty).
+func (e *probeEngine) promoteCandidateLocked(model string, cfg probeConfig, now time.Time) bool {
+	candidate, ok := e.candidates[model]
+	if !ok || !candidate.Valid || candidate.Value == "" {
+		return false
+	}
+	if entryExpired(candidate, cfg.TTL, now) {
+		delete(e.candidates, model)
+		return true
+	}
+	active, has := e.values[model]
+	if has && active.Valid && active.Value != "" && !entryExpired(active, cfg.TTL, now) {
+		return false
+	}
+	e.values[model] = candidate
+	delete(e.candidates, model)
+	return true
 }
 
 // activeValueFor returns the model's current healthy baseline value: one that
 // is stored (seed / business observation / manual probe) and still inside the
 // TTL window. Serving does not depend on the probe track being enabled - the
 // baseline is the plugin's cached known-good state and must keep protecting
-// requests while probing stays idle.
+// requests while probing stays idle. Expired actives are seamlessly replaced
+// by a parked candidate when one is available.
 func (e *probeEngine) activeValueFor(model string) string {
 	cfg := currentProbeConfig().Config
+	now := time.Now().UTC()
 	e.mu.Lock()
+	dirty := e.promoteCandidateLocked(model, cfg, now)
 	entry, ok := e.values[model]
 	e.mu.Unlock()
+	if dirty {
+		markStateDirty()
+	}
 	if !ok || !entry.Valid || entry.Value == "" {
 		return ""
 	}
 	if ts, okTime := parseTurnStateTimestamp(entry.Value); okTime {
-		if time.Since(ts) > cfg.TTL {
+		if now.Sub(ts) > cfg.TTL {
 			return ""
 		}
 	}
@@ -1305,6 +1467,22 @@ func probeSummary() map[string]any {
 		if entry.Value != "" {
 			item["value_preview"] = previewValue(entry.Value, turnStatePreviewLength)
 		}
+		// Candidate slot (two-slot smooth hand-off): expose its validity when
+		// a fresh token is parked and waiting for the active one to expire.
+		if candidate, ok := probeTrack.candidates[model]; ok && candidate.Valid && candidate.Value != "" {
+			citem := map[string]any{
+				"source":      candidate.Source,
+				"captured_at": candidate.CapturedAt,
+			}
+			if ts, okTime := parseTurnStateTimestamp(candidate.Value); okTime {
+				expires := ts.Add(cfg.TTL)
+				citem["issued_at"] = ts.Format(time.RFC3339)
+				citem["expires_at"] = expires.Format(time.RFC3339)
+				citem["remaining_seconds"] = int64(expires.Sub(now).Seconds())
+				citem["expired"] = !now.Before(expires)
+			}
+			item["candidate"] = citem
+		}
 		if ts, okTime := parseTurnStateTimestamp(entry.Value); okTime {
 			expires := ts.Add(cfg.TTL)
 			item["issued_at"] = ts.Format(time.RFC3339)
@@ -1398,6 +1576,7 @@ func probeSummary() map[string]any {
 		"exit_fail_threshold":   cfg.ExitFailThreshold,
 		"exit_cooldown_minutes": int(cfg.ExitCooldown / time.Minute),
 		"exit_min_active":       cfg.ExitMinActive,
+		"prefetch_minutes":      int(cfg.Prefetch / time.Minute),
 		"proxy_index":  probeTrack.proxyIndex,
 		"ttl_minutes":      int(cfg.TTL / time.Minute),
 		"window_minutes":   int(cfg.Window / time.Minute),
@@ -1431,5 +1610,6 @@ func probeSummary() map[string]any {
 // probeTrackShutdown is called from plugin.shutdown.
 func probeTrackShutdown() {
 	probeTrack.stop()
+	probeTrack.stopPrefetchWatcher()
 	closePersistence()
 }

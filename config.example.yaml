@@ -88,6 +88,13 @@ plugins:
           # Minimum usable exits kept in rotation (soonest-expiring entries
           # are released early when the usable set would fall below this).
           exit-min-active: 1
+          # ---- two-slot smooth hand-off ------------------------------------
+          # The prefetch watcher probes a model only while its active token's
+          # remaining validity enters this window; the fresh token parks as a
+          # candidate and takes over seamlessly when the active one expires,
+          # so business requests never see an empty slot. Set 0 to disable
+          # the automatic prefetch (fully manual again).
+          prefetch-minutes: 5
           # Degraded-model rejection is ON by default and restored from the
           # state snapshot across reloads; toggle it from the dashboard
           # header (global switch, independent of the probe track).

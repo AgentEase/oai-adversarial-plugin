@@ -284,7 +284,7 @@
     el('probe-priority').textContent=models.length?models[0]:'—';
     el('probe-counts').textContent=Number(probe.probes_ok||0).toLocaleString('zh-CN')+' / '+Number(probe.probes_total||0).toLocaleString('zh-CN');
     el('probe-activity').textContent=probe.last_activity||probe.last_error||'—';
-    el('probe-times').textContent='手动模式 · 有效期 '+(probe.ttl_minutes||55)+'m（按 token 内嵌签发时间推算） · 间隔 '+(probe.interval_seconds||5)+'s · 每出口尝试 '+(probe.attempts_per_proxy||3)+' 次 · 单轮上限 '+(probe.max_attempts_per_round||9)+' 次 · 失败冷却 '+(probe.cooldown_minutes||20)+'m · 疑似阈值 '+(probe.suspect_threshold||3)+' 次';
+    el('probe-times').textContent='手动模式 · 有效期 '+(probe.ttl_minutes||55)+'m（按 token 内嵌签发时间推算） · 到期前预取 '+(probe.prefetch_minutes||5)+'m 平滑接管 · 间隔 '+(probe.interval_seconds||5)+'s · 每出口尝试 '+(probe.attempts_per_proxy||3)+' 次 · 单轮上限 '+(probe.max_attempts_per_round||9)+' 次 · 失败冷却 '+(probe.cooldown_minutes||20)+'m · 疑似阈值 '+(probe.suspect_threshold||3)+' 次';
     const values=probe.values||[];
     const failureByModel={};
     for(const failure of (probe.failures||[])){failureByModel[failure.model]=failure;}
@@ -355,6 +355,14 @@
         bar.append(fill);ttl.append(bar);
       }else if(!expired){
         ttl.textContent=remainingText(entry.expires_at);
+      }
+      if(entry.candidate){
+        const cb=document.createElement('span');
+        cb.className='badge state-ok';
+        const cr=Number(entry.candidate.remaining_seconds);
+        cb.textContent='备胎就绪'+(isNaN(cr)?'':'（'+fmtDuration(cr)+'）');
+        cb.title='已从探测轨预取新 token（来源：'+(entry.candidate.source||'探测轨')+'）；当前值到期后无缝接管，业务无感';
+        ttl.append(cb);
       }
       if(expired){
         const badge=document.createElement('span');

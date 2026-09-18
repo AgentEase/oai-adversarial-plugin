@@ -838,6 +838,113 @@ func synthStateToken(t time.Time) string {
 	return base64.URLEncoding.EncodeToString(raw)
 }
 
+// TestSmoothHandoff drives the two-slot behavior: a fresh capture parks as
+// candidate while the active token still lives; an expired active promotes a
+// parked candidate seamlessly; a capture with no valid active replaces it.
+func TestSmoothHandoff(t *testing.T) {
+	enabled := true
+	probeTrack = &probeEngine{values: map[string]stateEntry{}, failures: map[string]probeFailure{},
+		candidates: map[string]stateEntry{}, prefetchGate: map[string]time.Time{},
+		lastAttempt: map[string]time.Time{},
+		paused:      map[string]bool{}, probing: map[string]bool{}}
+	cfg := parseProbeConfig(probeConfigYAML{Enabled: &enabled, Models: []string{"gpt-6-astra"}})
+	probeTrack.cfg.Config = cfg
+	if cfg.Prefetch != 5*time.Minute {
+		t.Fatalf("default prefetch wrong: %v", cfg.Prefetch)
+	}
+
+	oldToken := synthStateToken(time.Now().Add(-1 * time.Minute))
+	freshToken := synthStateToken(time.Now())
+	probeTrack.storeValue("gpt-6-astra", oldToken, "seed", "", cfg)
+	if got := probeTrack.activeValueFor("gpt-6-astra"); got != oldToken {
+		t.Fatalf("first capture must become active: %q", got)
+	}
+
+	// Fresh capture while active lives: parks in candidate; serving unaffected.
+	probeTrack.storeValue("gpt-6-astra", freshToken, "probe", "direct", cfg)
+	if got := probeTrack.activeValueFor("gpt-6-astra"); got != oldToken {
+		t.Fatalf("active must keep serving while valid: %q", got)
+	}
+	if candidate, ok := probeTrack.candidates["gpt-6-astra"]; !ok || candidate.Value != freshToken {
+		t.Fatalf("fresh capture must park as candidate: %+v", candidate)
+	}
+
+	// Simulate active expiry: next lookup promotes the candidate seamlessly.
+	probeTrack.mu.Lock()
+	probeTrack.values["gpt-6-astra"] = stateEntry{Model: "gpt-6-astra",
+		Value: synthStateToken(time.Now().Add(-2 * cfg.TTL)), Valid: true}
+	probeTrack.mu.Unlock()
+	if got := probeTrack.activeValueFor("gpt-6-astra"); got != freshToken {
+		t.Fatalf("expired active must promote candidate: %q", got)
+	}
+	if _, ok := probeTrack.candidates["gpt-6-astra"]; ok {
+		t.Fatal("promoted candidate must leave the slot")
+	}
+
+	// No valid active: a capture becomes active directly.
+	probeTrack.mu.Lock()
+	delete(probeTrack.values, "gpt-6-astra")
+	probeTrack.mu.Unlock()
+	newer := synthStateToken(time.Now())
+	probeTrack.storeValue("gpt-6-astra", newer, "probe", "", cfg)
+	if got := probeTrack.activeValueFor("gpt-6-astra"); got != newer {
+		t.Fatalf("capture must activate when no valid active: %q", got)
+	}
+}
+
+// TestPrefetchScanTriggersOnlyNearExpiry verifies the watcher's trigger: a
+// model outside the window is untouched, a near-expiry model gets one
+// throttled attempt, and a parked candidate suppresses further attempts.
+func TestPrefetchScanTriggersOnlyNearExpiry(t *testing.T) {
+	enabled := true
+	probeTrack = &probeEngine{values: map[string]stateEntry{}, failures: map[string]probeFailure{},
+		candidates: map[string]stateEntry{}, prefetchGate: map[string]time.Time{},
+		lastAttempt: map[string]time.Time{},
+		paused:      map[string]bool{}, probing: map[string]bool{}}
+	cfg := parseProbeConfig(probeConfigYAML{Enabled: &enabled,
+		Models: []string{"gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-luna"}})
+	probeTrack.cfg.Config = cfg
+
+	fresh := synthStateToken(time.Now().Add(-10 * time.Minute))
+	probeTrack.values["gpt-6-astra"] = stateEntry{Model: "gpt-6-astra", Value: fresh, Valid: true}
+	// sol: near expiry (remaining <= prefetch window) but feature disabled.
+	nearly := synthStateToken(time.Now().Add(-(cfg.TTL - 2*time.Minute)))
+	probeTrack.values["gpt-5.6-sol"] = stateEntry{Model: "gpt-5.6-sol", Value: nearly, Valid: true}
+
+	// Disabled prefetch: scan must not touch anything.
+	probeTrack.cfg.Config.Prefetch = 0
+	probeTrack.prefetchScan()
+	if !probeTrack.prefetchGate["gpt-5.6-sol"].IsZero() {
+		t.Fatal("disabled prefetch must not gate")
+	}
+
+	// Enable and scan: only the near-expiry model gets an attempt.
+	probeTrack.cfg.Config.Prefetch = cfg.Prefetch
+	probeTrack.prefetchScan()
+	if probeTrack.prefetchGate["gpt-6-astra"] != (time.Time{}) {
+		t.Fatal("fresh model must not be probed")
+	}
+	if probeTrack.prefetchGate["gpt-5.6-sol"].IsZero() {
+		t.Fatal("near-expiry model must be probed")
+	}
+	// Second scan within the retry window is throttled (gate unchanged).
+	gate := probeTrack.prefetchGate["gpt-5.6-sol"]
+	probeTrack.prefetchScan()
+	if !probeTrack.prefetchGate["gpt-5.6-sol"].Equal(gate) {
+		t.Fatal("retry window must throttle repeats")
+	}
+	// Parked candidate suppresses further attempts even near expiry.
+	candidate := synthStateToken(time.Now())
+	probeTrack.candidates["gpt-5.6-sol"] = stateEntry{Model: "gpt-5.6-sol", Value: candidate, Valid: true}
+	probeTrack.mu.Lock()
+	probeTrack.prefetchGate["gpt-5.6-sol"] = time.Time{}
+	probeTrack.mu.Unlock()
+	probeTrack.prefetchScan()
+	if !probeTrack.prefetchGate["gpt-5.6-sol"].IsZero() {
+		t.Fatal("a parked candidate must suppress prefetch")
+	}
+}
+
 // TestProbeSummaryShape ensures the management payload carries the expected keys.
 func TestProbeSummaryShape(t *testing.T) {
 	summary := probeSummary()

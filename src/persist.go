@@ -39,6 +39,7 @@ type persistedState struct {
 	RejectDegraded *bool           `json:"reject_degraded,omitempty"`
 	Paused         []string        `json:"paused,omitempty"`
 	Values         []stateEntry    `json:"values,omitempty"`
+	Candidates     []stateEntry    `json:"candidates,omitempty"`
 	Failures       []probeFailure  `json:"failures,omitempty"`
 	Suspects       []probeSuspicion `json:"suspects,omitempty"`
 	Business       []businessDegradation `json:"business,omitempty"`
@@ -137,6 +138,9 @@ func collectState() persistedState {
 	}
 	for _, entry := range probeTrack.values {
 		state.Values = append(state.Values, entry)
+	}
+	for _, entry := range probeTrack.candidates {
+		state.Candidates = append(state.Candidates, entry)
 	}
 	for _, failure := range probeTrack.failures {
 		state.Failures = append(state.Failures, failure)
@@ -253,6 +257,14 @@ func applyPersistedState(state persistedState) {
 	for _, entry := range state.Values {
 		if strings.TrimSpace(entry.Model) != "" {
 			probeTrack.values[entry.Model] = entry
+		}
+	}
+	if probeTrack.candidates == nil {
+		probeTrack.candidates = map[string]stateEntry{}
+	}
+	for _, entry := range state.Candidates {
+		if strings.TrimSpace(entry.Model) != "" {
+			probeTrack.candidates[entry.Model] = entry
 		}
 	}
 	if probeTrack.failures == nil {
