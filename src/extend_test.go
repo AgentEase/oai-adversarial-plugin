@@ -1109,6 +1109,181 @@ func TestPauseAbortsInFlightRound(t *testing.T) {
 	}
 }
 
+// TestStopAbortsAllInFlight verifies the v1.5.21 global brake: the dashboard
+// "stop" control terminates every in-flight probe (sequential or per-model
+// asynchronous) at the next attempt boundary, clears the in-round suspicion
+// counters, and leaves the engine idle without failure annotations.
+func TestStopAbortsAllInFlight(t *testing.T) {
+	enabled := true
+	interval := 2
+	probeTrack = &probeEngine{
+		values: map[string]stateEntry{}, failures: map[string]probeFailure{},
+		candidates: map[string]stateEntry{}, prefetchGate: map[string]time.Time{},
+		lastAttempt: map[string]time.Time{},
+		paused:      map[string]bool{}, probing: map[string]bool{},
+	}
+	cfg := parseProbeConfig(probeConfigYAML{
+		Enabled:         &enabled,
+		Models:          []string{"gpt-6-astra", "gpt-5.6-sol"},
+		IntervalSeconds: &interval,
+	})
+	cfg.CredFile = "/nonexistent/cred.json" // fails fast; exercises the real loop
+	probeTrack.cfg.Config = cfg
+
+	done := make(chan struct{})
+	for _, model := range []string{"gpt-6-astra", "gpt-5.6-sol"} {
+		go func(name string) {
+			probeTrack.probeModel(name, cfg, make(chan struct{}))
+			done <- struct{}{}
+		}(model)
+	}
+	// Wait for both rounds to land their first attempts.
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		probeTrack.mu.Lock()
+		records := len(probeTrack.history)
+		probeTrack.mu.Unlock()
+		if records >= 2 {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	probeTrack.stop()
+	for i := 0; i < 2; i++ {
+		select {
+		case <-done:
+		case <-time.After(6 * time.Second):
+			t.Fatal("the global stop must abort every in-flight round")
+		}
+	}
+	probeTrack.mu.Lock()
+	total := probeTrack.probesTotal
+	annotationA := probeTrack.failures["gpt-6-astra"]
+	annotationB := probeTrack.failures["gpt-5.6-sol"]
+	probing := len(probeTrack.probing)
+	suspects := len(probeTrack.suspects)
+	runNote := probeTrack.runNote
+	probeTrack.mu.Unlock()
+	time.Sleep(3 * time.Second)
+	probeTrack.mu.Lock()
+	after := probeTrack.probesTotal
+	probeTrack.mu.Unlock()
+	if after != total {
+		t.Fatalf("stopped rounds must not keep probing: %d -> %d", total, after)
+	}
+	if annotationA.Attempts != 0 || annotationB.Attempts != 0 {
+		t.Fatalf("a global stop must not write failure annotations: %+v / %+v", annotationA, annotationB)
+	}
+	if probing != 0 {
+		t.Fatalf("no model may remain marked as probing: %d", probing)
+	}
+	if suspects != 0 {
+		t.Fatalf("in-round suspicion counters must be cleared: %d", suspects)
+	}
+	if !strings.Contains(runNote, "已停止所有探测") {
+		t.Fatalf("the stop must be reported on the dashboard: %q", runNote)
+	}
+}
+
+// TestWatcherSilentAfterStop verifies the v1.5.22 halt semantics: after a
+// global stop the automatic hand-off watcher stays silent (no prefetch gate
+// is armed for an expiring baseline), while an explicit request re-ignites
+// the engine.
+func TestWatcherSilentAfterStop(t *testing.T) {
+	enabled := true
+	probeTrack = &probeEngine{
+		values: map[string]stateEntry{}, failures: map[string]probeFailure{},
+		candidates: map[string]stateEntry{}, prefetchGate: map[string]time.Time{},
+		lastAttempt: map[string]time.Time{},
+		paused:      map[string]bool{}, probing: map[string]bool{},
+	}
+	cfg := parseProbeConfig(probeConfigYAML{Enabled: &enabled, Models: []string{"gpt-6-astra"}})
+	cfg.CredFile = "/nonexistent/cred.json"
+	probeTrack.cfg.Config = cfg
+	// A baseline about to expire: the watcher would normally probe it.
+	probeTrack.values["gpt-6-astra"] = stateEntry{Model: "gpt-6-astra",
+		Value: synthStateToken(time.Now().Add(-(cfg.TTL - 2*time.Minute))), Valid: true}
+
+	probeTrack.stop()
+	probeTrack.mu.Lock()
+	halted := probeTrack.halted
+	probeTrack.mu.Unlock()
+	if !halted {
+		t.Fatal("the global stop must halt the engine")
+	}
+	probeTrack.prefetchScan()
+	if !probeTrack.prefetchGate["gpt-6-astra"].IsZero() {
+		t.Fatal("a halted engine must not arm the hand-off watcher")
+	}
+
+	// An explicit request re-ignites the engine (and legitimately spawns a
+	// probe that fails fast on the missing credential file).
+	probeTrack.probeModelAsync("gpt-6-astra")
+	probeTrack.mu.Lock()
+	reignited := !probeTrack.halted
+	probeTrack.mu.Unlock()
+	if !reignited {
+		t.Fatal("an explicit probe request must re-ignite the engine")
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		probeTrack.mu.Lock()
+		busy := probeTrack.probing["gpt-6-astra"]
+		probeTrack.mu.Unlock()
+		if !busy {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// TestExplicitRequestKeepsHaltWhileBusy verifies the v1.5.23 refinement: an
+// explicit request that cannot start anything (the model is busy) must not
+// silently lift the halt.
+func TestExplicitRequestKeepsHaltWhileBusy(t *testing.T) {
+	enabled := true
+	probeTrack = &probeEngine{
+		values: map[string]stateEntry{}, failures: map[string]probeFailure{},
+		candidates: map[string]stateEntry{}, prefetchGate: map[string]time.Time{},
+		lastAttempt: map[string]time.Time{},
+		paused:      map[string]bool{}, probing: map[string]bool{},
+	}
+	cfg := parseProbeConfig(probeConfigYAML{Enabled: &enabled, Models: []string{"gpt-6-astra"}})
+	cfg.CredFile = "/nonexistent/cred.json"
+	probeTrack.cfg.Config = cfg
+
+	probeTrack.stop() // halted
+	probeTrack.probing["gpt-6-astra"] = true
+	probeTrack.probeModelAsync("gpt-6-astra")
+	probeTrack.mu.Lock()
+	halted := probeTrack.halted
+	probeTrack.mu.Unlock()
+	if !halted {
+		t.Fatal("a busy model must not lift the halt without starting anything")
+	}
+	// Once the model is free, an explicit request does start and re-ignites.
+	probeTrack.mu.Lock()
+	delete(probeTrack.probing, "gpt-6-astra")
+	probeTrack.mu.Unlock()
+	probeTrack.probeModelAsync("gpt-6-astra")
+	probeTrack.mu.Lock()
+	reignited := !probeTrack.halted
+	probeTrack.mu.Unlock()
+	if !reignited {
+		t.Fatal("a startable explicit request must re-ignite the engine")
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		probeTrack.mu.Lock()
+		busy := probeTrack.probing["gpt-6-astra"]
+		probeTrack.mu.Unlock()
+		if !busy {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
 // TestPoolBudgetShare verifies the v1.5.19 adaptive per-round budget: plain
 // egresses contribute attempts-per-proxy tries each, rotating pools
 // contribute their own pool-attempts budget (default 100), an explicit

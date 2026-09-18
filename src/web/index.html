@@ -53,7 +53,7 @@
       <div class="card"><div class="label">最近探测活动</div><div class="number" id="probe-activity" style="font-size:14px">—</div></div>
     </section>
     <section class="panel">
-      <div class="toolbar"><h2>模型状态值（健康基线）</h2><div class="actions"><button id="round-start" type="button" class="switch-btn" title="手动开始一轮探测：按优先级依次尝试各模型（仍在有效期内、未临近到期的会自动跳过），获得模型一致且长度符合的 state 后才更新持久化基线">开始探测</button><button id="round-stop" type="button" title="停止当前探测轮（中途退出，已获得的值保留）">停止</button><span id="probe-times" class="probe-note">—</span></div></div>
+      <div class="toolbar"><h2>模型状态值（健康基线）</h2><div class="actions"><button id="round-start" type="button" class="switch-btn" title="手动开始一轮探测：按优先级依次尝试各模型（仍在有效期内、未临近到期的会自动跳过），获得模型一致且长度符合的 state 后才更新持久化基线">开始探测</button><button id="round-stop" type="button" title="停止所有探测：终止整轮与全部在途的单模型探测（在下一个尝试边界生效，已获得的值保留）">停止</button><span id="probe-times" class="probe-note">—</span></div></div>
       <div class="table-wrap" id="probe-values-wrap"><table>
         <thead><tr><th>模型</th><th>状态长度</th><th>来源</th><th>签发时间（UTC+8）</th><th>到期时间（UTC+8）</th><th>真实剩余</th><th>控制</th></tr></thead>
         <tbody id="probe-values"></tbody>
@@ -270,6 +270,11 @@
       el('probe-dot').style.background='#16a34a';
       el('probe-status').textContent='运行中';
       el('probe-status').className='number ok';
+    }else if(probe.halted){
+      el('probe-label').textContent='探测：已停止';
+      el('probe-dot').style.background='var(--warn)';
+      el('probe-status').textContent='已停止';
+      el('probe-status').className='number warn';
     }else if(enabled){
       el('probe-label').textContent='探测：待命';
       el('probe-dot').style.background='var(--muted)';
@@ -284,7 +289,7 @@
     const roundStart=el('round-start');
     roundStart.disabled=probe.running||!enabled;
     roundStart.textContent=probe.running?'探测中…':'开始探测';
-    el('round-stop').disabled=!probe.running;
+    el('round-stop').disabled=false;
     const models=probe.models||[];
     el('probe-priority').textContent=models.length?models[0]:'—';
     el('probe-counts').textContent=Number(probe.probes_ok||0).toLocaleString('zh-CN')+' / '+Number(probe.probes_total||0).toLocaleString('zh-CN');

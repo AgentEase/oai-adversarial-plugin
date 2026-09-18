@@ -211,6 +211,8 @@ type probeEngine struct {
 	lastAttempt    map[string]time.Time
 	paused         map[string]bool
 	probing        map[string]bool
+	abortCh        chan struct{}
+	halted         bool
 	rejectDegraded bool
 	history        []probeRecord
 	proxyIndex     int
@@ -454,6 +456,9 @@ func (e *probeEngine) start() {
 	e.stopCh = make(chan struct{})
 	stop := e.stopCh
 	cfg := e.cfg.Config
+	// An explicit start re-ignites the engine: the automatic hand-off watcher
+	// resumes replenishing expiring baselines.
+	e.halted = false
 	e.mu.Unlock()
 	markStateDirty()
 	go e.roundLoop(cfg, stop)
@@ -462,6 +467,24 @@ func (e *probeEngine) start() {
 func (e *probeEngine) stop() {
 	e.mu.Lock()
 	e.stopLocked()
+	if e.abortCh != nil {
+		close(e.abortCh)
+	}
+	// A fresh brake channel for future explicit requests: the global stop
+	// terminates everything in flight now, but does not block new rounds.
+	e.abortCh = make(chan struct{})
+	// Halt the engine: the automatic hand-off (prefetch) watcher must also
+	// stay silent until an explicit start / probe-now / resume re-ignites it.
+	e.halted = true
+	// In-round suspicion counters describe rounds that no longer exist;
+	// full failure annotations and business marks (non-round state) remain.
+	if len(e.suspects) > 0 {
+		e.suspects = map[string]probeSuspicion{}
+	}
+	runNote := "已停止所有探测（整轮与全部在途探测；在下一个尝试边界生效）"
+	if e.running || len(e.probing) > 0 {
+		e.runNote = runNote
+	}
 	e.mu.Unlock()
 	markStateDirty()
 }
@@ -472,6 +495,19 @@ func (e *probeEngine) stopLocked() {
 	}
 	e.running = false
 	e.stopCh = nil
+}
+
+// abortSignal returns the current global brake channel. All in-flight probe
+// rounds watch it so the dashboard's "stop" control can terminate every
+// running probe (sequential round and per-model asynchronous ones alike) at
+// the next attempt boundary.
+func (e *probeEngine) abortSignal() <-chan struct{} {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.abortCh == nil {
+		e.abortCh = make(chan struct{})
+	}
+	return e.abortCh
 }
 
 // roundLoop drives one user-initiated round: every configured model is tried
@@ -637,6 +673,14 @@ func (e *probeEngine) prefetchScan() {
 	if !cfg.Enabled || cfg.Prefetch <= 0 {
 		return
 	}
+	e.mu.Lock()
+	halted := e.halted
+	e.mu.Unlock()
+	if halted {
+		// The operator stopped all probing; the automatic hand-off watcher
+		// waits for an explicit restart before replenishing again.
+		return
+	}
 	now := time.Now().UTC()
 	for _, model := range cfg.Models {
 		e.mu.Lock()
@@ -676,27 +720,53 @@ func (e *probeEngine) prefetchScan() {
 		}
 		e.prefetchGate[model] = now
 		e.mu.Unlock()
-		e.probeModelAsync(model)
+		e.probeModelAsyncFromWatcher(model)
 	}
 }
 
 // probeModelAsync launches one background probe round for a single model on
 // explicit user request (the row's "probe now" control or resuming a paused
-// model). It is independent of the sequential round control: different models
-// may be probed concurrently, and a model that is already being probed is
-// never started twice.
+// model). An explicit request also re-ignites the engine after a global stop.
+// It is independent of the sequential round control: different models may be
+// probed concurrently, and a model that is already being probed is never
+// started twice.
 func (e *probeEngine) probeModelAsync(model string) {
+	e.probeModelAsyncImpl(model, true)
+}
+
+// probeModelAsyncFromWatcher launches the automatic hand-off probe. Unlike
+// the explicit entry point it never re-ignites a halted engine: a scan that
+// raced with a dashboard stop must not resurrect probing.
+func (e *probeEngine) probeModelAsyncFromWatcher(model string) {
+	e.probeModelAsyncImpl(model, false)
+}
+
+func (e *probeEngine) probeModelAsyncImpl(model string, explicit bool) {
 	model = strings.TrimSpace(model)
 	if model == "" {
 		return
 	}
 	e.mu.Lock()
-	cfg := e.cfg.Config
-	busy := e.probing[model]
-	e.mu.Unlock()
-	if !cfg.Enabled || busy {
+	prevHalted := e.halted
+	if explicit {
+		e.halted = false
+	}
+	if e.halted {
+		e.mu.Unlock()
 		return
 	}
+	cfg := e.cfg.Config
+	busy := e.probing[model]
+	if !cfg.Enabled || busy {
+		// Nothing will start: an explicit request must not silently lift the
+		// halt just because the model was busy or the track is disabled.
+		if explicit && prevHalted {
+			e.halted = true
+		}
+		e.mu.Unlock()
+		return
+	}
+	e.mu.Unlock()
 	go e.probeModel(model, cfg, make(chan struct{}))
 }
 
@@ -1175,9 +1245,15 @@ func (e *probeEngine) probeModel(model string, cfg probeConfig, stop chan struct
 	lastError := ""
 	lastLength := 0
 	cursor := 0
+	brake := e.abortSignal()
 	for attempts < maxAttempts {
 		select {
 		case <-stop:
+			return
+		case <-brake:
+			// Global stop (dashboard "stop" control): leave at once without a
+			// failure annotation - it is an operator command, not a probe
+			// outcome. The suspicion counters are cleared by stop().
 			return
 		default:
 		}
@@ -1226,6 +1302,8 @@ func (e *probeEngine) probeModel(model string, cfg probeConfig, stop chan struct
 		select {
 		case <-time.After(cfg.ProbeInterval):
 		case <-stop:
+			return
+		case <-brake:
 			return
 		}
 	}
@@ -1831,6 +1909,7 @@ func probeSummary() map[string]any {
 		"paused":           paused,
 		"reject_degraded":  probeTrack.rejectDegraded,
 		"running":      probeTrack.running,
+		"halted":       probeTrack.halted,
 		"run_started_at":  probeTrack.runStartedAt,
 		"run_finished_at": probeTrack.runFinishedAt,
 		"run_note":        probeTrack.runNote,
