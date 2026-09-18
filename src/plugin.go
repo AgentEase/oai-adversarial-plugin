@@ -12,7 +12,7 @@ import (
 
 const (
 	pluginID                   = "timezone-override"
-	pluginVersion              = "1.5.10"
+	pluginVersion              = "1.5.11"
 	historyLimit               = 200
 	schemaVersion              = 6
 	streamChunkHeaderInitIndex = -1
@@ -216,6 +216,10 @@ func intercept(raw []byte) (interceptResponse, error) {
 			Model: req.Model, RequestedModel: req.RequestedModel,
 			Time:             time.Now().UTC().Format(time.RFC3339Nano),
 			DegradedRejected: true,
+			// The request never reaches normalization, so the conversion keeps
+			// empty slices (never nil) - a nil slice marshals as JSON null and
+			// the dashboard expects arrays.
+			conversion: conversion{Target: targetTimezone, Original: []string{}, Paths: []string{}},
 		})
 		payload, _ := json.Marshal(map[string]any{"error": map[string]string{
 			"type": "degraded_model_rejected", "message": message,
@@ -318,7 +322,16 @@ func (s *auditState) snapshot() map[string]any {
 	mismatches := 0
 	overridden := 0
 	for i := range s.records {
-		records[len(s.records)-1-i] = s.records[i]
+		record := s.records[i]
+		// Defensive: legacy records may carry nil slices from snapshots;
+		// the dashboard parses these as arrays.
+		if record.Original == nil {
+			record.Original = []string{}
+		}
+		if record.Paths == nil {
+			record.Paths = []string{}
+		}
+		records[len(s.records)-1-i] = record
 		if s.records[i].ModelMismatch {
 			mismatches++
 		}

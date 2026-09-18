@@ -380,7 +380,9 @@ func TestProbeControlEndpoint(t *testing.T) {
 // TestInterceptDegradedRejection covers the full rejection path: with the
 // switch on and a degradation-annotated failure present, intercept() must
 // terminate the request with a 403 and a Chinese JSON message, and record
-// the rejection without attempting timezone normalization.
+// the rejection without attempting timezone normalization. The rejection
+// record must carry empty arrays (never nil) for original/paths so that the
+// dashboard JSON never contains null for them.
 func TestInterceptDegradedRejection(t *testing.T) {
 	history = auditState{}
 	probeTrack = &probeEngine{values: map[string]stateEntry{}, failures: map[string]probeFailure{},
@@ -405,6 +407,13 @@ func TestInterceptDegradedRejection(t *testing.T) {
 	record := history.snapshot()["records"].([]auditRecord)[0]
 	if !record.DegradedRejected {
 		t.Fatalf("rejection must be recorded: %+v", record)
+	}
+	if record.Original == nil || record.Paths == nil {
+		t.Fatalf("rejection record must keep empty arrays, not nil: %+v", record)
+	}
+	encoded, _ := json.Marshal(record)
+	if bytes.Contains(encoded, []byte(`"original":null`)) || bytes.Contains(encoded, []byte(`"paths":null`)) {
+		t.Fatalf("rejection record must not marshal null arrays: %s", encoded)
 	}
 	// With the switch off the same request passes through to normalization.
 	probeTrack.setRejectDegraded(false)

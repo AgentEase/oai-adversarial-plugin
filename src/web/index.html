@@ -167,7 +167,8 @@
         const code=document.createElement('code');code.textContent=record.upstream_model;upstream.append(code);
         if(record.model_mismatch){const badge=document.createElement('span');badge.className='badge mismatch';badge.textContent='模型不一致';upstream.append(badge);}
       }else{upstream.textContent='—';upstream.classList.add('none');}
-      cell(tr,record.original.length?record.original.join('、'):'无',record.original.length?'':'none');
+      const original=record.original||[];
+      cell(tr,original.length?original.join('、'):'无',original.length?'':'none');
       const target=cell(tr,'');const code=document.createElement('code');code.textContent=record.target;target.append(code);
       const action=cell(tr,'');
       if(record.degraded_rejected){const badge=document.createElement('span');badge.className='badge probe-fail';badge.textContent='降智已拦截';badge.title='请求因模型疑似风控降智被插件拦截（HTTP 403）';action.append(badge);}

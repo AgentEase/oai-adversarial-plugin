@@ -279,8 +279,18 @@ func applyPersistedState(state persistedState) {
 
 	history.mu.Lock()
 	if len(state.Records) > 0 {
-		recordsCopy := make([]auditRecord, len(state.Records))
-		copy(recordsCopy, state.Records)
+		recordsCopy := make([]auditRecord, 0, len(state.Records))
+		for _, record := range state.Records {
+			// Repair legacy snapshots: nil slices must become empty arrays so
+			// the dashboard can render them.
+			if record.Original == nil {
+				record.Original = []string{}
+			}
+			if record.Paths == nil {
+				record.Paths = []string{}
+			}
+			recordsCopy = append(recordsCopy, record)
+		}
 		if len(recordsCopy) > historyLimit {
 			recordsCopy = recordsCopy[len(recordsCopy)-historyLimit:]
 		}
