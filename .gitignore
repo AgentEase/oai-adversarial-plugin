@@ -1,0 +1,26 @@
+# Build artifacts
+/build/
+*.so
+*.dylib
+*.dll
+*.test
+*.h
+
+# Go workspace
+go.work
+go.work.sum
+
+# Local runtime state
+*.log
+/proxies.conf
+/config.yaml
+
+# Editor / IDE
+.idea/
+.vscode/
+*.swp
+*~
+
+# OS
+.DS_Store
+Thumbs.db

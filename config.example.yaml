@@ -1,0 +1,80 @@
+# Example configuration for the CPA Adversarial Plugin (plugin id: timezone-override).
+# Copy the block below into your CPA config.yaml under `plugins.configs`.
+#
+# Notes:
+# - Only *.enabled* and the plugin id are required to load the plugin.
+# - Every listed field is hot-reloaded: edit the file and CPA reconfigures the
+#   plugin without restarting the container.
+# - All secrets (proxy URLs) should live in the dedicated proxies file below,
+#   not in config.yaml.
+
+plugins:
+  enabled: true
+  dir: "/CLIProxyAPI/logs/.plugins"
+  configs:
+    # ---- plugin id (must match the installed .so file name) -----------------
+    timezone-override:
+      enabled: true
+      priority: 100
+
+      # ---- request-side X-Codex-Turn-State rewrite --------------------------
+      turn-state-override:
+        # Master switch: when enabled, matching requests get the header value
+        # replaced before reaching the upstream.
+        enabled: true
+
+        # Model prefixes to rewrite (case-insensitive prefix match).
+        models:
+          - gpt-6-astra
+
+        # Fallback static value used when the probe track is disabled or has no
+        # fresh value yet. Only the pristine 292-byte state is considered valid
+        # by the probe acceptance rules; replace this with your own token.
+        value: "REPLACE_WITH_YOUR_TOKEN"
+
+        # true  = always replace an existing client value
+        # false = only fill when the client did not send a value
+        force: true
+
+        # ---- probe track ----------------------------------------------------
+        probe:
+          enabled: true
+
+          # Probe priority order: the first model is refreshed first.
+          models:
+            - gpt-6-astra
+            - gpt-5.6-sol
+            - gpt-5.6-luna
+            - gpt-5.6-terra
+
+          # Credential file with access_token/account_id (auth JSON as produced
+          # by CPA's OAuth flow). Keep it outside the repository.
+          cred-file: "/root/.cli-proxy-api/your-codex-auth.json"
+
+          # Dedicated secrets file with one egress per line:
+          #   direct
+          #   socks5://user:pass@host:port
+          #   http://user:pass@host:port
+          # Rotated in order; each egress is retried attempts-per-proxy times
+          # before the next one is used.
+          proxies-file: "/CLIProxyAPI/logs/.plugins/proxies.conf"
+
+          # Cached state is considered valid for ttl-minutes; the last
+          # probe-window-minutes before expiry trigger a refresh.
+          ttl-minutes: 55
+          probe-window-minutes: 5
+
+          # Scheduler cadence.
+          scan-interval-seconds: 30
+          probe-interval-seconds: 5
+
+          # Retry policy: N attempts per egress, then rotate; the whole round
+          # gives up after max-attempts-per-round attempts and the model is
+          # annotated as failed on the dashboard until the next success.
+          attempts-per-proxy: 3
+          max-attempts-per-round: 30
+
+          # Upstream request settings for each probe.
+          timeout-seconds: 60
+          prompt: "hi"
+          upstream-url: "https://chatgpt.com/backend-api/codex/responses"
