@@ -77,20 +77,24 @@ plugins:
           # max-attempts-per-round: 0   # 0/absent = auto (egress count x 3)
           cooldown-minutes: 20
           # ---- egress pool rotation (IPv4/IPv6 mixed friendly) -----------
-          # An egress that fails to obtain a healthy state (length anomaly,
-          # model mismatch or transport errors) this many times in a row is
-          # temporarily removed from rotation; it returns automatically after
-          # exit-cooldown-minutes (set 0 to disable the removal). IPv6 exits
-          # can be added to the proxies file as socks5h://[2001:db8::1]:1080
-          # or http://[2001:db8::1]:8080 and are pooled with IPv4 exits.
+          # A plain (fixed-endpoint) egress that fails to obtain a healthy
+          # state (length anomaly, model mismatch or transport errors) this
+          # many times in a row is temporarily removed from rotation; it
+          # returns automatically after exit-cooldown-minutes (set 0 to
+          # disable the removal). IPv6 exits can be added to the proxies file
+          # as socks5h://[2001:db8::1]:1080 or http://[2001:db8::1]:8080
+          # and are pooled with IPv4 exits.
           exit-fail-threshold: 3
           exit-cooldown-minutes: 180
           # Rotating pools (one endpoint that presents many source IPs, for
-          # example a local IPv6 /64 dynamic proxy) are benched far more
-          # reluctantly: a streak of pool-threshold failures is required, so
-          # "another draw" from the pool is always tried first. Mark such an
-          # entry with a trailing comment in the proxies file:
+          # example a local IPv6/64 dynamic proxy) are NEVER benched: every
+          # connection draws a fresh address, so a failing streak says
+          # nothing about the endpoint being broken. Their failures keep
+          # accumulating for the dashboard, but no cool-down is applied.
+          # Mark such an entry with a trailing comment in the proxies file:
           #   socks5h://10.255.1.1:18321  # pool:ipv6
+          # exit-pool-fail-threshold is kept for backward compatibility only;
+          # it no longer participates in the cool-down decision.
           exit-pool-fail-threshold: 10
           # Minimum usable exits kept in rotation (soonest-expiring entries
           # are released early when the usable set would fall below this).

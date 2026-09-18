@@ -39,7 +39,7 @@
         <a class="primary" id="management-login" target="_top">返回 CPA 管理页</a>
       </div>
       <div class="table-wrap hidden" id="results"><table>
-        <thead><tr><th>请求时间 · 洛杉矶</th><th>模型</th><th>上游响应模型</th><th>原时区</th><th>替换后时区</th><th>处理方式</th><th>X-Codex-Turn-State</th></tr></thead>
+        <thead><tr><th>请求时间（UTC+8）</th><th>模型</th><th>上游响应模型</th><th>原时区</th><th>替换后时区</th><th>处理方式</th><th>X-Codex-Turn-State</th></tr></thead>
         <tbody id="rows"></tbody>
       </table></div>
       <div class="footer"><span>保留最近 200 条记录 · 本地快照自动恢复</span><span>自动复用 CPA 登录</span></div>
@@ -62,7 +62,7 @@
     <section class="panel">
       <div class="toolbar"><h2>探测轨迹</h2><div class="actions"><span class="probe-note">按最新在前，最多 200 条</span></div></div>
       <div class="table-wrap" id="probe-history-wrap"><table>
-        <thead><tr><th>时间（UTC）</th><th>模型</th><th>出口</th><th>结果</th><th>耗时</th><th>说明</th></tr></thead>
+        <thead><tr><th>时间（UTC+8）</th><th>模型</th><th>出口</th><th>结果</th><th>耗时</th><th>说明</th></tr></thead>
         <tbody id="probe-history"></tbody>
       </table></div>
     </section>
@@ -75,7 +75,7 @@
       <div class="card"><div class="label">冷却策略</div><div class="number" id="pool-policy" style="font-size:14px">—</div></div>
     </section>
     <section class="panel">
-      <div class="toolbar"><h2>代理出口池</h2><div class="actions"><span class="probe-note" id="pool-note">轮询探测；连续失败达阈值的出口短暂移出池子</span></div></div>
+      <div class="toolbar"><h2>代理出口池</h2><div class="actions"><span class="probe-note" id="pool-note">轮询探测；普通出口连续失败达阈值短暂移出池子，轮换池（# pool:）永不冷却</span></div></div>
       <div class="table-wrap" id="pool-wrap"><table>
         <thead><tr><th>出口</th><th>类型</th><th>状态</th><th>连续失败</th><th>冷却至（UTC+8）</th><th>剩余冷却</th><th>最后错误</th></tr></thead>
         <tbody id="pool-rows"></tbody>
@@ -88,7 +88,7 @@
   const el = id => document.getElementById(id);
   const prefix = location.pathname.split('/v0/resource/plugins/')[0];
   const endpoint = prefix + '/v0/management/timezone-override/requests';
-  const clock = new Intl.DateTimeFormat('zh-CN',{timeZone:'America/Los_Angeles',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false});
+  const clock = new Intl.DateTimeFormat('zh-CN',{timeZone:'Asia/Shanghai',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false});
   // Token-derived validity is displayed in UTC+8 (Asia/Shanghai) per request.
   const shanghai = new Intl.DateTimeFormat('zh-CN',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false});
   function fmtBeijing(value){if(!value)return '—';const date=new Date(value);if(isNaN(date.getTime()))return String(value);return shanghai.format(date).replace(/\//g,'-');}
@@ -232,7 +232,7 @@
     const poolThreshold=probe.exit_pool_fail_threshold||10;
     const minutes=probe.exit_cooldown_minutes!==undefined?probe.exit_cooldown_minutes:180;
     const minActive=probe.exit_min_active||1;
-    el('pool-policy').textContent='普通出口 '+threshold+' 次失败 / 多出口池 '+poolThreshold+' 次失败 → 冷却 '+(minutes>0?minutes+' 分钟':'关闭');
+    el('pool-policy').textContent='普通出口连续 '+threshold+' 次失败 → 冷却 '+(minutes>0?minutes+' 分钟':'关闭')+' · 轮换池永不冷却';
     const frag=document.createDocumentFragment();
     for(const item of items){
       const tr=document.createElement('tr');
@@ -332,7 +332,7 @@
         }else{
           badge.textContent='上次探测 '+failure.attempts+' 次失败 · 可再次手动探测';
         }
-        badge.title=(failure.last_error||'')+'（'+failure.rounds+' 轮，最后于 '+(failure.failed_at||'').replace('T',' ').slice(0,19)+' UTC；探测已改为手动模式，不会自动开始新一轮）';
+        badge.title=(failure.last_error||'')+'（'+failure.rounds+' 轮，最后于 '+fmtBeijing(failure.failed_at)+'（UTC+8）；探测已改为手动模式，不会自动开始新一轮）';
         ttl.append(badge);
       }else if(businessMark){
         const badge=document.createElement('span');
@@ -396,9 +396,10 @@
     const hfrag=document.createDocumentFragment();
     for(const record of history){
       const tr=document.createElement('tr');
-      cell(tr,record.time?record.time.replace('T',' ').slice(0,19):'—','time');
+      cell(tr,record.time?fmtBeijing(record.time):'—','time');
       const model=cell(tr,record.model,'model');
-      cell(tr,proxyLabel(record.proxy));
+      const egress=cell(tr,proxyLabel(record.proxy));
+      if(record.egress_addr){const src=document.createElement('span');src.className='src';src.textContent=' · '+record.egress_addr;src.title='本次连接实际使用的出口源地址（socks5 服务端 BND.ADDR 回报）';egress.append(src);}
       const result=cell(tr,'');
       const badge=document.createElement('span');badge.className='badge '+(record.success?'probe-ok':'probe-fail');
       badge.textContent=record.success?'获取成功':'失败';result.append(badge);

@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -18,8 +17,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"golang.org/x/net/proxy"
 )
 
 // This file implements the manual probe track: on explicit dashboard request
@@ -134,6 +131,7 @@ type probeRecord struct {
 	Success       bool   `json:"success"`
 	StatusCode    int    `json:"status_code,omitempty"`
 	DurationMS    int64  `json:"duration_ms"`
+	EgressAddr    string `json:"egress_addr,omitempty"`
 	StateLength   int    `json:"state_length,omitempty"`
 	ObservedModel string `json:"observed_model,omitempty"`
 	Error         string `json:"error,omitempty"`
@@ -381,17 +379,20 @@ func configureProbeTrack(block probeConfigYAML) error {
 	probeTrack.mu.Lock()
 	probeTrack.stopLocked()
 	probeTrack.cfg = probeConfigState{Config: cfg, Error: cfgErr}
-	// Policy migration: an exit whose accumulated failures are below its
-	// (possibly raised) threshold is released at once; pool entries previously
-	// cooled by the lower fixed threshold start fresh.
+	// Policy migration: plain exits whose accumulated failures are below the
+	// (possibly raised) threshold are released at once. Rotating pools are
+	// released unconditionally - v1.5.17 never benches them any more, so any
+	// cool-down left by the older policy is stale state.
 	for spec, penalty := range probeTrack.exitPenalties {
+		if cfg.ProxyPools[spec] {
+			delete(probeTrack.exitPenalties, spec)
+			markStateDirty()
+			continue
+		}
 		if penalty.Until == "" {
 			continue
 		}
 		threshold := cfg.ExitFailThreshold
-		if cfg.ProxyPools[spec] {
-			threshold = cfg.ExitPoolFailThreshold
-		}
 		if penalty.Failures < threshold {
 			delete(probeTrack.exitPenalties, spec)
 			markStateDirty()
@@ -936,10 +937,17 @@ func (e *probeEngine) availableProxies(proxies []string, now time.Time) []string
 }
 
 // noteExitOutcome records one attempt result for an egress. A healthy capture
-// clears its penalty immediately; consecutive failures reaching the configured
-// threshold remove the egress from rotation for exit-cooldown-minutes. Setting
-// exit-cooldown-minutes to 0 disables the removal (failures still accumulate
-// for the pool dashboard).
+// clears its penalty immediately; for plain (fixed-endpoint) egresses a streak
+// of consecutive failures reaching the configured threshold removes the egress
+// from rotation for exit-cooldown-minutes (set 0 to disable the removal).
+//
+// Rotating pools (one endpoint that presents many source addresses, marked
+// "# pool:..." in the proxies file) are never benched: every connection draws
+// a fresh address, so a failing streak says nothing about the endpoint being
+// broken - it only reflects the current upstream state, which the model-level
+// tracks already describe. Their counters keep accumulating for the dashboard,
+// and any cool-down recorded by an older policy is cleared on the next
+// observation.
 func (e *probeEngine) noteExitOutcome(spec string, healthy bool, errorText string) {
 	if spec == "" {
 		return
@@ -963,19 +971,16 @@ func (e *probeEngine) noteExitOutcome(spec string, healthy bool, errorText strin
 	}
 	penalty.Failures++
 	penalty.LastError = errorText
+	if e.cfg.Config.ProxyPools[spec] {
+		penalty.Until = ""
+		e.exitPenalties[spec] = penalty
+		markStateDirty()
+		return
+	}
 	cfg := e.cfg.Config
 	threshold := cfg.ExitFailThreshold
 	if threshold <= 0 {
 		threshold = probeDefaultsExitFailThreshold
-	}
-	// Rotating pools (many candidate source IPs behind one endpoint) are much
-	// more likely to recover on the next attempt, so they tolerate a longer
-	// streak before being benched.
-	if cfg.ProxyPools[spec] {
-		threshold = cfg.ExitPoolFailThreshold
-		if threshold <= 0 {
-			threshold = probeDefaultsExitPoolFailThreshold
-		}
 	}
 	if penalty.Failures >= threshold && cfg.ExitCooldown > 0 {
 		penalty.Until = now.Add(cfg.ExitCooldown).Format(time.RFC3339Nano)
@@ -1094,7 +1099,7 @@ func (e *probeEngine) probeOnce(model, proxySpec string, cfg probeConfig) (probe
 		e.noteError(record.Error)
 		return record, ""
 	}
-	transport, err := buildProbeTransport(proxySpec)
+	transport, binder, err := buildProbeTransport(proxySpec)
 	if err != nil {
 		record.DurationMS = time.Since(started).Milliseconds()
 		record.Error = fmt.Sprintf("transport: %v", err)
@@ -1135,6 +1140,11 @@ func (e *probeEngine) probeOnce(model, proxySpec string, cfg probeConfig) (probe
 
 	resp, err := client.Do(req)
 	record.DurationMS = time.Since(started).Milliseconds()
+	if binder != nil {
+		// The socks5 handshake captured the server-bound address (the real
+		// rotating source IP this attempt went out through).
+		record.EgressAddr = binder.load()
+	}
 	if err != nil {
 		record.Error = fmt.Sprintf("do: %v", err)
 		e.noteError(record.Error)
@@ -1456,8 +1466,11 @@ func parseTurnStateTimestamp(value string) (time.Time, bool) {
 }
 
 // buildProbeTransport builds an HTTP transport bound to the given egress:
-// "direct", "socks5://...", or "http(s)://...".
-func buildProbeTransport(spec string) (*http.Transport, error) {
+// "direct", "socks5://...", or "http(s)://...". For socks5 / socks5h it also
+// returns a bind recorder that captures the server-reported egress address
+// (the CONNECT reply's BND.ADDR) so the audit trail can show which rotating
+// source address actually carried the attempt; other egresses return nil.
+func buildProbeTransport(spec string) (*http.Transport, *socksBind, error) {
 	transport := &http.Transport{
 		TLSClientConfig:   &tls.Config{},
 		ForceAttemptHTTP2: true,
@@ -1465,38 +1478,27 @@ func buildProbeTransport(spec string) (*http.Transport, error) {
 	}
 	spec = strings.TrimSpace(spec)
 	if spec == "" || strings.EqualFold(spec, "direct") {
-		return transport, nil
+		return transport, nil, nil
 	}
 	parsed, err := url.Parse(spec)
 	if err != nil {
-		return nil, fmt.Errorf("parse proxy url: %w", err)
+		return nil, nil, fmt.Errorf("parse proxy url: %w", err)
 	}
 	switch strings.ToLower(parsed.Scheme) {
 	case "socks5", "socks5h":
-		var auth *proxy.Auth
+		binder := &socksBind{host: parsed.Host}
 		if parsed.User != nil {
-			password, _ := parsed.User.Password()
-			auth = &proxy.Auth{User: parsed.User.Username(), Password: password}
+			binder.user = parsed.User.Username()
+			binder.pass, _ = parsed.User.Password()
 		}
-		dialer, err := proxy.SOCKS5("tcp", parsed.Host, auth, proxy.Direct)
-		if err != nil {
-			return nil, fmt.Errorf("socks5 dialer: %w", err)
-		}
-		transport.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
-			type contextDialer interface {
-				DialContext(context.Context, string, string) (net.Conn, error)
-			}
-			if cd, ok := dialer.(contextDialer); ok {
-				return cd.DialContext(ctx, network, address)
-			}
-			return dialer.Dial(network, address)
-		}
+		transport.DialContext = binder.dialContext
+		return transport, binder, nil
 	case "http", "https":
 		transport.Proxy = http.ProxyURL(parsed)
 	default:
-		return nil, fmt.Errorf("unsupported proxy scheme %q", parsed.Scheme)
+		return nil, nil, fmt.Errorf("unsupported proxy scheme %q", parsed.Scheme)
 	}
-	return transport, nil
+	return transport, nil, nil
 }
 
 // probeSummary describes the probe engine state for the management API.

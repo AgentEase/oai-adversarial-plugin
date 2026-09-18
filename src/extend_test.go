@@ -945,10 +945,14 @@ func TestPrefetchScanTriggersOnlyNearExpiry(t *testing.T) {
 	}
 }
 
-// TestPoolTolerance verifies rotating pools use the higher threshold: a pool
-// exit survives failures below exit-pool-fail-threshold and only benches once
-// the pool threshold is reached.
-func TestPoolTolerance(t *testing.T) {
+// TestPoolNeverBenched verifies rotating pools (one endpoint presenting many
+// source addresses behind it) never leave the rotation, no matter how long
+// the failing streak grows: every attempt draws a fresh address, so a streak
+// cannot condemn the endpoint - it only reflects the current upstream state.
+// Failures keep accumulating for the dashboard, a stale cool-down recorded by
+// an older policy is cleared on the next observation, and a healthy capture
+// still clears the counters.
+func TestPoolNeverBenched(t *testing.T) {
 	enabled := true
 	probeTrack = &probeEngine{values: map[string]stateEntry{}, failures: map[string]probeFailure{},
 		paused: map[string]bool{}, probing: map[string]bool{}}
@@ -962,33 +966,35 @@ func TestPoolTolerance(t *testing.T) {
 	probeTrack.cfg.Config.ProxyLabels = map[string]string{poolSpec: "IPv6 池"}
 	pool := []string{"direct", poolSpec}
 	now := time.Now().UTC()
-	// Nine failures: still usable (single-exit threshold would have benched it at 3).
-	for i := 0; i < 9; i++ {
-		probeTrack.noteExitOutcome(poolSpec, false, "state length 312 != 292")
+	// A dozen failures: the counters grow, the rotation is untouched (the
+	// plain-exit threshold would have benched a fixed endpoint at three).
+	for i := 0; i < 12; i++ {
+		probeTrack.noteExitOutcome(poolSpec, false, "state length 312 != 292 (suspected degraded)")
 	}
 	if got := probeTrack.availableProxies(pool, now); len(got) != 2 {
-		t.Fatalf("pool exit must survive below its threshold: %v", got)
+		t.Fatalf("a rotating pool must never leave the rotation: %v", got)
 	}
-	// Tenth failure benches it.
-	probeTrack.noteExitOutcome(poolSpec, false, "state length 312 != 292")
-	got := probeTrack.availableProxies(pool, now)
-	if len(got) != 1 || got[0] != "direct" {
-		t.Fatalf("pool exit must bench at its own threshold: %v", got)
-	}
-	// Policy migration: lowering the accumulated count below the (new) threshold
-	// releases the penalty on the next configure pass.
-	probeTrack.mu.Lock()
 	penalty := probeTrack.exitPenalties[poolSpec]
-	penalty.Failures = 4
-	probeTrack.exitPenalties[poolSpec] = penalty
-	probeTrack.mu.Unlock()
-	probeTrack.mu.Lock()
-	if penalty.Failures < cfg.ExitPoolFailThreshold {
-		delete(probeTrack.exitPenalties, poolSpec)
+	if penalty.Failures != 12 || penalty.Until != "" {
+		t.Fatalf("pool counters must keep accumulating without a cool-down: %+v", penalty)
 	}
+	// A stale cool-down left behind by an older policy is cleared on the next
+	// observation of the rotating pool.
+	probeTrack.mu.Lock()
+	probeTrack.exitPenalties[poolSpec] = exitPenalty{Proxy: poolSpec, Failures: 12,
+		Until: now.Add(time.Hour).Format(time.RFC3339Nano)}
 	probeTrack.mu.Unlock()
+	probeTrack.noteExitOutcome(poolSpec, false, "boom")
+	if got := probeTrack.availableProxies(pool, now); len(got) != 2 {
+		t.Fatalf("a stale pool cool-down must be cleared on observation: %v", got)
+	}
+	if cleared := probeTrack.exitPenalties[poolSpec]; cleared.Until != "" {
+		t.Fatalf("stale pool cool-down must be reset: %+v", cleared)
+	}
+	// A healthy capture still clears the counters entirely.
+	probeTrack.noteExitOutcome(poolSpec, true, "")
 	if _, ok := probeTrack.exitPenalties[poolSpec]; ok {
-		t.Fatal("released pool exit must leave the penalty map")
+		t.Fatal("healthy capture must clear the pool counters")
 	}
 }
 func TestProbeSummaryShape(t *testing.T) {
