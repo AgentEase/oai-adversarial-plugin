@@ -37,6 +37,7 @@ const (
 	probeDefaultsIntervalSeconds = 5
 	probeDefaultsAttemptsPerHop  = 3
 	probeDefaultsMaxAttempts     = 30
+	probeDefaultsCooldownMinutes = 20
 	probeDefaultsTimeoutSeconds  = 60
 	probeRequiredStateLength     = 292
 	probeDefaultsPrompt          = "hi"
@@ -57,6 +58,7 @@ type probeConfig struct {
 	ProbeInterval       time.Duration
 	AttemptsPerHop      int
 	MaxAttemptsPerRound int
+	Cooldown            time.Duration
 	Timeout             time.Duration
 	Prompt              string
 	UpstreamURL         string
@@ -76,6 +78,7 @@ type probeConfigYAML struct {
 	IntervalSeconds  *int     `yaml:"probe-interval-seconds"`
 	AttemptsPerHop   *int     `yaml:"attempts-per-proxy"`
 	MaxAttemptsRound *int     `yaml:"max-attempts-per-round"`
+	CooldownMinutes  *int     `yaml:"cooldown-minutes"`
 	TimeoutSeconds   *int     `yaml:"timeout-seconds"`
 	Prompt           string   `yaml:"prompt"`
 	UpstreamURL      string   `yaml:"upstream-url"`
@@ -113,7 +116,8 @@ type probeRecord struct {
 }
 
 // probeFailure marks a model whose latest probe round exhausted all retries
-// without obtaining an acceptable (292-byte, consistent) state.
+// without obtaining an acceptable (292-byte, consistent) state. CooldownUntil
+// is the end of the quiet period; new rounds are suppressed until it passes.
 type probeFailure struct {
 	Model      string `json:"model"`
 	Attempts   int    `json:"attempts"`
@@ -121,6 +125,7 @@ type probeFailure struct {
 	LastError  string `json:"last_error,omitempty"`
 	LastLength int    `json:"last_length,omitempty"`
 	FailedAt   string `json:"failed_at"`
+	CooldownUntil string `json:"cooldown_until,omitempty"`
 }
 
 type probeEngine struct {
@@ -157,6 +162,7 @@ func parseProbeConfig(block probeConfigYAML) probeConfig {
 		ProbeInterval:       time.Duration(probeDefaultsIntervalSeconds) * time.Second,
 		AttemptsPerHop:      probeDefaultsAttemptsPerHop,
 		MaxAttemptsPerRound: probeDefaultsMaxAttempts,
+		Cooldown:            time.Duration(probeDefaultsCooldownMinutes) * time.Minute,
 		Timeout:             time.Duration(probeDefaultsTimeoutSeconds) * time.Second,
 		Prompt:              probeDefaultsPrompt,
 		UpstreamURL:         probeDefaultsUpstreamURL,
@@ -185,6 +191,9 @@ func parseProbeConfig(block probeConfigYAML) probeConfig {
 	}
 	if block.MaxAttemptsRound != nil && *block.MaxAttemptsRound > 0 {
 		cfg.MaxAttemptsPerRound = *block.MaxAttemptsRound
+	}
+	if block.CooldownMinutes != nil && *block.CooldownMinutes > 0 {
+		cfg.Cooldown = time.Duration(*block.CooldownMinutes) * time.Minute
 	}
 	if block.TimeoutSeconds != nil && *block.TimeoutSeconds > 0 {
 		cfg.Timeout = time.Duration(*block.TimeoutSeconds) * time.Second
@@ -329,11 +338,18 @@ func (e *probeEngine) scanOnce(stop chan struct{}) {
 }
 
 // needsProbe reports whether a model's current state is missing or about to
-// expire (inside the configured probe window).
+// expire (inside the configured probe window). A failure cooldown suppresses
+// new rounds until cooldown-minutes have elapsed since the failed round.
 func (e *probeEngine) needsProbe(model string, cfg probeConfig) bool {
 	e.mu.Lock()
 	entry, ok := e.values[model]
+	failure, hasFailure := e.failures[model]
 	e.mu.Unlock()
+	if hasFailure {
+		if until, err := time.Parse(time.RFC3339Nano, failure.CooldownUntil); err == nil && time.Now().UTC().Before(until) {
+			return false
+		}
+	}
 	if !ok || !entry.Valid || entry.Value == "" {
 		return true
 	}
@@ -402,15 +418,18 @@ func (e *probeEngine) probeModel(model string, cfg probeConfig, stop chan struct
 		e.proxyIndex = (startIndex + (round+1)*cfg.AttemptsPerHop) % len(proxies)
 		e.mu.Unlock()
 	}
-	// Retries exhausted: annotate the failure for the dashboard.
+	// Retries exhausted: annotate the failure for the dashboard and start the
+	// cooldown window; the next round is suppressed until it elapses.
+	now := time.Now().UTC()
 	e.mu.Lock()
 	e.failures[model] = probeFailure{
-		Model:      model,
-		Attempts:   attempts,
-		Rounds:     (attempts + cfg.AttemptsPerHop - 1) / cfg.AttemptsPerHop,
-		LastError:  lastError,
-		LastLength: lastLength,
-		FailedAt:   time.Now().UTC().Format(time.RFC3339Nano),
+		Model:         model,
+		Attempts:      attempts,
+		Rounds:        (attempts + cfg.AttemptsPerHop - 1) / cfg.AttemptsPerHop,
+		LastError:     lastError,
+		LastLength:    lastLength,
+		FailedAt:      now.Format(time.RFC3339Nano),
+		CooldownUntil: now.Add(cfg.Cooldown).Format(time.RFC3339Nano),
 	}
 	e.mu.Unlock()
 }
@@ -733,6 +752,7 @@ func probeSummary() map[string]any {
 		"scan_seconds": int(cfg.ScanInterval / time.Second),
 		"interval_seconds": int(cfg.ProbeInterval / time.Second),
 		"attempts_per_proxy": cfg.AttemptsPerHop,
+		"cooldown_minutes": int(cfg.Cooldown / time.Minute),
 		"running":      probeTrack.running,
 		"probes_total": probeTrack.probesTotal,
 		"probes_ok":    probeTrack.probesOK,

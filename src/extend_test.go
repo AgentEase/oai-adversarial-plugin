@@ -217,12 +217,12 @@ func TestProbeRecordCarriesObservedModel(t *testing.T) {
 func TestProbeFailureShape(t *testing.T) {
 	failure := probeFailure{Model: "gpt-6-astra", Attempts: 30, Rounds: 10,
 		LastError: "state length 312 != 292 (suspected degraded)", LastLength: 312,
-		FailedAt: "2026-09-18T02:20:00Z"}
+		FailedAt: "2026-09-18T02:20:00Z", CooldownUntil: "2026-09-18T02:40:00Z"}
 	encoded, err := json.Marshal(failure)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{`"attempts":30`, `"rounds":10`, `"last_length":312`, `"last_error"`} {
+	for _, key := range []string{`"attempts":30`, `"rounds":10`, `"last_length":312`, `"last_error"`, `"cooldown_until":"2026-09-18T02:40:00Z"`} {
 		if !bytes.Contains(encoded, []byte(key)) {
 			t.Fatalf("failure payload missing %s: %s", key, encoded)
 		}
@@ -233,6 +233,44 @@ func TestProbeFailureShape(t *testing.T) {
 	delete(engine.failures, "gpt-6-astra")
 	if _, ok := engine.failures["gpt-6-astra"]; ok {
 		t.Fatal("failure must be removable on success")
+	}
+}
+
+// TestProbeCooldownSuppressesNextRound verifies a failed model is not probed
+// again until its cooldown window elapses, and becomes eligible afterwards.
+func TestProbeCooldownSuppressesNextRound(t *testing.T) {
+	state := &probeEngine{values: map[string]stateEntry{}, failures: map[string]probeFailure{}}
+	cfg := parseProbeConfig(probeConfigYAML{})
+	if cfg.Cooldown != 20*time.Minute {
+		t.Fatalf("default cooldown wrong: %v", cfg.Cooldown)
+	}
+	// No value and no failure -> needs probing.
+	if !state.needsProbe("gpt-6-astra", cfg) {
+		t.Fatal("missing value must need probe")
+	}
+	now := time.Now().UTC()
+	// Active cooldown suppresses the next round.
+	state.failures["gpt-6-astra"] = probeFailure{
+		Model: "gpt-6-astra", Attempts: 30, Rounds: 10,
+		FailedAt:      now.Format(time.RFC3339Nano),
+		CooldownUntil: now.Add(10 * time.Minute).Format(time.RFC3339Nano),
+	}
+	if state.needsProbe("gpt-6-astra", cfg) {
+		t.Fatal("cooldown must suppress the next round")
+	}
+	// Elapsed cooldown allows a fresh round.
+	state.failures["gpt-6-astra"] = probeFailure{
+		Model: "gpt-6-astra", Attempts: 30, Rounds: 10,
+		FailedAt:      now.Add(-30 * time.Minute).Format(time.RFC3339Nano),
+		CooldownUntil: now.Add(-10 * time.Minute).Format(time.RFC3339Nano),
+	}
+	if !state.needsProbe("gpt-6-astra", cfg) {
+		t.Fatal("elapsed cooldown must allow a new round")
+	}
+	// A legacy annotation without cooldown_until does not suppress probing.
+	state.failures["gpt-6-astra"] = probeFailure{Model: "gpt-6-astra", Attempts: 30, Rounds: 10}
+	if !state.needsProbe("gpt-6-astra", cfg) {
+		t.Fatal("legacy annotation without cooldown must not suppress probing")
 	}
 }
 
@@ -261,6 +299,7 @@ func TestProbeConfigDefaultsAndOverrides(t *testing.T) {
 	scan := 15
 	window := 4
 	attempts := 2
+	cooldown := 3
 	block := probeConfigYAML{
 		Enabled:         &enabled,
 		Models:          []string{" gpt-6-astra ", ""},
@@ -268,10 +307,11 @@ func TestProbeConfigDefaultsAndOverrides(t *testing.T) {
 		ScanSeconds:     &scan,
 		WindowMinutes:   &window,
 		AttemptsPerHop:  &attempts,
+		CooldownMinutes: &cooldown,
 		Proxies:         []string{"direct", "socks5://a:b@1.2.3.4:443"},
 	}
 	cfg := parseProbeConfig(block)
-	if !cfg.Enabled || cfg.ScanInterval != 15*time.Second || cfg.Window != 4*time.Minute || cfg.AttemptsPerHop != 2 {
+	if !cfg.Enabled || cfg.ScanInterval != 15*time.Second || cfg.Window != 4*time.Minute || cfg.AttemptsPerHop != 2 || cfg.Cooldown != 3*time.Minute {
 		t.Fatalf("overrides wrong: %+v", cfg)
 	}
 	if cfg.TTL != 55*time.Minute || cfg.ProbeInterval != 5*time.Second || cfg.Timeout != 60*time.Second {
