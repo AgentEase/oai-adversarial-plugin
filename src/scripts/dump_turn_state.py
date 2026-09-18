@@ -1,17 +1,12 @@
-"""Dump the X-Codex-Turn-State observations from the plugin's records endpoint."""
+"""Show turn-state metadata without exporting token values or previews."""
 
 import json
-import subprocess
+import os
 import urllib.request
 
-environment = dict(
-    item.split('=', 1)
-    for item in json.loads(subprocess.run(
-        ['docker', 'inspect', 'cpa-usage-keeper'], check=True,
-        stdout=subprocess.PIPE, universal_newlines=True).stdout)[0]['Config']['Env']
-    if '=' in item
-)
-key = environment['CPA_MANAGEMENT_KEY']
+key = os.environ.get('CPA_MANAGEMENT_KEY')
+if not key:
+    raise SystemExit('Set CPA_MANAGEMENT_KEY in the environment before running this script.')
 
 request = urllib.request.Request('http://127.0.0.1:8317/v0/management/timezone-override/requests',
                                  headers={'Authorization': 'Bearer ' + key})
@@ -29,6 +24,6 @@ for record in payload.get('records', []):
           '| mismatch:', record.get('model_mismatch'))
     print('turn_state_length:', record.get('turn_state_length'))
     print('turn_state_source:', record.get('turn_state_source') or '(none)')
-    print('turn_state_value:', record.get('turn_state_value') or '(none)')
+    print('turn_state_present:', bool(record.get('turn_state_value')))
     if record.get('turn_state_truncated'):
         print('turn_state_truncated: True')

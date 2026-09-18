@@ -12,7 +12,7 @@ import (
 
 const (
 	pluginID                   = "timezone-override"
-	pluginVersion              = "1.5.28"
+	pluginVersion              = "1.5.30"
 	historyLimit               = 200
 	schemaVersion              = 6
 	streamChunkHeaderInitIndex = -1
@@ -110,6 +110,7 @@ type auditRecord struct {
 	UpstreamModel    string `json:"upstream_model,omitempty"`
 	ModelChecked     bool   `json:"model_checked"`
 	ModelMismatch    bool   `json:"model_mismatch"`
+	DetectionExempt  bool   `json:"detection_exempt,omitempty"`
 	TurnStateLength  int    `json:"turn_state_length"`
 	TurnStateSource  string `json:"turn_state_source,omitempty"`
 	TurnStatePreview string `json:"turn_state_preview,omitempty"`
@@ -207,9 +208,9 @@ func intercept(raw []byte) (interceptResponse, error) {
 		return interceptResponse{}, nil
 	}
 	// Degraded-model rejection: when the switch is on and the request targets
-	// a model whose latest probe round shows degradation evidence, terminate
-	// the request with a 403 and a clear Chinese message. The upstream is
-	// never called, so no timezone normalization is attempted.
+	// a model with business degradation evidence, or probe evidence without
+	// a usable baseline, terminate with 403. A failing prefetch must not
+	// interrupt traffic still protected by the active or successor value.
 	if message := degradedRejectMessage(req.Model, req.RequestedModel); message != "" {
 		history.record(auditRecord{
 			RequestID: req.RequestID, TraceID: req.TraceID,
@@ -323,6 +324,13 @@ func (s *auditState) snapshot() map[string]any {
 	overridden := 0
 	for i := range s.records {
 		record := s.records[i]
+		// Preserve the historic observations, but publish today's policy even
+		// for records restored from snapshots predating model exemptions.
+		record.DetectionExempt = !degradationDetectionEnabled(record.Model, record.RequestedModel)
+		if record.DetectionExempt {
+			record.ModelChecked = false
+			record.ModelMismatch = false
+		}
 		// Defensive: legacy records may carry nil slices from snapshots;
 		// the dashboard parses these as arrays.
 		if record.Original == nil {
@@ -332,7 +340,7 @@ func (s *auditState) snapshot() map[string]any {
 			record.Paths = []string{}
 		}
 		records[len(s.records)-1-i] = record
-		if s.records[i].ModelMismatch {
+		if record.ModelMismatch && !record.DetectionExempt {
 			mismatches++
 		}
 		if s.records[i].TurnStateOverride == "applied" {
@@ -388,12 +396,15 @@ func management(raw []byte) (managementResponse, error) {
 //	{"model": "gpt-5.6-luna", "action": "pause"|"resume"|"probe-model"}
 //	{"action": "reject-degraded", "enabled": true|false}
 //	{"action": "start-round"}   # start one user-initiated probe round
-//	{"action": "stop-round"}    # stop the running probe round
+//	{"action": "stop-current"}  # cancel the batch, preserve prefetch mode
+//	{"action": "stop-all"}      # cancel all tasks and halt prefetch
+//	{"action": "stop-round"}    # legacy alias of stop-all
 //
 // Pause removes the model from rounds; resume clears the stale annotation
 // and probes that model once in the background; probe-model starts one
-// single-model probe immediately (independent of the sequential round).
+// single-model probe through the same FIFO worker. Neither re-arms prefetch.
 func probeControl(body []byte) (managementResponse, error) {
+	skipped := false
 	var req struct {
 		Model   string `json:"model"`
 		Proxy   string `json:"proxy"`
@@ -411,13 +422,25 @@ func probeControl(body []byte) (managementResponse, error) {
 		if model == "" {
 			return jsonErrorResponse(http.StatusBadRequest, "缺少 model 字段"), nil
 		}
-		probeTrack.setModelPaused(model, action == "pause")
+		if !degradationDetectionEnabled(model, "") {
+			skipped = true
+			break
+		}
+		if !probeTrack.setModelPaused(model, action == "pause") {
+			return jsonErrorResponse(http.StatusConflict, "正在停止，或该模型已有探测任务，请等待状态刷新"), nil
+		}
 	case "probe-model":
 		model := strings.TrimSpace(req.Model)
 		if model == "" {
 			return jsonErrorResponse(http.StatusBadRequest, "缺少 model 字段"), nil
 		}
-		probeTrack.probeModelAsync(model)
+		if !degradationDetectionEnabled(model, "") {
+			skipped = true
+			break
+		}
+		if !probeTrack.probeModelAsync(model) {
+			return jsonErrorResponse(http.StatusConflict, "探测未就绪，或该模型已暂停/已有任务，请检查当前状态"), nil
+		}
 	case "reject-degraded":
 		if req.Enabled == nil {
 			return jsonErrorResponse(http.StatusBadRequest, "缺少 enabled 字段"), nil
@@ -436,14 +459,19 @@ func probeControl(body []byte) (managementResponse, error) {
 			return jsonErrorResponse(http.StatusBadRequest, "未知出口："+proxy), nil
 		}
 	case "start-round":
-		probeTrack.start()
-	case "stop-round":
+		if !probeTrack.start() {
+			return jsonErrorResponse(http.StatusConflict, "探测未启用、配置错误或正在停止，请检查当前状态"), nil
+		}
+	case "stop-current":
+		probeTrack.stopCurrent()
+	case "stop-round", "stop-all":
 		probeTrack.stop()
 	default:
 		return jsonErrorResponse(http.StatusBadRequest, "不支持的操作："+action), nil
 	}
 	payload, _ := json.Marshal(map[string]any{
 		"ok":              true,
+		"skipped":         skipped,
 		"paused":          probeTrack.pausedModels(),
 		"reject_degraded": probeTrack.rejectDegradedEnabled(),
 	})

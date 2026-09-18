@@ -1,5 +1,6 @@
 # Build artifacts
 /build/
+/src/build/
 *.so
 *.dylib
 *.dll
@@ -14,6 +15,22 @@ go.work.sum
 *.log
 /proxies.conf
 /config.yaml
+**/proxies*.conf
+**/config.yaml
+**/state.json
+**/state.json.*
+**/seeds.json
+**/auths/
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+/.ai/
+
+# Python diagnostics
+__pycache__/
+*.py[cod]
 
 # Editor / IDE
 .idea/

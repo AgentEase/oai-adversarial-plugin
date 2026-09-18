@@ -9,9 +9,16 @@ import base64
 import struct
 from datetime import datetime, timezone
 
+def synthetic_token(timestamp, seed):
+    # Deliberately patterned bytes: valid layout, no real IV, ciphertext or MAC.
+    raw = b"\x80" + struct.pack(">Q", timestamp)
+    raw += bytes((index + seed) % 256 for index in range(208))
+    return base64.urlsafe_b64encode(raw).decode("ascii")
+
+
 VALUES = {
-    "sample A (synthetic)": "gAAAAABmghDAxGKf1Sdzgjn12nAPCycdxfMcxibA5Z_oOPJv54SBDALTLi1Mca2D_6kI2oh-XKV1F_qy5G31xyGw3uHSu5jkSXCYpnxzOR0pITyVdhXH9fGRyIfR114r-wTxrEnfsZ_srOsLj_JtnzYgr4e7HYL-biRaGfjHr0VwnNrMYwZ80Is5cmab6VptKJJDPKzHA5jkYUy9ZhCeOIeCk0j0PxhAj2I2akAl4CIoqICctbVjtQQpUINSwaKo6UPWlWWQxMptnyybojsrsHVhqap07KlsCg==",
-    "sample B (synthetic)": "gAAAAABmghGBmYaclH8OS9klHHtxV66BFRs90YCwVvyhGekc94ZKb8ykKmVcL0Oi5t7l6rXCV4UZuSTEIJtZDdMLLxSrYWCICmEC7Ak1NZJgVQM4cKr_GrmMMH6PZ_vdOzagz_s6UfFH-uHuW3DMgmFtS2GeFdISSKPc9_mrGjv0ivTrd-TCZMSn1wO1p_Hf9S4lF76BVWe2Si70_Zd5QQvn2bazHvUfKc8AIF6HEndjCJNwec577I6HhQ0z2VmRsLkjvZehVq3lo5rbmXJiaE_Sz3XFeYsndA==",
+    "sample A (synthetic)": synthetic_token(1719800000, 0),
+    "sample B (synthetic)": synthetic_token(1719800193, 1),
 }
 
 for name, value in VALUES.items():

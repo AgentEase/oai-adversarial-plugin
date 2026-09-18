@@ -213,6 +213,8 @@ type probeEngine struct {
 	probing        map[string]bool
 	abortCh        chan struct{}
 	halted         bool
+	stopping       bool
+	shuttingDown   bool
 	queue          []probeTask
 	queueActive    bool
 	disabledExits  map[string]bool
@@ -221,7 +223,6 @@ type probeEngine struct {
 	proxyIndex     int
 	consecutive    int
 	lastActivity   string
-	stopCh         chan struct{}
 	running        bool
 	runNote        string
 	runStartedAt   string
@@ -349,7 +350,7 @@ func parseProbeConfig(block probeConfigYAML) probeConfig {
 // loadProxiesFile reads the dedicated proxy secret file (one proxy per line;
 // full-line "#" comments and blank lines ignored) and returns the parsed list
 // plus per-entry metadata. A trailing comment may declare a multi-exit pool
-// and a display label: "socks5h://10.0.0.1:18321  # pool:ipv6" marks the
+// and a display label: "socks5h://192.0.2.1:1080  # pool:ipv6" marks the
 // entry as a rotating pool (higher cool-down tolerance).
 func loadProxiesFile(path string) ([]string, map[string]bool, map[string]string, error) {
 	raw, err := os.ReadFile(path)
@@ -384,7 +385,7 @@ func loadProxiesFile(path string) ([]string, map[string]bool, map[string]string,
 				case "ipv4":
 					labels[spec] = "IPv4 池"
 				default:
-					// A custom label like "pool:DuckIP 洛杉矶" is shown as-is.
+					// A custom label like "pool:Example" is shown as-is.
 					labels[spec] = name
 				}
 			}
@@ -412,7 +413,7 @@ func configureProbeTrack(block probeConfigYAML) error {
 		}
 	}
 	probeTrack.mu.Lock()
-	probeTrack.stopLocked()
+	probeTrack.cancelCurrentLocked()
 	probeTrack.cfg = probeConfigState{Config: cfg, Error: cfgErr}
 	// Policy migration: plain exits whose accumulated failures are below the
 	// (possibly raised) threshold are released at once. Rotating pools are
@@ -440,8 +441,8 @@ func configureProbeTrack(block probeConfigYAML) error {
 	// comfortably far from expiry nothing happens at all, and only inside the
 	// final hand-off window (prefetch-minutes) does the watcher attempt one
 	// probe to park a successor token for a seamless takeover.
-	probeTrack.ensurePrefetchWatcher()
 	ensurePersistence()
+	probeTrack.ensurePrefetchWatcher()
 	return nil
 }
 
@@ -463,34 +464,32 @@ type probeTask struct {
 	Force bool
 }
 
-func (e *probeEngine) start() {
+func (e *probeEngine) start() bool {
 	e.mu.Lock()
-	if e.queueActive || len(e.queue) > 0 {
-		e.mu.Unlock()
-		return
-	}
+	defer e.mu.Unlock()
 	cfg := e.cfg.Config
+	if !cfg.Enabled || e.cfg.Error != "" || e.stopping || e.shuttingDown {
+		if !cfg.Enabled {
+			e.runNote = "探测轨未启用（probe.enabled=false）"
+		}
+		return false
+	}
 	// An explicit start re-ignites the engine: the automatic hand-off watcher
 	// resumes replenishing expiring baselines.
 	e.halted = false
+	markStateDirty()
+	if e.queueActive {
+		return true
+	}
 	e.runNote = ""
 	e.runStartedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	e.runFinishedAt = ""
-	e.mu.Unlock()
-	if !cfg.Enabled {
-		e.mu.Lock()
-		e.runNote = "探测轨未启用（probe.enabled=false）"
-		e.runFinishedAt = time.Now().UTC().Format(time.RFC3339Nano)
-		e.mu.Unlock()
-		markStateDirty()
-		return
-	}
 	skipped := 0
 	for _, model := range cfg.Models {
-		if e.modelPaused(model) {
+		if e.paused[model] || !degradationDetectionEnabled(model, "") {
 			continue
 		}
-		if e.settledBaseline(model, cfg, time.Now().UTC()) {
+		if e.settledBaselineLocked(model, cfg, time.Now().UTC()) {
 			// One healthy capture is enough: a model whose baseline is still
 			// comfortably far from expiry is skipped until its hand-off window
 			// comes up (the prefetch watcher refills it then). The row's "probe
@@ -498,52 +497,65 @@ func (e *probeEngine) start() {
 			skipped++
 			continue
 		}
-		e.enqueueTask(model, false)
+		e.enqueueTaskLocked(model, false)
 	}
 	if skipped > 0 {
-		e.mu.Lock()
-		e.runNote = fmt.Sprintf("已跳过 %d 个仍在有效期内（未临近到期）的模型，保留现有健康基线", skipped)
-		if len(e.queue) == 0 && !e.queueActive {
-			e.runFinishedAt = time.Now().UTC().Format(time.RFC3339Nano)
-		}
-		e.mu.Unlock()
-		markStateDirty()
+		e.runNote = fmt.Sprintf("已跳过 %d 个基线仍充裕或已备好接班值的模型", skipped)
 	}
+	if !e.queueActive {
+		e.runFinishedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	}
+	return true
 }
 
 func (e *probeEngine) stop() {
 	e.mu.Lock()
-	e.stopLocked()
-	if e.abortCh != nil {
-		close(e.abortCh)
-	}
-	// A fresh brake channel for future explicit requests: the global stop
-	// terminates everything in flight now, but does not block new rounds.
-	e.abortCh = make(chan struct{})
-	// Halt the engine: the automatic hand-off (prefetch) watcher must also
-	// stay silent until an explicit start / probe-now / resume re-ignites it.
+	e.cancelCurrentLocked()
+	// Only start-round re-arms automatic prefetch after a full stop.
 	e.halted = true
-	// "Stop all" also cancels every queued-but-not-started task.
-	hadQueued := len(e.queue) > 0
-	e.queue = nil
-	// In-round suspicion counters describe rounds that no longer exist;
-	// full failure annotations and business marks (non-round state) remain.
-	if len(e.suspects) > 0 {
-		e.suspects = map[string]probeSuspicion{}
-	}
-	if e.running || e.queueActive || hadQueued || len(e.probing) > 0 {
-		e.runNote = "已停止所有探测（已取消队列等待与在途探测；在下一个尝试边界生效）"
-	}
+	e.runNote = "已停止所有探测；自动预备已停止，在途请求将在尝试边界结束"
 	e.mu.Unlock()
 	markStateDirty()
 }
 
-func (e *probeEngine) stopLocked() {
-	if e.running && e.stopCh != nil {
-		close(e.stopCh)
+// stopCurrent cancels this batch without changing the automatic-prefetch
+// switch. It never re-arms an engine previously stopped with stop-all.
+func (e *probeEngine) stopCurrent() {
+	e.mu.Lock()
+	e.cancelCurrentLocked()
+	e.runNote = "已取消本轮排队与在途探测；自动预备保持原状态"
+	e.mu.Unlock()
+	markStateDirty()
+}
+
+func (e *probeEngine) shutdown() {
+	e.mu.Lock()
+	e.shuttingDown = true
+	e.cancelCurrentLocked()
+	e.mu.Unlock()
+	e.stopPrefetchWatcher()
+}
+
+// Caller holds e.mu. Keep the worker visible until its in-flight request
+// actually returns, and reject new tasks during that drain interval.
+func (e *probeEngine) cancelCurrentLocked() {
+	if e.abortCh != nil {
+		close(e.abortCh)
 	}
-	e.running = false
-	e.stopCh = nil
+	e.abortCh = make(chan struct{})
+	for _, task := range e.queue {
+		delete(e.prefetchGate, task.Model)
+	}
+	for model := range e.probing {
+		delete(e.prefetchGate, model)
+	}
+	e.queue = nil
+	e.suspects = map[string]probeSuspicion{}
+	e.stopping = e.queueActive || len(e.probing) > 0
+	e.running = e.stopping
+	if !e.stopping {
+		e.runFinishedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	}
 }
 
 // abortSignal returns the current global brake channel. All in-flight probe
@@ -562,24 +574,27 @@ func (e *probeEngine) abortSignal() <-chan struct{} {
 // enqueueTask appends one probe task to the unified execution queue and
 // starts the worker when it is idle. A model already queued or currently
 // executing is never queued twice.
-func (e *probeEngine) enqueueTask(model string, force bool) {
-	model = strings.TrimSpace(model)
-	if model == "" {
-		return
-	}
+func (e *probeEngine) enqueueTask(model string, force bool) bool {
 	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.enqueueTaskLocked(model, force)
+}
+
+func (e *probeEngine) enqueueTaskLocked(model string, force bool) bool {
+	model = strings.TrimSpace(model)
+	if model == "" || !degradationDetectionEnabled(model, "") || !e.cfg.Config.Enabled || e.cfg.Error != "" || e.stopping || e.shuttingDown || e.paused[model] || (!force && e.halted) {
+		return false
+	}
 	if e.queue == nil {
 		e.queue = []probeTask{}
 	}
 	for _, task := range e.queue {
 		if task.Model == model {
-			e.mu.Unlock()
-			return
+			return false
 		}
 	}
 	if e.probing[model] {
-		e.mu.Unlock()
-		return
+		return false
 	}
 	e.queue = append(e.queue, probeTask{Model: model, Force: force})
 	active := e.queueActive
@@ -589,11 +604,11 @@ func (e *probeEngine) enqueueTask(model string, force bool) {
 		e.runStartedAt = time.Now().UTC().Format(time.RFC3339Nano)
 		e.runFinishedAt = ""
 	}
-	e.mu.Unlock()
 	markStateDirty()
 	if !active {
 		go e.queueLoop()
 	}
+	return true
 }
 
 // modelPaused reports whether the model was paused from the dashboard.
@@ -616,6 +631,7 @@ func (e *probeEngine) queueLoop() {
 		if len(e.queue) == 0 {
 			e.queueActive = false
 			e.running = false
+			e.stopping = false
 			e.runFinishedAt = time.Now().UTC().Format(time.RFC3339Nano)
 			e.mu.Unlock()
 			markStateDirty()
@@ -638,7 +654,9 @@ func (e *probeEngine) queueLoop() {
 		// command - but still respects an operator pause.
 		if cfg.Enabled && !paused && (task.Force || !halted) &&
 			(task.Force || !e.settledBaseline(task.Model, cfg, time.Now().UTC())) {
-			e.probeModel(task.Model, cfg, make(chan struct{}))
+			// Capture cancellation before dequeue: a stop between dequeue and
+			// probeModel must not be lost by reading a fresh brake channel.
+			e.probeModel(task.Model, cfg, brake)
 		}
 		// The queue interval: the pacing between two tasks (and, inside a
 		// task, between retries). Interrupted by the global brake.
@@ -675,12 +693,22 @@ func (e *probeEngine) probeSuppressed(model string) bool {
 // successor capture). With the automatic window disabled (prefetch-minutes:
 // 0) this gate stays open so fully-manual rounds behave exactly as before.
 func (e *probeEngine) settledBaseline(model string, cfg probeConfig, now time.Time) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.settledBaselineLocked(model, cfg, now)
+}
+
+func (e *probeEngine) settledBaselineLocked(model string, cfg probeConfig, now time.Time) bool {
+	if e.promoteCandidateLocked(model, cfg, now) {
+		markStateDirty()
+	}
 	window := cfg.Prefetch
 	if window <= 0 {
 		return false
 	}
-	e.mu.Lock()
-	defer e.mu.Unlock()
+	if candidate, ok := e.candidates[model]; ok && candidate.Valid && candidate.Value != "" && !entryExpired(candidate, cfg.TTL, now) {
+		return true
+	}
 	active, ok := e.values[model]
 	if !ok || !active.Valid || active.Value == "" {
 		return false
@@ -698,18 +726,30 @@ func (e *probeEngine) settledBaseline(model string, cfg probeConfig, now time.Ti
 // (see probeModel). Resuming clears the stale annotation and queues one
 // forced probe for the model - it runs even while the engine is halted, but
 // the halt itself and every other model stay untouched.
-func (e *probeEngine) setModelPaused(model string, paused bool) {
+func (e *probeEngine) setModelPaused(model string, paused bool) bool {
 	e.mu.Lock()
+	defer e.mu.Unlock()
+	if !paused && (e.stopping || e.shuttingDown) {
+		return false
+	}
 	if e.paused == nil {
 		e.paused = map[string]bool{}
 	}
 	if paused {
 		e.paused[model] = true
+		pending := e.queue[:0]
+		for _, task := range e.queue {
+			if task.Model != model {
+				pending = append(pending, task)
+			}
+		}
+		e.queue = pending
+		delete(e.suspects, model)
+		delete(e.prefetchGate, model)
 	} else {
 		delete(e.paused, model)
 		delete(e.failures, model)
 	}
-	e.mu.Unlock()
 	markStateDirty()
 	if !paused {
 		// Resuming lifts the pause and probes the model once through the
@@ -718,8 +758,12 @@ func (e *probeEngine) setModelPaused(model string, paused bool) {
 		// never re-ignites the engine: the halt (silent hand-off watcher)
 		// stays and no other model is disturbed. The task is forced so the
 		// dequeue gate lets it run regardless of the halt.
-		e.enqueueTask(model, true)
+		if !e.cfg.Config.Enabled || e.cfg.Error != "" {
+			return true
+		}
+		return e.enqueueTaskLocked(model, true)
 	}
+	return true
 }
 
 // ---------------------------------------------------------------------------
@@ -773,21 +817,24 @@ func (e *probeEngine) prefetchWatchLoop(stop <-chan struct{}) {
 }
 
 func (e *probeEngine) prefetchScan() {
-	cfg := currentProbeConfig().Config
-	if !cfg.Enabled || cfg.Prefetch <= 0 {
-		return
-	}
 	e.mu.Lock()
-	halted := e.halted
+	cfg := e.cfg.Config
+	suppressed := !cfg.Enabled || e.cfg.Error != "" || cfg.Prefetch <= 0 || e.halted || e.stopping || e.shuttingDown
 	e.mu.Unlock()
-	if halted {
+	if suppressed {
 		// The operator stopped all probing; the automatic hand-off watcher
 		// waits for an explicit restart before replenishing again.
 		return
 	}
 	now := time.Now().UTC()
 	for _, model := range cfg.Models {
+		if !degradationDetectionEnabled(model, "") {
+			continue
+		}
 		e.mu.Lock()
+		if e.promoteCandidateLocked(model, cfg, now) {
+			markStateDirty()
+		}
 		if e.paused[model] || e.probing[model] {
 			e.mu.Unlock()
 			continue
@@ -897,21 +944,15 @@ func (e *probeEngine) resetExit(spec string) int {
 // stop and skips the settled-baseline gate, but it never re-ignites the
 // engine (the halt and the silent hand-off watcher stay in place) and no
 // other model is disturbed. The deliberate global re-ignition happens on
-// "start-round" and on resuming a paused model.
-func (e *probeEngine) probeModelAsync(model string) {
-	e.enqueueTask(model, true)
+// "start-round" only.
+func (e *probeEngine) probeModelAsync(model string) bool {
+	return e.enqueueTask(model, true)
 }
 
 // probeModelAsyncFromWatcher queues the automatic hand-off probe. Unlike the
 // explicit entry point it is suppressed while the engine is halted: a scan
 // that raced with a dashboard stop must not resurrect probing.
 func (e *probeEngine) probeModelAsyncFromWatcher(model string) {
-	e.mu.Lock()
-	halted := e.halted
-	e.mu.Unlock()
-	if halted {
-		return
-	}
 	e.enqueueTask(model, false)
 }
 
@@ -963,7 +1004,7 @@ func degradationEvidence(message string) string {
 // before the round completes. A successful probe or a completed round clears
 // it (success) or promotes it (exhausted round).
 func (e *probeEngine) noteProbeFailure(model string, record probeRecord, cfg probeConfig) {
-	if degradationEvidence(record.Error) == "" {
+	if !degradationDetectionEnabled(model, "") || degradationEvidence(record.Error) == "" {
 		return
 	}
 	markStateDirty()
@@ -991,35 +1032,60 @@ func (e *probeEngine) clearSuspect(model string) {
 }
 
 // degradedRejectReason reports the Chinese reason used by the degraded-model
-// rejection when the switch is enabled. Full failure annotations win; on top
-// of them, in-round suspicions that crossed suspect-threshold are eligible so
-// the rejection starts about fifteen seconds after degradation appears
-// instead of waiting for the whole round.
+// rejection when the switch is enabled. Probe evidence cannot reject traffic
+// protected by a usable baseline; actual business evidence remains separate.
 func (e *probeEngine) degradedRejectReason(model string) string {
+	return e.degradedRejectReasonFor(model, []string{model})
+}
+
+func (e *probeEngine) degradedRejectReasonFor(model string, servingModels []string) string {
+	requestedModel := ""
+	if len(servingModels) > 1 {
+		requestedModel = servingModels[1]
+	}
+	if !degradationDetectionEnabled(model, requestedModel) {
+		return ""
+	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if !e.rejectDegraded {
 		return ""
 	}
 	candidate := strings.ToLower(strings.TrimSpace(model))
-	for key, failure := range e.failures {
-		if !strings.HasPrefix(candidate, strings.ToLower(key)) {
-			continue
-		}
-		if reason := degradationEvidence(failure.LastError); reason != "" {
-			return reason
-		}
-	}
 	for key, mark := range e.business {
-		if !strings.HasPrefix(candidate, strings.ToLower(key)) {
+		if !degradationDetectionEnabled(key, "") || !strings.HasPrefix(candidate, strings.ToLower(key)) {
 			continue
 		}
 		if mark.Reason != "" {
 			return mark.Reason + "（业务流量确认）"
 		}
 	}
+	// Use the same exact model / requested-model choices as the header
+	// rewrite. Promote before checking so an expired active with a ready
+	// successor cannot produce a transient 403 during hand-off.
+	now := time.Now().UTC()
+	for _, servingModel := range servingModels {
+		servingModel = strings.TrimSpace(servingModel)
+		if !degradationDetectionEnabled(servingModel, "") {
+			continue
+		}
+		if e.promoteCandidateLocked(servingModel, e.cfg.Config, now) {
+			markStateDirty()
+		}
+		if entry, ok := e.values[servingModel]; ok && entry.Valid && len(entry.Value) == probeRequiredStateLength && !entryExpired(entry, e.cfg.Config.TTL, now) {
+			return ""
+		}
+	}
+	for key, failure := range e.failures {
+		if !degradationDetectionEnabled(key, "") || !strings.HasPrefix(candidate, strings.ToLower(key)) {
+			continue
+		}
+		if reason := degradationEvidence(failure.LastError); reason != "" {
+			return reason
+		}
+	}
 	for key, suspicion := range e.suspects {
-		if !strings.HasPrefix(candidate, strings.ToLower(key)) {
+		if !degradationDetectionEnabled(key, "") || !strings.HasPrefix(candidate, strings.ToLower(key)) {
 			continue
 		}
 		threshold := e.cfg.Config.SuspectThreshold
@@ -1044,7 +1110,7 @@ func degradedRejectMessage(models ...string) string {
 		if candidate == "" {
 			continue
 		}
-		if reason := probeTrack.degradedRejectReason(candidate); reason != "" {
+		if reason := probeTrack.degradedRejectReasonFor(candidate, models); reason != "" {
 			return fmt.Sprintf("模型 %s 当前处于风控降智状态：%s。请求已被 O/对抗插件拦截，请稍后重试或切换模型。", candidate, reason)
 		}
 	}
@@ -1112,7 +1178,7 @@ func pickRotation(rotation []string, budgets map[string]int, cursor int) (string
 // minutes per model, and suppressed while a round or cooldown is active).
 func (e *probeEngine) noteBusinessDegradation(model, reason string) {
 	model = strings.TrimSpace(model)
-	if model == "" {
+	if model == "" || !degradationDetectionEnabled(model, "") {
 		return
 	}
 	e.mu.Lock()
@@ -1158,7 +1224,7 @@ func (e *probeEngine) clearBusinessDegradation(model string) {
 //   - state empty with no mismatch -> no signal, ignored.
 func observeBusinessState(model, state, observedModel string) {
 	model = strings.TrimSpace(model)
-	if model == "" {
+	if model == "" || !degradationDetectionEnabled(model, "") {
 		return
 	}
 	state = strings.TrimSpace(state)
@@ -1360,7 +1426,10 @@ func (e *probeEngine) noteExitOutcome(spec string, healthy bool, errorText strin
 // across the egress pool (skipping cool-down entries) until an acceptable
 // state is captured (success clears any failure mark) or the resolved attempt
 // cap is exhausted (failure is recorded for the dashboard).
-func (e *probeEngine) probeModel(model string, cfg probeConfig, stop chan struct{}) {
+func (e *probeEngine) probeModel(model string, cfg probeConfig, stop <-chan struct{}) {
+	if !degradationDetectionEnabled(model, "") {
+		return
+	}
 	e.mu.Lock()
 	if e.probing == nil {
 		e.probing = map[string]bool{}
@@ -1383,6 +1452,10 @@ func (e *probeEngine) probeModel(model string, cfg probeConfig, stop chan struct
 	defer func() {
 		e.mu.Lock()
 		delete(e.probing, model)
+		if !e.queueActive && len(e.probing) == 0 {
+			e.stopping = false
+			e.running = false
+		}
 		e.mu.Unlock()
 	}()
 	maxAttempts := effectiveMaxAttempts(cfg, proxies)
@@ -1450,6 +1523,16 @@ func (e *probeEngine) probeModel(model string, cfg probeConfig, stop chan struct
 			return
 		}
 		lastError = record.Error
+		select {
+		case <-stop:
+			return
+		case <-brake:
+			return
+		default:
+		}
+		if e.modelPaused(model) {
+			return
+		}
 		if record.StateLength > 0 {
 			lastLength = record.StateLength
 		}
@@ -1606,6 +1689,11 @@ func (e *probeEngine) probeOnce(model, proxySpec string, cfg probeConfig) (probe
 		e.noteError(record.Error)
 		return record, ""
 	}
+	if entryExpired(stateEntry{Value: state}, cfg.TTL, time.Now().UTC()) {
+		record.Error = "captured state already expired"
+		e.noteError(record.Error)
+		return record, ""
+	}
 	record.Success = true
 	record.StateLength = len(state)
 	record.ObservedModel = observedModel
@@ -1652,21 +1740,44 @@ func (e *probeEngine) storeValue(model, value, source, proxySpec string, cfg pro
 		Valid:       true,
 	}
 	now := time.Now().UTC()
+	if entryExpired(entry, cfg.TTL, now) {
+		return
+	}
 	e.mu.Lock()
+	defer e.mu.Unlock()
 	if e.candidates == nil {
 		e.candidates = map[string]stateEntry{}
+	}
+	if e.promoteCandidateLocked(model, cfg, now) {
+		markStateDirty()
 	}
 	active, ok := e.values[model]
 	activeUsable := ok && active.Valid && active.Value != "" && !entryExpired(active, cfg.TTL, now)
 	if activeUsable {
+		// Echoed business state is not a successor. Neither it nor an older
+		// capture may replace a newer value already parked for takeover.
+		if !newerState(value, active.Value) {
+			return
+		}
+		if candidate, ok := e.candidates[model]; ok && candidate.Valid && !entryExpired(candidate, cfg.TTL, now) && !newerState(value, candidate.Value) {
+			return
+		}
 		// Keep serving the old token; park the fresh one as the next slot.
 		e.candidates[model] = entry
 	} else {
 		e.values[model] = entry
 		delete(e.candidates, model)
 	}
-	e.mu.Unlock()
 	markStateDirty()
+}
+
+func newerState(value, previous string) bool {
+	if value == previous {
+		return false
+	}
+	issued, known := parseTurnStateTimestamp(value)
+	prior, priorKnown := parseTurnStateTimestamp(previous)
+	return !known || !priorKnown || issued.After(prior)
 }
 
 // entryExpired reports whether a stored value's embedded timestamp plus the
@@ -1693,6 +1804,12 @@ func (e *probeEngine) promoteCandidateLocked(model string, cfg probeConfig, now 
 	}
 	active, has := e.values[model]
 	if has && active.Valid && active.Value != "" && !entryExpired(active, cfg.TTL, now) {
+		// Older snapshots may contain an echoed or older active in this slot.
+		// It cannot extend coverage and must not suppress the prefetch window.
+		if !newerState(candidate.Value, active.Value) {
+			delete(e.candidates, model)
+			return true
+		}
 		return false
 	}
 	e.values[model] = candidate
@@ -1707,9 +1824,9 @@ func (e *probeEngine) promoteCandidateLocked(model string, cfg probeConfig, now 
 // requests while probing stays idle. Expired actives are seamlessly replaced
 // by a parked candidate when one is available.
 func (e *probeEngine) activeValueFor(model string) string {
-	cfg := currentProbeConfig().Config
 	now := time.Now().UTC()
 	e.mu.Lock()
+	cfg := e.cfg.Config
 	dirty := e.promoteCandidateLocked(model, cfg, now)
 	entry, ok := e.values[model]
 	e.mu.Unlock()
@@ -1719,10 +1836,8 @@ func (e *probeEngine) activeValueFor(model string) string {
 	if !ok || !entry.Valid || entry.Value == "" {
 		return ""
 	}
-	if ts, okTime := parseTurnStateTimestamp(entry.Value); okTime {
-		if now.Sub(ts) > cfg.TTL {
-			return ""
-		}
+	if entryExpired(entry, cfg.TTL, now) {
+		return ""
 	}
 	return entry.Value
 }
@@ -1945,13 +2060,23 @@ func probeSummary() map[string]any {
 	// issued_at / expires_at / remaining_seconds / expired are computed fresh
 	// on every summary so the dashboard never relies on a stale estimate.
 	values := make([]map[string]any, 0, len(cfg.Models))
+	detectionModels := make([]string, 0, len(cfg.Models))
 	for _, model := range cfg.Models {
+		if !degradationDetectionEnabled(model, "") {
+			values = append(values, map[string]any{"model": model, "detection_enabled": false})
+			continue
+		}
+		detectionModels = append(detectionModels, model)
+		if probeTrack.promoteCandidateLocked(model, cfg, now) {
+			markStateDirty()
+		}
 		entry, ok := probeTrack.values[model]
 		if !ok {
 			entry = stateEntry{Model: model}
 		}
 		item := map[string]any{
 			"model":        entry.Model,
+			"detection_enabled": true,
 			"value_length": entry.ValueLength,
 			"source":       entry.Source,
 			"proxy":        entry.Proxy,
@@ -2013,7 +2138,7 @@ func probeSummary() map[string]any {
 	}
 	failures := make([]probeFailure, 0, len(cfg.Models))
 	for _, model := range cfg.Models {
-		if failure, ok := probeTrack.failures[model]; ok {
+		if failure, ok := probeTrack.failures[model]; ok && degradationDetectionEnabled(model, "") {
 			failures = append(failures, failure)
 		}
 	}
@@ -2029,13 +2154,13 @@ func probeSummary() map[string]any {
 		threshold = probeDefaultsSuspectThreshold
 	}
 	for _, model := range cfg.Models {
-		if suspicion, ok := probeTrack.suspects[model]; ok && suspicion.Failures >= threshold {
+		if suspicion, ok := probeTrack.suspects[model]; ok && degradationDetectionEnabled(model, "") && suspicion.Failures >= threshold {
 			suspects = append(suspects, suspicion)
 		}
 	}
 	businessMarks := make([]businessDegradation, 0, len(cfg.Models))
 	for _, model := range cfg.Models {
-		if mark, ok := probeTrack.business[model]; ok {
+		if mark, ok := probeTrack.business[model]; ok && degradationDetectionEnabled(model, "") {
 			businessMarks = append(businessMarks, mark)
 		}
 	}
@@ -2089,6 +2214,7 @@ func probeSummary() map[string]any {
 		"enabled":      cfg.Enabled,
 		"error":        cfgState.Error,
 		"models":       append([]string(nil), cfg.Models...),
+		"detection_models": detectionModels,
 		"proxies":      append([]string(nil), cfg.Proxies...),
 		"proxies_state": pool,
 		"pool_total":   len(cfg.Proxies),
@@ -2116,6 +2242,8 @@ func probeSummary() map[string]any {
 		"reject_degraded":  probeTrack.rejectDegraded,
 		"running":      probeTrack.running,
 		"halted":       probeTrack.halted,
+		"stopping":     probeTrack.stopping,
+		"prefetch_enabled": cfg.Enabled && cfgState.Error == "" && cfg.Prefetch > 0 && !probeTrack.halted && len(detectionModels) > 0,
 		"queue_length": len(probeTrack.queue),
 		"queue_models": queueModels(probeTrack.queue),
 		"active_models": activeModels(probeTrack.probing, probeTrack.queue),
@@ -2137,7 +2265,7 @@ func probeSummary() map[string]any {
 
 // probeTrackShutdown is called from plugin.shutdown.
 func probeTrackShutdown() {
-	probeTrack.stop()
-	probeTrack.stopPrefetchWatcher()
+	// Shutdown cancels execution, but must not persist a user-issued full stop.
+	probeTrack.shutdown()
 	closePersistence()
 }

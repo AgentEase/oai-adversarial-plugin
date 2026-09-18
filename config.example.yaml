@@ -45,6 +45,10 @@ plugins:
 
           # Probe priority order for manual rounds: models are tried in this
           # order, once each, until the round is stopped or the list ends.
+          # luna/terra families remain visible as "not checked" but never
+          # probe, reject for degradation, inject or backfill turn-state.
+          # Exemption follows the original requested model, not a response
+          # model: astra/sol routed to luna are still checked.
           models:
             - gpt-6-astra
             - gpt-5.6-sol
@@ -72,7 +76,8 @@ plugins:
           # their own pool-attempts budget instead (see below). The automatic
           # round cap = (plain count x N) + (pools x pool-attempts). Success
           # stores the baseline; failure only annotates the dashboard
-          # (cool-down hint), and nothing restarts automatically.
+          # (cool-down hint). The independent prefetch watcher can enqueue
+          # another attempt when its window and throttle allow it.
           probe-interval-seconds: 5
           attempts-per-proxy: 3
           # max-attempts-per-round: 0   # 0/absent = auto (see formula above)
@@ -101,7 +106,7 @@ plugins:
           # nothing about the endpoint being broken. Their failures keep
           # accumulating for the dashboard, but no cool-down is applied.
           # Mark such an entry with a trailing comment in the proxies file:
-          #   socks5h://10.255.1.1:18321  # pool:ipv6
+          #   socks5h://192.0.2.1:1080  # pool:ipv6 (documentation address)
           # Rotating pools also get an independent per-round budget below:
           # every attempt draws a fresh random source address, so one round
           # may sample up to pool-attempts times (default 100) to find a
@@ -118,9 +123,14 @@ plugins:
           # One healthy capture is enough: away from expiry nothing probes.
           # The watcher probes a model only while its active token's
           # remaining validity enters this window; the successor token
-          # takes over seamlessly the moment the active one expires, so
-          # business requests never see an empty slot. Set 0 to disable
-          # the automatic hand-off (fully manual again).
+          # takes over on lookup after the active expires, if still valid.
+          # Queue delays and upstream failures can prevent timely capture.
+          # Stop-current cancels this batch and preserves prefetch mode;
+          # stop-all (legacy stop-round) also halts prefetch across restarts.
+          # Start-round re-arms it. Set 0 for fully manual operation.
+          # Probe failures do not reject business while a healthy active
+          # or successor remains available. Actual business evidence is
+          # evaluated independently by the rejection switch below.
           prefetch-minutes: 3
           # Degraded-model rejection is ON by default and restored from the
           # state snapshot across reloads; toggle it from the dashboard

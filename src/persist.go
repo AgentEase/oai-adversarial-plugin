@@ -37,6 +37,7 @@ type persistedState struct {
 	StateVersion   int             `json:"state_version"`
 	SavedAt        string          `json:"saved_at,omitempty"`
 	RejectDegraded *bool           `json:"reject_degraded,omitempty"`
+	Halted         *bool           `json:"halted,omitempty"`
 	Paused         []string        `json:"paused,omitempty"`
 	Values         []stateEntry    `json:"values,omitempty"`
 	Candidates     []stateEntry    `json:"candidates,omitempty"`
@@ -96,6 +97,9 @@ func ensurePersistence() {
 // exiting. Safe to call multiple times and from any lifecycle call.
 func closePersistence() {
 	persistStopOnce.Do(func() {
+		// Persist mode and both baseline slots before returning to the host;
+		// shutdown must not rely on an asynchronously scheduled final flush.
+		flushStateNow()
 		close(persistStop)
 	})
 }
@@ -134,6 +138,8 @@ func collectState() persistedState {
 	probeTrack.mu.Lock()
 	enabled := probeTrack.rejectDegraded
 	state.RejectDegraded = &enabled
+	halted := probeTrack.halted
+	state.Halted = &halted
 	for model := range probeTrack.paused {
 		state.Paused = append(state.Paused, model)
 	}
@@ -248,6 +254,9 @@ func applyPersistedState(state persistedState) {
 	probeTrack.mu.Lock()
 	if state.RejectDegraded != nil {
 		probeTrack.rejectDegraded = *state.RejectDegraded
+	}
+	if state.Halted != nil {
+		probeTrack.halted = *state.Halted
 	}
 	if probeTrack.paused == nil {
 		probeTrack.paused = map[string]bool{}

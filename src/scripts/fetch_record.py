@@ -1,17 +1,13 @@
-"""Fetch audit records to locate and print the newest full 292-byte turn-state value."""
+"""Show audit metadata and token fingerprints without exporting token values."""
 
 import json
-import subprocess
+import hashlib
+import os
 import urllib.request
 
-environment = dict(
-    item.split('=', 1)
-    for item in json.loads(subprocess.run(
-        ['docker', 'inspect', 'cpa-usage-keeper'], check=True,
-        stdout=subprocess.PIPE, universal_newlines=True).stdout)[0]['Config']['Env']
-    if '=' in item
-)
-key = environment['CPA_MANAGEMENT_KEY']
+key = os.environ.get('CPA_MANAGEMENT_KEY')
+if not key:
+    raise SystemExit('Set CPA_MANAGEMENT_KEY in the environment before running this script.')
 
 api = urllib.request.Request('http://127.0.0.1:8317/v0/management/timezone-override/requests',
                              headers={'Authorization': 'Bearer ' + key})
@@ -28,7 +24,8 @@ for index, record in enumerate(records):
           '| mismatch:', record.get('model_mismatch'),
           '| length:', record.get('turn_state_length'),
           '| source:', record.get('turn_state_source'))
-    for name, value in sorted(record.items()):
-        if 'turn' in name.lower():
-            print('   ', name, '=>', value)
+    value = record.get('turn_state_value') or ''
+    if value:
+        print('   turn_state_sha256:', hashlib.sha256(value.encode('utf-8')).hexdigest())
+    print('   turn_state_truncated:', bool(record.get('turn_state_truncated')))
     print()

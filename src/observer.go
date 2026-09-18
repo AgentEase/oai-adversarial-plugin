@@ -153,6 +153,9 @@ func turnStateOverrideMatches(config turnStateOverrideConfig, models ...string) 
 // configured value; the baseline keeps serving even while the probe track is
 // idle - it is cached protection, not probing.
 func applyTurnStateOverride(model, requestedModel string, headers http.Header) (http.Header, string) {
+	if !degradationDetectionEnabled(model, requestedModel) {
+		return nil, ""
+	}
 	state := currentTurnStateOverride()
 	if state == nil {
 		return nil, ""
@@ -161,7 +164,7 @@ func applyTurnStateOverride(model, requestedModel string, headers http.Header) (
 	matched := false
 	for _, candidate := range []string{model, requestedModel} {
 		candidate = strings.TrimSpace(candidate)
-		if candidate == "" {
+		if candidate == "" || !degradationDetectionEnabled(candidate, "") {
 			continue
 		}
 		if state.Config.Enabled && turnStateModelMatched(state.Config, candidate) {
@@ -216,6 +219,9 @@ func isHealthyTurnState(model, observedModel, state string) bool {
 // repair applies (healthy value, no state, or no baseline yet), in which case
 // the response must pass through untouched.
 func repairTurnStateHeader(model, requestedModel, observedModel, state string) http.Header {
+	if !degradationDetectionEnabled(model, requestedModel) {
+		return nil
+	}
 	state = strings.TrimSpace(state)
 	if state == "" {
 		return nil
@@ -275,7 +281,7 @@ func interceptNonStreamingResponse(raw []byte) (responseInterceptOutput, error) 
 		history.observeModel(req.RequestID, "", model)
 	}
 	history.observeTurnState(req.RequestID, state, "response")
-	observeBusinessState(businessModelName(req.Model, req.RequestedModel), state, upstream)
+	observeBusinessStateForRequest(req.Model, req.RequestedModel, state, upstream)
 	out := responseInterceptOutput{}
 	if headers := repairTurnStateHeader(req.Model, req.RequestedModel, upstream, state); headers != nil {
 		out.Headers = headers
@@ -301,7 +307,7 @@ func interceptStreamChunk(raw []byte) (responseInterceptOutput, error) {
 	state := headerValue(req.ResponseHeaders, turnStateHeader)
 	history.observeTurnState(req.RequestID, state, "stream")
 	if upstream != "" || state != "" {
-		observeBusinessState(businessModelName(req.Model, req.RequestedModel), state, upstream)
+		observeBusinessStateForRequest(req.Model, req.RequestedModel, state, upstream)
 	}
 	out := responseInterceptOutput{}
 	if headers := repairTurnStateHeader(req.Model, req.RequestedModel, upstream, state); headers != nil {
@@ -320,14 +326,39 @@ func observeWebSocketEvent(raw []byte) (struct{}, error) {
 	}
 	if model, ok := probeUpstreamModel(event.Payload); ok {
 		history.observeModel(event.RequestID, event.TraceID, model)
-		observeBusinessState(businessModelName(event.Model, event.RequestedModel), "", model)
+		observeBusinessStateForRequest(event.Model, event.RequestedModel, "", model)
 	}
 	return struct{}{}, nil
 }
 
+// Exempt requests are selected by the user's requested model, never by the
+// model reported in the response. An astra response routed to luna must still
+// be checked. Family boundaries avoid exempting names such as lunafoo.
+func degradationDetectionEnabled(model, requestedModel string) bool {
+	if strings.TrimSpace(requestedModel) != "" {
+		model = requestedModel
+	}
+	model = strings.ToLower(strings.TrimSpace(model))
+	if model == "luna" || model == "terra" {
+		return false
+	}
+	parts := strings.Split(model, "-")
+	return !(len(parts) >= 3 && parts[0] == "gpt" && (parts[2] == "luna" || parts[2] == "terra"))
+}
+
+func observeBusinessStateForRequest(model, requestedModel, state, upstream string) {
+	if degradationDetectionEnabled(model, requestedModel) {
+		observeBusinessState(businessModelName(model, requestedModel), state, upstream)
+	}
+}
+
 // businessModelName picks the model name used as the business-observation
-// key: the executed model first, falling back to the requested one.
+// key: the executed model first, falling back to the requested one. If a
+// checked request was routed to an exempt family, retain the requested key.
 func businessModelName(model, requestedModel string) string {
+	if !degradationDetectionEnabled(model, "") && degradationDetectionEnabled(model, requestedModel) {
+		return strings.TrimSpace(requestedModel)
+	}
 	if value := strings.TrimSpace(model); value != "" {
 		return value
 	}
@@ -414,11 +445,13 @@ func (s *auditState) observeModel(requestID, traceID, upstreamModel string) {
 			continue
 		}
 		record.UpstreamModel = upstreamModel
-		record.ModelChecked = true
-		basis := strings.TrimSpace(record.Model)
-		if basis == "" {
-			basis = strings.TrimSpace(record.RequestedModel)
+		if !degradationDetectionEnabled(record.Model, record.RequestedModel) {
+			record.ModelChecked = false
+			record.ModelMismatch = false
+			return
 		}
+		record.ModelChecked = true
+		basis := businessModelName(record.Model, record.RequestedModel)
 		record.ModelMismatch = basis != "" && !strings.EqualFold(basis, upstreamModel)
 		return
 	}

@@ -6,9 +6,11 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -56,7 +58,7 @@ func TestProbeUpstreamModelRejectsOversizePayload(t *testing.T) {
 // attaches the observed model and turn-state.
 func TestObserveModelAndTurnState(t *testing.T) {
 	var state auditState
-	state.record(auditRecord{RequestID: "req-1", Model: "gpt-5.6-luna", conversion: conversion{Target: targetTimezone, Action: "inserted"}})
+	state.record(auditRecord{RequestID: "req-1", Model: "gpt-5.6-sol", conversion: conversion{Target: targetTimezone, Action: "inserted"}})
 	state.record(auditRecord{RequestID: "req-2", Model: "gpt-6-astra", conversion: conversion{Target: targetTimezone, Action: "unchanged"}})
 
 	state.observeModel("req-1", "", "gpt-6-luna")
@@ -129,8 +131,8 @@ func TestInterceptRequestRecordsTurnState(t *testing.T) {
 // the three response-side hooks and checks the attached observations.
 func TestResponseInterceptorsRecordObservations(t *testing.T) {
 	history = auditState{}
-	history.record(auditRecord{RequestID: "req-ns", Model: "gpt-5.6-luna", conversion: conversion{Target: targetTimezone, Action: "replaced"}})
-	history.record(auditRecord{RequestID: "req-stream", Model: "gpt-5.6-luna", conversion: conversion{Target: targetTimezone, Action: "inserted"}})
+	history.record(auditRecord{RequestID: "req-ns", Model: "gpt-5.6-sol", conversion: conversion{Target: targetTimezone, Action: "replaced"}})
+	history.record(auditRecord{RequestID: "req-stream", Model: "gpt-5.6-sol", conversion: conversion{Target: targetTimezone, Action: "inserted"}})
 
 	nonStream, _ := json.Marshal(responseInterceptRequest{
 		RequestID:       "req-ns",
@@ -303,24 +305,24 @@ func TestDegradedRejectDecision(t *testing.T) {
 	if message := degradedRejectMessage("gpt-6-luna"); message != "" {
 		t.Fatalf("unrelated model must pass: %q", message)
 	}
-	probeTrack.failures["gpt-5.6-luna"] = probeFailure{LastError: "model mismatch: requested gpt-5.6-luna got gpt-6-astra"}
-	if message := degradedRejectMessage("gpt-5.6-luna"); !strings.Contains(message, "模型不一致") {
+	probeTrack.failures["gpt-5.6-sol"] = probeFailure{LastError: "model mismatch: requested gpt-5.6-sol got gpt-6-astra"}
+	if message := degradedRejectMessage("gpt-5.6-sol"); !strings.Contains(message, "模型不一致") {
 		t.Fatalf("model mismatch must be rejected: %q", message)
 	}
-	probeTrack.failures["gpt-5.6-sol"] = probeFailure{LastError: "status 429: rate limit exceeded"}
-	if message := degradedRejectMessage("gpt-5.6-sol"); message != "" {
+	probeTrack.failures["other-model"] = probeFailure{LastError: "status 429: rate limit exceeded"}
+	if message := degradedRejectMessage("other-model"); message != "" {
 		t.Fatalf("rate limit must not count as degradation: %q", message)
 	}
 	// Early suspicion: below the threshold passes, at the threshold rejects.
-	delete(probeTrack.failures, "gpt-5.6-terra")
-	probeTrack.suspects["gpt-5.6-terra"] = probeSuspicion{Model: "gpt-5.6-terra", Failures: 2,
+	delete(probeTrack.failures, "gpt-6-astra")
+	probeTrack.suspects["gpt-6-astra"] = probeSuspicion{Model: "gpt-6-astra", Failures: 2,
 		LastError: "state length 312 != 292 (suspected degraded)"}
-	if message := degradedRejectMessage("gpt-5.6-terra"); message != "" {
+	if message := degradedRejectMessage("gpt-6-astra"); message != "" {
 		t.Fatalf("below threshold must pass: %q", message)
 	}
-	probeTrack.suspects["gpt-5.6-terra"] = probeSuspicion{Model: "gpt-5.6-terra", Failures: 3,
+	probeTrack.suspects["gpt-6-astra"] = probeSuspicion{Model: "gpt-6-astra", Failures: 3,
 		LastError: "state length 312 != 292 (suspected degraded)"}
-	if message := degradedRejectMessage("gpt-5.6-terra"); !strings.Contains(message, "尚未达到正式判定") {
+	if message := degradedRejectMessage("gpt-6-astra"); !strings.Contains(message, "尚未达到正式判定") {
 		t.Fatalf("threshold-crossing suspicion must be rejected: %q", message)
 	}
 }
@@ -359,18 +361,18 @@ func TestSuspectTracking(t *testing.T) {
 func TestProbeControlEndpoint(t *testing.T) {
 	probeTrack = &probeEngine{values: map[string]stateEntry{}, failures: map[string]probeFailure{},
 		paused: map[string]bool{}, probing: map[string]bool{}}
-	response, err := probeControl([]byte(`{"model":"gpt-5.6-luna","action":"pause"}`))
+	response, err := probeControl([]byte(`{"model":"gpt-5.6-sol","action":"pause"}`))
 	if err != nil || response.StatusCode != 200 {
 		t.Fatalf("pause failed: %+v %v", response, err)
 	}
-	if !probeTrack.paused["gpt-5.6-luna"] {
+	if !probeTrack.paused["gpt-5.6-sol"] {
 		t.Fatal("pause must mark the model")
 	}
-	response, err = probeControl([]byte(`{"model":"gpt-5.6-luna","action":"resume"}`))
+	response, err = probeControl([]byte(`{"model":"gpt-5.6-sol","action":"resume"}`))
 	if err != nil || response.StatusCode != 200 {
 		t.Fatalf("resume failed: %+v %v", response, err)
 	}
-	if probeTrack.paused["gpt-5.6-luna"] {
+	if probeTrack.paused["gpt-5.6-sol"] {
 		t.Fatal("resume must clear the mark")
 	}
 	response, err = probeControl([]byte(`{"action":"reject-degraded","enabled":true}`))
@@ -455,7 +457,7 @@ func TestPersistenceRoundTrip(t *testing.T) {
 	probeTrack.setModelPaused("gpt-5.6-terra", true)
 	probeTrack.storeValue("gpt-6-astra", "sample-state-0001", "probe", "direct", cfg)
 	probeTrack.noteError("state length 312 != 292 (suspected degraded)")
-	probeTrack.noteProbeFailure("gpt-5.6-luna", probeRecord{Error: "state length 312 != 292 (suspected degraded)"}, cfg)
+	probeTrack.noteProbeFailure("gpt-6-astra", probeRecord{Error: "state length 312 != 292 (suspected degraded)"}, cfg)
 	probeTrack.failures["gpt-5.6-sol"] = probeFailure{Model: "gpt-5.6-sol", Attempts: 30, Rounds: 10,
 		LastError: "state length 312 != 292 (suspected degraded)", FailedAt: "2026-09-18T02:20:00Z"}
 	probeTrack.appendRecord(probeRecord{Time: "2026-09-18T02:20:00Z", Model: "gpt-6-astra", Success: true})
@@ -485,7 +487,7 @@ func TestPersistenceRoundTrip(t *testing.T) {
 	if _, ok := probeTrack.failures["gpt-5.6-sol"]; !ok {
 		t.Fatal("failure annotation must be restored")
 	}
-	if suspicion, ok := probeTrack.suspects["gpt-5.6-luna"]; !ok || suspicion.Failures != 1 {
+	if suspicion, ok := probeTrack.suspects["gpt-6-astra"]; !ok || suspicion.Failures != 1 {
 		t.Fatalf("suspicion must be restored: %+v", suspicion)
 	}
 	if probeTrack.probesTotal != 1 {
@@ -729,25 +731,25 @@ func TestRepairTurnStateHeader(t *testing.T) {
 		paused: map[string]bool{}, probing: map[string]bool{}}
 	probeTrack.cfg.Config = parseProbeConfig(probeConfigYAML{})
 	healthy := synthStateToken(time.Now().Add(-5 * time.Minute))
-	probeTrack.values["gpt-5.6-luna"] = stateEntry{Model: "gpt-5.6-luna", Value: healthy,
+	probeTrack.values["gpt-5.6-sol"] = stateEntry{Model: "gpt-5.6-sol", Value: healthy,
 		ValueLength: len(healthy), Valid: true}
 
 	// Length anomaly: replaced with the healthy baseline.
-	headers := repairTurnStateHeader("gpt-5.6-luna", "", "gpt-5.6-luna", strings.Repeat("A", 312))
+	headers := repairTurnStateHeader("gpt-5.6-sol", "", "gpt-5.6-sol", strings.Repeat("A", 312))
 	if headers == nil || headers.Get(turnStateHeader) != healthy {
 		t.Fatalf("degraded state must be backfilled with the baseline: %+v", headers)
 	}
 	// Model mismatch: replaced too.
-	headers = repairTurnStateHeader("gpt-5.6-luna", "", "gpt-6-astra", strings.Repeat("A", 292))
+	headers = repairTurnStateHeader("gpt-5.6-sol", "", "gpt-6-astra", strings.Repeat("A", 292))
 	if headers == nil || headers.Get(turnStateHeader) != healthy {
 		t.Fatalf("model mismatch must be backfilled: %+v", headers)
 	}
 	// Healthy and consistent: untouched.
-	if headers := repairTurnStateHeader("gpt-5.6-luna", "", "gpt-5.6-luna", healthy); headers != nil {
+	if headers := repairTurnStateHeader("gpt-5.6-sol", "", "gpt-5.6-sol", healthy); headers != nil {
 		t.Fatalf("healthy state must pass through: %+v", headers)
 	}
 	// No state at all: untouched.
-	if headers := repairTurnStateHeader("gpt-5.6-luna", "", "gpt-5.6-luna", ""); headers != nil {
+	if headers := repairTurnStateHeader("gpt-5.6-sol", "", "gpt-5.6-sol", ""); headers != nil {
 		t.Fatalf("absent state must pass through: %+v", headers)
 	}
 	// No baseline for the model: untouched (nothing to backfill with).
@@ -760,7 +762,7 @@ func TestRepairTurnStateHeader(t *testing.T) {
 // synthetic token with the production layout; malformed inputs are rejected.
 func TestParseTurnStateTimestamp(t *testing.T) {
 	// Deterministic synthetic sample with the same Fernet layout as production.
-	const token = "gAAAAABqrJWYCQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0-P0BBQkNERUZHSElKS0xNTk9QUVJTVFVWV1hZWltcXV5fYGFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6e3x9fn-AgYKDhIWGh4iJiouMjY6PkJGSk5SVlpeYmZqbnJ2en6ChoqOkpaanqKmqq6ytrq-wsbKztLW2t7i5uru8vb6_wMHCw8TFxsfIycrLzM3Oz9DR0tPU1dbX2A=="
+	token := synthStateToken(time.Unix(1789695384, 0))
 	ts, ok := parseTurnStateTimestamp(token)
 	if !ok {
 		t.Fatal("valid token must decode")
@@ -790,7 +792,7 @@ func TestProbeConfigDefaultsAndOverrides(t *testing.T) {
 		WindowMinutes:   &window,
 		AttemptsPerHop:  &attempts,
 		CooldownMinutes: &cooldown,
-		Proxies:         []string{"direct", "socks5://a:b@1.2.3.4:443"},
+		Proxies:         []string{"direct", "socks5://a:b@192.0.2.2:1080"},
 	}
 	cfg := parseProbeConfig(block)
 	if !cfg.Enabled || cfg.ScanInterval != 15*time.Second || cfg.Window != 4*time.Minute || cfg.AttemptsPerHop != 2 || cfg.Cooldown != 3*time.Minute {
@@ -1022,7 +1024,7 @@ func TestPoolNeverBenched(t *testing.T) {
 	if cfg.ExitPoolFailThreshold != 10 {
 		t.Fatalf("pool threshold default wrong: %d", cfg.ExitPoolFailThreshold)
 	}
-	poolSpec := "socks5h://10.255.1.1:18321"
+	poolSpec := "socks5h://192.0.2.1:1080"
 	probeTrack.cfg.Config.ProxyPools = map[string]bool{poolSpec: true}
 	probeTrack.cfg.Config.ProxyLabels = map[string]string{poolSpec: "IPv6 池"}
 	pool := []string{"direct", poolSpec}
@@ -1345,7 +1347,7 @@ func TestResetExit(t *testing.T) {
 	}
 	probeTrack.cfg.Config = parseProbeConfig(probeConfigYAML{Enabled: &enabled, Models: []string{"gpt-6-astra"}})
 	cfg := probeTrack.cfg.Config
-	pool := []string{"direct", "socks5://a:b@1.2.3.4:443"}
+	pool := []string{"direct", "socks5://a:b@192.0.2.2:1080"}
 	now := time.Now().UTC()
 	for _, spec := range pool {
 		for i := 0; i < 3; i++ {
@@ -1405,7 +1407,7 @@ func TestExitEnableDisable(t *testing.T) {
 		paused:      map[string]bool{}, probing: map[string]bool{},
 	}
 	cfg := parseProbeConfig(probeConfigYAML{Enabled: &enabled, Models: []string{"gpt-6-astra"}})
-	cfg.Proxies = []string{"direct", "socks5://a:b@1.2.3.4:443"}
+	cfg.Proxies = []string{"direct", "socks5://a:b@192.0.2.2:1080"}
 	probeTrack.cfg.Config = cfg
 	pool := cfg.Proxies
 	now := time.Now().UTC()
@@ -1461,14 +1463,14 @@ func TestPoolBudgetShare(t *testing.T) {
 	if cfg.PoolAttempts != 100 {
 		t.Fatalf("pool budget default wrong: %d", cfg.PoolAttempts)
 	}
-	pool := "socks5h://10.255.1.1:18321"
+	pool := "socks5h://192.0.2.1:1080"
 	cfg.ProxyPools = map[string]bool{pool: true}
-	proxies := []string{"direct", "socks5://a:b@1.2.3.4:443", pool}
+	proxies := []string{"direct", "socks5://a:b@192.0.2.2:1080", pool}
 	if got := effectiveMaxAttempts(cfg, proxies); got != 3+3+100 {
 		t.Fatalf("auto cap must weight pools separately: %d", got)
 	}
 	// All plain exits: legacy auto behaviour stays (count x per-hop).
-	plain := []string{"direct", "socks5://a:b@1.2.3.4:443"}
+	plain := []string{"direct", "socks5://a:b@192.0.2.2:1080"}
 	if got := effectiveMaxAttempts(cfg, plain); got != 6 {
 		t.Fatalf("plain-only auto cap wrong: %d", got)
 	}
@@ -1491,7 +1493,7 @@ func TestPoolBudgetShare(t *testing.T) {
 // once every usable egress is spent.
 func TestPickRotationBudgets(t *testing.T) {
 	direct := "direct"
-	pool := "socks5h://10.255.1.1:18321"
+	pool := "socks5h://192.0.2.1:1080"
 	rotation := []string{direct, pool}
 	budgets := map[string]int{direct: 2, pool: 4}
 	cursor := 0
@@ -1555,7 +1557,7 @@ func TestExitCircuitBreaker(t *testing.T) {
 	if cfg.ExitSuccessCooldown != 30*time.Minute {
 		t.Fatalf("exit success rest default wrong: %v", cfg.ExitSuccessCooldown)
 	}
-	pool := []string{"direct", "socks5h://[2001:db8::1]:1080", "socks5://a:b@1.2.3.4:443"}
+	pool := []string{"direct", "socks5h://[2001:db8::1]:1080", "socks5://a:b@192.0.2.2:1080"}
 	now := time.Now().UTC()
 	if got := probeTrack.availableProxies(pool, now); len(got) != 3 {
 		t.Fatalf("all exits must start usable: %v", got)
@@ -1909,11 +1911,11 @@ func TestResponseHookMethodsAreRouted(t *testing.T) {
 // the already observed upstream model and turn-state.
 func TestAuditUpsertPreservesObservations(t *testing.T) {
 	var state auditState
-	state.record(auditRecord{RequestID: "retry-1", Model: "gpt-5.6-luna", conversion: conversion{Target: targetTimezone, Action: "inserted"}})
+	state.record(auditRecord{RequestID: "retry-1", Model: "gpt-5.6-sol", conversion: conversion{Target: targetTimezone, Action: "inserted"}})
 	state.observeModel("retry-1", "", "gpt-6-luna")
 	state.observeTurnState("retry-1", "abcdef", "stream")
 	// A retry re-records the request level; observed fields must survive.
-	state.record(auditRecord{RequestID: "retry-1", Model: "gpt-5.6-luna", conversion: conversion{Target: targetTimezone, Action: "unchanged"}})
+	state.record(auditRecord{RequestID: "retry-1", Model: "gpt-5.6-sol", conversion: conversion{Target: targetTimezone, Action: "unchanged"}})
 	records := state.snapshot()["records"].([]auditRecord)
 	if len(records) != 1 {
 		t.Fatalf("retry must update in place: %d records", len(records))
@@ -1959,5 +1961,435 @@ func TestTurnStateInjectedLengthRecorded(t *testing.T) {
 	after := history.snapshot()["records"].([]auditRecord)[0]
 	if after.TurnStateInjectedLength != len("REWRITTEN-STATE") {
 		t.Fatalf("injected length lost on retry: %+v", after)
+	}
+}
+
+func newPrefetchTestEngine(t *testing.T) *probeEngine {
+	t.Helper()
+	enabled := true
+	e := &probeEngine{
+		values: map[string]stateEntry{}, candidates: map[string]stateEntry{},
+		failures: map[string]probeFailure{}, suspects: map[string]probeSuspicion{},
+		business: map[string]businessDegradation{}, paused: map[string]bool{},
+		probing: map[string]bool{}, prefetchGate: map[string]time.Time{}, rejectDegraded: true,
+	}
+	e.cfg.Config = parseProbeConfig(probeConfigYAML{Enabled: &enabled, Models: []string{"gpt-6-astra"}})
+	e.cfg.Config.CredFile = filepath.Join(t.TempDir(), "missing-auth.json")
+	e.cfg.Config.ProbeInterval = time.Millisecond
+	e.cfg.Config.MaxAttemptsPerRound = 1
+	previous := probeTrack
+	probeTrack = e
+	t.Setenv("LKS_TZ_STATE_FILE", filepath.Join(t.TempDir(), "state.json"))
+	t.Cleanup(func() {
+		e.stopPrefetchWatcher()
+		e.stop()
+		waitPrefetchIdle(t, e)
+		probeTrack = previous
+	})
+	return e
+}
+
+func waitPrefetchIdle(t *testing.T, e *probeEngine) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		e.mu.Lock()
+		busy := e.queueActive || len(e.probing) > 0
+		e.mu.Unlock()
+		if !busy {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("probe worker did not drain")
+}
+
+func TestPrefetchStopModes(t *testing.T) {
+	e := newPrefetchTestEngine(t)
+	cfg := e.cfg.Config
+	e.storeValue("gpt-6-astra", synthStateToken(time.Now().Add(-cfg.TTL+2*time.Minute)), "seed", "", cfg)
+	response, _ := probeControl([]byte(`{"action":"stop-current"}`))
+	if response.StatusCode != 200 || e.halted {
+		t.Fatal("stopping the current batch must preserve automatic prefetch")
+	}
+	e.prefetchScan()
+	waitPrefetchIdle(t, e)
+	if e.probesTotal != 1 {
+		t.Fatal("the next scan must still probe the expiring baseline")
+	}
+	for _, action := range []string{"stop-all", "stop-round"} {
+		body, _ := json.Marshal(map[string]string{"action": action})
+		response, _ = probeControl(body)
+		e.prefetchScan()
+		if response.StatusCode != 200 || !e.halted || e.probesTotal != 1 || e.queueActive {
+			t.Fatal("full stop and its legacy alias must suppress the watcher")
+		}
+	}
+	e.stopCurrent()
+	if !e.halted {
+		t.Fatal("stop-current must not undo a prior full stop")
+	}
+}
+
+func TestPrefetchStoppingDrainsRequest(t *testing.T) {
+	e := newPrefetchTestEngine(t)
+	entered, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		once.Do(func() { close(entered) })
+		<-release
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	t.Cleanup(upstream.Close)
+	t.Cleanup(func() { close(release) })
+	e.cfg.Config.UpstreamURL = upstream.URL
+	e.cfg.Config.MaxAttemptsPerRound = 3
+	if err := os.WriteFile(e.cfg.Config.CredFile, []byte(`{"access_token":"mock-only"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	e.probeModelAsync("gpt-6-astra")
+	select {
+	case <-entered:
+	case <-time.After(3 * time.Second):
+		t.Fatal("mock request did not start")
+	}
+	e.stopCurrent()
+	summary := probeSummary()
+	if summary["stopping"] != true || summary["running"] != true || summary["prefetch_enabled"] != true {
+		t.Fatal("an outstanding request must display stopping with prefetch still armed")
+	}
+	if e.enqueueTask("gpt-5.6-sol", true) || e.start() {
+		t.Fatal("new requests must not overtake the draining worker")
+	}
+	// Release via the cleanup channel without closing it twice.
+	release <- struct{}{}
+	waitPrefetchIdle(t, e)
+	if e.probesTotal != 1 || e.stopping || e.running || len(e.failures) != 0 {
+		t.Fatal("stopping must drain the current request without retries or failure annotation")
+	}
+}
+
+func TestPrefetchCancelledBeforeProbe(t *testing.T) {
+	e := newPrefetchTestEngine(t)
+	dequeuedBrake := e.abortSignal()
+	e.stopCurrent()
+	e.probeModel("gpt-6-astra", e.cfg.Config, dequeuedBrake)
+	if e.probesTotal != 0 {
+		t.Fatal("a stop after dequeue must still cancel before the first attempt")
+	}
+}
+
+func TestPrefetchPauseRemovesQueuedModel(t *testing.T) {
+	e := newPrefetchTestEngine(t)
+	e.queue = []probeTask{{Model: "gpt-6-astra"}, {Model: "gpt-5.6-sol"}}
+	e.setModelPaused("gpt-6-astra", true)
+	if len(e.queue) != 1 || e.queue[0].Model != "gpt-5.6-sol" {
+		t.Fatal("pausing must remove that model from the queue immediately")
+	}
+	if e.enqueueTask("gpt-6-astra", true) {
+		t.Fatal("one-off refresh must respect explicit model pause")
+	}
+}
+
+func TestPrefetchCapturePreservesNewerState(t *testing.T) {
+	e := newPrefetchTestEngine(t)
+	cfg, now := e.cfg.Config, time.Now()
+	active := synthStateToken(now.Add(-10 * time.Minute))
+	successor := synthStateToken(now.Add(-time.Minute))
+	e.storeValue("gpt-6-astra", active, "seed", "", cfg)
+	e.storeValue("gpt-6-astra", active, "business", "", cfg)
+	if len(e.candidates) != 0 {
+		t.Fatal("an echoed active must not masquerade as a ready successor")
+	}
+	e.candidates["gpt-6-astra"] = e.values["gpt-6-astra"]
+	probeSummary()
+	if len(e.candidates) != 0 {
+		t.Fatal("an echoed successor restored from an older snapshot must be discarded")
+	}
+	e.storeValue("gpt-6-astra", successor, "probe", "direct", cfg)
+	for _, value := range []string{active, synthStateToken(now.Add(-5*time.Minute)), synthStateToken(now.Add(-2*cfg.TTL))} {
+		e.storeValue("gpt-6-astra", value, "business", "", cfg)
+		if e.values["gpt-6-astra"].Value != active || e.candidates["gpt-6-astra"].Value != successor {
+			t.Fatal("repeated, older and expired captures must preserve both healthy slots")
+		}
+	}
+}
+
+func TestPrefetchRejectsExpiredCapture(t *testing.T) {
+	e := newPrefetchTestEngine(t)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set(turnStateHeader, synthStateToken(time.Now().Add(-2*e.cfg.Config.TTL)))
+		_, _ = w.Write([]byte("data: {\"type\":\"response.created\",\"response\":{\"model\":\"gpt-6-astra\"}}\n\n"))
+	}))
+	defer upstream.Close()
+	e.cfg.Config.UpstreamURL = upstream.URL
+	if err := os.WriteFile(e.cfg.Config.CredFile, []byte(`{"access_token":"mock-only"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	record, value := e.probeOnce("gpt-6-astra", "direct", e.cfg.Config)
+	if value != "" || record.Success || !strings.Contains(record.Error, "expired") {
+		t.Fatalf("expired capture check: success=%v returned=%v error=%q", record.Success, value != "", record.Error)
+	}
+}
+
+func TestPrefetchCandidateSuppressesQueueAndPromotes(t *testing.T) {
+	e := newPrefetchTestEngine(t)
+	cfg := e.cfg.Config
+	active := synthStateToken(time.Now().Add(-cfg.TTL + 2*time.Minute))
+	successor := synthStateToken(time.Now())
+	e.storeValue("gpt-6-astra", active, "seed", "", cfg)
+	e.storeValue("gpt-6-astra", successor, "probe", "direct", cfg)
+	if !e.start() || e.queueActive || e.probesTotal != 0 {
+		t.Fatal("a ready successor must suppress manual round duplication")
+	}
+	e.queue = []probeTask{{Model: "gpt-6-astra"}}
+	e.queueLoop()
+	if e.probesTotal != 0 {
+		t.Fatal("a successor acquired while queued must suppress the stale task at dequeue")
+	}
+	e.values["gpt-6-astra"] = stateEntry{Model: "gpt-6-astra", Value: synthStateToken(time.Now().Add(-2*cfg.TTL)), Valid: true}
+	e.stop()
+	probeSummary()
+	if e.values["gpt-6-astra"].Value != successor || len(e.candidates) != 0 || !e.halted {
+		t.Fatal("summary must reflect due hand-off even while probing is halted")
+	}
+}
+
+func TestPrefetchRestartKeepsBaselineAndMode(t *testing.T) {
+	for _, halted := range []bool{false, true} {
+		t.Run(map[bool]string{false: "armed", true: "halted"}[halted], func(t *testing.T) {
+			e := newPrefetchTestEngine(t)
+			cfg := e.cfg.Config
+			active := synthStateToken(time.Now().Add(-10 * time.Minute))
+			successor := synthStateToken(time.Now())
+			e.storeValue("gpt-6-astra", active, "seed", "", cfg)
+			e.storeValue("gpt-6-astra", successor, "probe", "direct", cfg)
+			e.halted = halted
+			e.shutdown()
+			if e.enqueueTask("gpt-6-astra", true) || e.start() {
+				t.Fatal("shutdown must block new work without persisting an operator halt")
+			}
+			savePersistedState()
+			e.values, e.candidates = map[string]stateEntry{}, map[string]stateEntry{}
+			e.shuttingDown = false // the next process starts with a fresh lifecycle
+			e.halted = !halted
+			loadPersistedState()
+			e.prefetchScan()
+			if e.halted != halted || e.activeValueFor("gpt-6-astra") != active || e.candidates["gpt-6-astra"].Value != successor || e.queueActive {
+				t.Fatal("restart must restore both slots and mode without probing a healthy baseline")
+			}
+			applyPersistedState(persistedState{})
+			if e.halted != halted {
+				t.Fatal("legacy snapshots without halted must not overwrite an explicit mode")
+			}
+		})
+	}
+}
+
+func TestPrefetchFailureDoesNotRejectHealthyBusiness(t *testing.T) {
+	e := newPrefetchTestEngine(t)
+	cfg := e.cfg.Config
+	turnStateOverride.Store(&turnStateOverrideState{Config: turnStateOverrideConfig{Enabled: true, Force: true, Models: cfg.Models}})
+	t.Cleanup(func() { turnStateOverride = atomic.Value{} })
+	active := synthStateToken(time.Now().Add(-cfg.TTL + 3*time.Minute))
+	successor := synthStateToken(time.Now())
+	e.storeValue("gpt-6-astra", active, "seed", "", cfg)
+	assertBusiness := func(want string, blocked bool) {
+		t.Helper()
+		raw, _ := json.Marshal(interceptRequest{RequestID: "prefetch-business", ToFormat: "codex", Model: "gpt-6-astra", Body: []byte(`{"input":"hello"}`)})
+		response, err := intercept(raw)
+		if err != nil || response.Terminate != blocked {
+			t.Fatalf("business rejection mismatch: blocked=%v response=%+v err=%v", blocked, response, err)
+		}
+		if !blocked && response.Headers.Get(turnStateHeader) != want {
+			t.Fatal("business must retain the expected healthy state")
+		}
+	}
+	for i := 0; i < cfg.SuspectThreshold; i++ {
+		e.noteProbeFailure("gpt-6-astra", probeRecord{Error: "model mismatch: requested gpt-6-astra got other"}, cfg)
+		assertBusiness(active, false)
+	}
+	e.failures["gpt-6-astra"] = probeFailure{LastError: "model mismatch: requested gpt-6-astra got other"}
+	assertBusiness(active, false)
+	e.storeValue("gpt-6-astra", successor, "probe", "direct", cfg)
+	assertBusiness(active, false)
+	// Keep the old probe annotations to ensure rejection checks promote before
+	// deciding, rather than relying on a probe-success side effect.
+	e.values["gpt-6-astra"] = stateEntry{Model: "gpt-6-astra", Value: synthStateToken(time.Now().Add(-2*cfg.TTL)), Valid: true}
+	assertBusiness(successor, false)
+	if len(e.candidates) != 0 {
+		t.Fatal("business must atomically consume the successor")
+	}
+	if reason := degradedRejectMessage("gpt-6-astra-preview", "gpt-6-astra"); reason != "" {
+		t.Fatal("the requested-model baseline must also protect a routed alias")
+	}
+	e.values["gpt-6-astra"] = stateEntry{Value: synthStateToken(time.Now().Add(-2*cfg.TTL)), Valid: true}
+	assertBusiness("", true)
+	e.storeValue("gpt-6-astra", successor, "probe", "direct", cfg)
+	e.noteBusinessDegradation("gpt-6-astra", "业务模型不一致")
+	assertBusiness("", true)
+}
+
+func TestUncheckedModelPolicy(t *testing.T) {
+	for _, tc := range []struct {
+		model, requested string
+		enabled          bool
+	}{
+		{"gpt-5.6-luna", "", false}, {"gpt-5.6-terra", "", false},
+		{" GPT-6-LUNA-preview ", "", false}, {"gpt-6-terra-20260919", "", false},
+		{"luna", "", false}, {"terra", "", false},
+		{"gpt-6-astra", "gpt-5.6-luna", false},
+		{"gpt-5.6-luna", "gpt-6-astra", true},
+		{"gpt-5.6-sol", "", true}, {"gpt-6-astra-luna", "", true},
+		{"gpt-5.6-lunafoo", "", true}, {"other-luna", "", true},
+	} {
+		if got := degradationDetectionEnabled(tc.model, tc.requested); got != tc.enabled {
+			t.Errorf("policy(%q, %q)=%v; want %v", tc.model, tc.requested, got, tc.enabled)
+		}
+	}
+}
+
+func TestUncheckedRequestsIgnoreOldStateAndErrors(t *testing.T) {
+	e := newPrefetchTestEngine(t)
+	turnStateOverride.Store(&turnStateOverrideState{Config: turnStateOverrideConfig{
+		Enabled: true, Force: true, Models: []string{"gpt-5.6-luna", "gpt-5.6-terra"}, Value: "STATIC-FALLBACK",
+	}})
+	t.Cleanup(func() { turnStateOverride = atomic.Value{} })
+	for _, model := range []string{"gpt-5.6-luna", "gpt-5.6-terra"} {
+		e.values[model] = stateEntry{Model: model, Value: synthStateToken(time.Now()), Valid: true}
+		e.failures[model] = probeFailure{Model: model, LastError: "model mismatch"}
+		e.suspects[model] = probeSuspicion{Model: model, Failures: 100, LastError: "state length 312 != 292"}
+		e.business[model] = businessDegradation{Model: model, Reason: "历史模型不一致"}
+		for _, length := range []int{0, 1, 292, 312} {
+			headers := http.Header{turnStateHeader: {strings.Repeat("x", length)}}
+			raw, _ := json.Marshal(interceptRequest{RequestID: "unchecked-" + model,
+				ToFormat: "codex", Model: model, Headers: headers, Body: []byte(`{"input":"hello"}`)})
+			response, err := intercept(raw)
+			if err != nil || response.Terminate || response.Headers.Get(turnStateHeader) != "" {
+				t.Fatalf("unchecked request must pass without cached/static state injection: model=%s length=%d err=%v", model, length, err)
+			}
+			if headers.Get(turnStateHeader) != strings.Repeat("x", length) {
+				t.Fatal("the client's state must remain untouched")
+			}
+		}
+		if e.degradedRejectReason(model) != "" {
+			t.Fatal("restored failure, suspicion and business marks must not reject an exempt model")
+		}
+	}
+}
+
+func TestUncheckedResponseHooks(t *testing.T) {
+	e := newPrefetchTestEngine(t)
+	history = auditState{}
+	for _, model := range []string{"gpt-5.6-luna", "gpt-5.6-terra"} {
+		for _, state := range []string{"", "short", strings.Repeat("x", 292), strings.Repeat("x", 312)} {
+			id := "unchecked-response-" + model
+			history.record(auditRecord{RequestID: id, Model: model})
+			body := []byte(`{"type":"response.created","response":{"model":"gpt-6-astra"}}`)
+			nonStream, _ := json.Marshal(responseInterceptRequest{RequestID: id, Model: model,
+				Body: body, ResponseHeaders: http.Header{turnStateHeader: {state}}})
+			out, err := interceptNonStreamingResponse(nonStream)
+			if err != nil || out.Headers != nil || out.Body != nil {
+				t.Fatal("unchecked non-streaming responses must pass unchanged")
+			}
+			chunk, _ := json.Marshal(streamChunkInterceptRequest{RequestID: id, Model: model, ChunkIndex: 0,
+				Body: body, ResponseHeaders: http.Header{turnStateHeader: {state}}})
+			out, err = interceptStreamChunk(chunk)
+			if err != nil || out.Headers != nil || out.Body != nil {
+				t.Fatal("unchecked streaming responses must pass unchanged")
+			}
+			event, _ := json.Marshal(webSocketResponseEvent{RequestID: id, Model: model, Payload: body})
+			if _, err := observeWebSocketEvent(event); err != nil {
+				t.Fatal(err)
+			}
+			record := history.snapshot()["records"].([]auditRecord)[0]
+			if !record.DetectionExempt || record.ModelChecked || record.ModelMismatch || record.UpstreamModel != "gpt-6-astra" {
+				t.Fatal("observations must stay available without evaluating model consistency")
+			}
+			if out := repairTurnStateHeader(model, "", "gpt-6-astra", state); out != nil {
+				t.Fatal("unchecked responses must not be backfilled")
+			}
+		}
+	}
+	if len(e.business) != 0 || len(e.suspects) != 0 || len(e.values) != 0 {
+		t.Fatal("unchecked observations must not create degradation marks or healthy baselines")
+	}
+}
+
+func TestUncheckedProbeEntrypointsAndSummary(t *testing.T) {
+	e := newPrefetchTestEngine(t)
+	e.cfg.Config.Models = []string{"gpt-5.6-luna", "gpt-5.6-terra"}
+	for _, model := range e.cfg.Config.Models {
+		for _, action := range []string{"pause", "resume", "probe-model"} {
+			body, _ := json.Marshal(map[string]string{"model": model, "action": action})
+			response, _ := probeControl(body)
+			var result map[string]any
+			if err := json.Unmarshal(response.Body, &result); err != nil || response.StatusCode != 200 || result["skipped"] != true {
+				t.Fatal("unchecked model controls must explicitly acknowledge a no-op")
+			}
+		}
+		e.values[model] = stateEntry{Model: model, Value: synthStateToken(time.Now().Add(-2*e.cfg.Config.TTL)), Valid: true}
+		e.failures[model] = probeFailure{Model: model, LastError: "model mismatch"}
+		e.suspects[model] = probeSuspicion{Model: model, Failures: 100, LastError: "state length 312 != 292"}
+		e.business[model] = businessDegradation{Model: model, Reason: "旧标记"}
+		if e.probeModelAsync(model) || e.enqueueTask(model, false) {
+			t.Fatal("unchecked models must not enter the probe queue")
+		}
+		e.probeModel(model, e.cfg.Config, make(chan struct{}))
+		e.noteProbeFailure(model, probeRecord{Error: "model mismatch"}, e.cfg.Config)
+		if e.suspects[model].Failures != 100 {
+			t.Fatal("unchecked models must not accumulate suspicion")
+		}
+	}
+	e.start()
+	e.prefetchScan()
+	if e.queueActive || len(e.queue) != 0 || e.probesTotal != 0 || len(e.prefetchGate) != 0 {
+		t.Fatal("manual rounds and automatic prefetch must skip unchecked models")
+	}
+	summary := probeSummary()
+	if summary["prefetch_enabled"] != false || len(summary["detection_models"].([]string)) != 0 {
+		t.Fatal("all-unchecked configuration must not advertise prefetch")
+	}
+	for _, value := range summary["values"].([]map[string]any) {
+		if value["detection_enabled"] != false || len(value) != 2 {
+			t.Fatal("unchecked rows must expose their policy instead of stale baseline status")
+		}
+	}
+	if len(summary["failures"].([]probeFailure)) != 0 || len(summary["suspects"].([]probeSuspicion)) != 0 || len(summary["business"].([]businessDegradation)) != 0 {
+		t.Fatal("historical marks must not appear as current unchecked-model status")
+	}
+}
+
+func TestUncheckedRoutingKeepsAstraDetection(t *testing.T) {
+	e := newPrefetchTestEngine(t)
+	observeBusinessStateForRequest("gpt-6-astra", "", "", "gpt-5.6-luna")
+	if degradedRejectMessage("gpt-6-astra") == "" {
+		t.Fatal("astra routed to luna must still be detected")
+	}
+	if degradedRejectMessage("gpt-6-astra", "gpt-5.6-luna") != "" {
+		t.Fatal("an explicit user request for luna must remain exempt after routing")
+	}
+	delete(e.business, "gpt-6-astra")
+	observeBusinessStateForRequest("gpt-5.6-luna", "gpt-6-astra", "", "gpt-5.6-luna")
+	if degradedRejectMessage("gpt-5.6-luna", "gpt-6-astra") == "" {
+		t.Fatal("routing a checked request to an unchecked model must not exempt the original request")
+	}
+	delete(e.business, "gpt-6-astra")
+	observeBusinessStateForRequest("gpt-6-astra", "gpt-5.6-terra", "short", "gpt-5.6-sol")
+	if len(e.business) != 0 {
+		t.Fatal("explicit terra requests must not create marks on a routed model")
+	}
+}
+
+func TestUncheckedLegacyAuditSnapshot(t *testing.T) {
+	var audit auditState
+	audit.records = []auditRecord{{Model: "gpt-5.6-luna", UpstreamModel: "gpt-6-astra", ModelChecked: true, ModelMismatch: true}}
+	snapshot := audit.snapshot()
+	record := snapshot["records"].([]auditRecord)[0]
+	if !record.DetectionExempt || record.ModelChecked || record.ModelMismatch || snapshot["mismatches"].(int) != 0 {
+		t.Fatal("restored audit records must use the current unchecked policy")
+	}
+	if !audit.records[0].ModelMismatch || record.UpstreamModel != "gpt-6-astra" {
+		t.Fatal("historical observations must not be destroyed")
 	}
 }
