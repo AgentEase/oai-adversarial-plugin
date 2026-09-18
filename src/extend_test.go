@@ -849,7 +849,7 @@ func TestSmoothHandoff(t *testing.T) {
 		paused:      map[string]bool{}, probing: map[string]bool{}}
 	cfg := parseProbeConfig(probeConfigYAML{Enabled: &enabled, Models: []string{"gpt-6-astra"}})
 	probeTrack.cfg.Config = cfg
-	if cfg.Prefetch != 5*time.Minute {
+	if cfg.Prefetch != 3*time.Minute {
 		t.Fatalf("default prefetch wrong: %v", cfg.Prefetch)
 	}
 
@@ -889,6 +889,57 @@ func TestSmoothHandoff(t *testing.T) {
 	probeTrack.storeValue("gpt-6-astra", newer, "probe", "", cfg)
 	if got := probeTrack.activeValueFor("gpt-6-astra"); got != newer {
 		t.Fatalf("capture must activate when no valid active: %q", got)
+	}
+}
+
+// TestSettledBaselineGate verifies the "one healthy capture is enough"
+// round gate: a comfortably-valid baseline is settled (skip), while a
+// missing, near-expiry, expired, or non-decodable value is not, and the gate
+// disables itself when the hand-off window is turned off (fully manual).
+func TestSettledBaselineGate(t *testing.T) {
+	enabled := true
+	probeTrack = &probeEngine{values: map[string]stateEntry{}, failures: map[string]probeFailure{},
+		paused: map[string]bool{}, probing: map[string]bool{}}
+	cfg := parseProbeConfig(probeConfigYAML{Enabled: &enabled, Models: []string{"gpt-6-astra"}})
+	probeTrack.cfg.Config = cfg
+	now := time.Now().UTC()
+	if cfg.Prefetch != 3*time.Minute {
+		t.Fatalf("default hand-off window wrong: %v", cfg.Prefetch)
+	}
+	// No baseline: the round must probe.
+	if probeTrack.settledBaseline("gpt-6-astra", cfg, now) {
+		t.Fatal("missing baseline must not be settled")
+	}
+	// Fresh baseline (remaining far beyond the window): nothing to do.
+	probeTrack.values["gpt-6-astra"] = stateEntry{Model: "gpt-6-astra",
+		Value: synthStateToken(now.Add(-10 * time.Minute)), Valid: true}
+	if !probeTrack.settledBaseline("gpt-6-astra", cfg, now) {
+		t.Fatal("fresh baseline must be settled")
+	}
+	// Near expiry (remaining <= window): hand-off territory, keep probing.
+	probeTrack.values["gpt-6-astra"] = stateEntry{Model: "gpt-6-astra",
+		Value: synthStateToken(now.Add(-(cfg.TTL - 2*time.Minute))), Valid: true}
+	if probeTrack.settledBaseline("gpt-6-astra", cfg, now) {
+		t.Fatal("near-expiry baseline must not be settled")
+	}
+	// Expired: probe.
+	probeTrack.values["gpt-6-astra"] = stateEntry{Model: "gpt-6-astra",
+		Value: synthStateToken(now.Add(-2 * cfg.TTL)), Valid: true}
+	if probeTrack.settledBaseline("gpt-6-astra", cfg, now) {
+		t.Fatal("expired baseline must not be settled")
+	}
+	// Value without a decodable timestamp cannot prove validity: probe.
+	probeTrack.values["gpt-6-astra"] = stateEntry{Model: "gpt-6-astra", Value: "not-a-fernet-token", Valid: true}
+	if probeTrack.settledBaseline("gpt-6-astra", cfg, now) {
+		t.Fatal("undecodable baseline must not be settled")
+	}
+	// Disabled window (fully manual): the gate stays open.
+	probeTrack.values["gpt-6-astra"] = stateEntry{Model: "gpt-6-astra",
+		Value: synthStateToken(now.Add(-time.Minute)), Valid: true}
+	manual := cfg
+	manual.Prefetch = 0
+	if probeTrack.settledBaseline("gpt-6-astra", manual, now) {
+		t.Fatal("disabled hand-off window must keep the gate open")
 	}
 }
 
@@ -1020,6 +1071,9 @@ func TestExitCircuitBreaker(t *testing.T) {
 	if cfg.ExitCooldown != 180*time.Minute || cfg.ExitFailThreshold != 3 || cfg.ExitMinActive != 1 {
 		t.Fatalf("exit defaults wrong: cooldown=%v threshold=%d min=%d", cfg.ExitCooldown, cfg.ExitFailThreshold, cfg.ExitMinActive)
 	}
+	if cfg.ExitSuccessCooldown != 30*time.Minute {
+		t.Fatalf("exit success rest default wrong: %v", cfg.ExitSuccessCooldown)
+	}
 	pool := []string{"direct", "socks5h://[2001:db8::1]:1080", "socks5://a:b@1.2.3.4:443"}
 	now := time.Now().UTC()
 	if got := probeTrack.availableProxies(pool, now); len(got) != 3 {
@@ -1064,14 +1118,42 @@ func TestExitCircuitBreaker(t *testing.T) {
 	if released.Failures != 0 || released.Until != "" {
 		t.Fatalf("release must reset the failure window: %+v", released)
 	}
-	// A success clears any penalty immediately.
+	// A success schedules a short rest (default exit-success-cooldown-minutes
+	// = 30): the rotation spreads next attempts across the other exits
+	// instead of hammering the same address.
 	probeTrack.noteExitOutcome(pool[1], false, "boom")
 	probeTrack.noteExitOutcome(pool[1], false, "boom")
 	probeTrack.noteExitOutcome(pool[1], false, "boom")
 	probeTrack.noteExitOutcome(pool[1], true, "")
-	if _, ok := probeTrack.exitPenalties[pool[1]]; ok {
-		t.Fatal("healthy capture must clear the penalty")
+	rest, ok := probeTrack.exitPenalties[pool[1]]
+	if !ok || !rest.Success || rest.Until == "" || rest.Failures != 0 {
+		t.Fatalf("healthy capture must schedule a rest: %+v", rest)
 	}
+	if got := probeTrack.availableProxies(pool, time.Now().UTC()); len(got) != 2 {
+		t.Fatalf("a resting exit must leave the rotation: %v", got)
+	}
+	// The rest expires on the clock and the exit returns automatically.
+	probeTrack.mu.Lock()
+	probeTrack.exitPenalties[pool[1]] = exitPenalty{Proxy: pool[1], Success: true,
+		Until: time.Now().Add(-time.Minute).Format(time.RFC3339Nano)}
+	probeTrack.mu.Unlock()
+	if got := probeTrack.availableProxies(pool, time.Now().UTC()); len(got) != 3 {
+		t.Fatalf("an expired rest must be released: %v", got)
+	}
+	probeTrack.mu.Lock()
+	releasedRest := probeTrack.exitPenalties[pool[1]]
+	probeTrack.mu.Unlock()
+	if releasedRest.Success || releasedRest.Until != "" {
+		t.Fatalf("release must clear the rest flags: %+v", releasedRest)
+	}
+	// exit-success-cooldown-minutes: 0 restores the legacy behaviour where
+	// success clears the entry immediately.
+	probeTrack.cfg.Config.ExitSuccessCooldown = 0
+	probeTrack.noteExitOutcome(pool[1], true, "")
+	if _, ok := probeTrack.exitPenalties[pool[1]]; ok {
+		t.Fatal("legacy mode: healthy capture must clear the entry")
+	}
+	probeTrack.cfg.Config.ExitSuccessCooldown = 30 * time.Minute
 	// Emergency release: with every exit cooled down, the minimum active set
 	// is freed so a round can still run.
 	for _, spec := range pool {

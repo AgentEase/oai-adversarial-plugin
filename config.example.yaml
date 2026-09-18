@@ -77,15 +77,23 @@ plugins:
           # max-attempts-per-round: 0   # 0/absent = auto (egress count x 3)
           cooldown-minutes: 20
           # ---- egress pool rotation (IPv4/IPv6 mixed friendly) -----------
-          # A plain (fixed-endpoint) egress that fails to obtain a healthy
-          # state (length anomaly, model mismatch or transport errors) this
-          # many times in a row is temporarily removed from rotation; it
-          # returns automatically after exit-cooldown-minutes (set 0 to
-          # disable the removal). IPv6 exits can be added to the proxies file
-          # as socks5h://[2001:db8::1]:1080 or http://[2001:db8::1]:8080
+          # Two temporary removals apply to plain (fixed-endpoint) egresses,
+          # both released automatically once their window passes:
+          #   - a scheduled rest after a healthy capture
+          #     (exit-success-cooldown-minutes, default 30): the rotation
+          #     spreads attempts across other exits instead of hammering the
+          #     same address; set 0 for the legacy "success = usable
+          #     immediately" behaviour;
+          #   - a failure cool-down: a streak of consecutive failed attempts
+          #     (length anomaly, model mismatch or transport errors) reaching
+          #     exit-fail-threshold removes the exit for
+          #     exit-cooldown-minutes (set 0 to disable the removal).
+          # IPv6 exits can be added to the proxies file as
+          # socks5h://[2001:db8::1]:1080 or http://[2001:db8::1]:8080
           # and are pooled with IPv4 exits.
           exit-fail-threshold: 3
           exit-cooldown-minutes: 180
+          exit-success-cooldown-minutes: 30
           # Rotating pools (one endpoint that presents many source IPs, for
           # example a local IPv6/64 dynamic proxy) are NEVER benched: every
           # connection draws a fresh address, so a failing streak says
@@ -99,13 +107,14 @@ plugins:
           # Minimum usable exits kept in rotation (soonest-expiring entries
           # are released early when the usable set would fall below this).
           exit-min-active: 1
-          # ---- two-slot smooth hand-off ------------------------------------
-          # The prefetch watcher probes a model only while its active token's
-          # remaining validity enters this window; the fresh token parks as a
-          # candidate and takes over seamlessly when the active one expires,
-          # so business requests never see an empty slot. Set 0 to disable
-          # the automatic prefetch (fully manual again).
-          prefetch-minutes: 5
+          # ---- successor hand-off (smooth takeover) -------------------------
+          # One healthy capture is enough: away from expiry nothing probes.
+          # The watcher probes a model only while its active token's
+          # remaining validity enters this window; the successor token
+          # takes over seamlessly the moment the active one expires, so
+          # business requests never see an empty slot. Set 0 to disable
+          # the automatic hand-off (fully manual again).
+          prefetch-minutes: 3
           # Degraded-model rejection is ON by default and restored from the
           # state snapshot across reloads; toggle it from the dashboard
           # header (global switch, independent of the probe track).

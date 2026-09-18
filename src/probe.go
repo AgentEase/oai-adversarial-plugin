@@ -22,10 +22,13 @@ import (
 // This file implements the manual probe track: on explicit dashboard request
 // ("start-round") a single round walks the configured models in priority order
 // and captures a fresh X-Codex-Turn-State through the rotating egress pool.
+// Round attempts skip models whose current baseline is still comfortably
+// valid - one healthy capture is enough until the final hand-off window.
 // Accepted captures (model-consistent, 292 bytes) replace the model's healthy
 // baseline, which the rewrite engine serves to business requests. Nothing is
-// scheduled automatically: no scan loop, no timers, no auto-recovery - idle
-// is the default state, and business observations refresh baselines passively.
+// scheduled automatically except the hand-off (prefetch) watcher at the end
+// of this file, and that watcher only acts once a value approaches expiry: no
+// auto-recovery rounds, no other background probing.
 //
 // The probe track never touches the business request path, only reads auth
 // material, and is gated by probe.enabled.
@@ -43,8 +46,9 @@ const (
 	probeDefaultsExitFailThreshold = 3
 	probeDefaultsExitPoolFailThreshold = 10
 	probeDefaultsExitMinActive = 1
-	probeDefaultsPrefetchMinutes = 5
-	prefetchRetryWindow = 5 * time.Minute
+	probeDefaultsExitSuccessCooldownMinutes = 30
+	probeDefaultsPrefetchMinutes = 3
+	prefetchRetryWindow = 90 * time.Second
 	probeDefaultsTimeoutSeconds  = 60
 	probeRequiredStateLength     = 292
 	probeDefaultsPrompt          = "hi"
@@ -70,6 +74,7 @@ type probeConfig struct {
 	ExitFailThreshold   int
 	ExitPoolFailThreshold int
 	ExitMinActive       int
+	ExitSuccessCooldown time.Duration
 	Prefetch            time.Duration
 	SuspectThreshold    int
 	Timeout             time.Duration
@@ -98,6 +103,7 @@ type probeConfigYAML struct {
 	ExitFailThreshold   *int  `yaml:"exit-fail-threshold"`
 	ExitPoolFailThreshold *int `yaml:"exit-pool-fail-threshold"`
 	ExitMinActive       *int  `yaml:"exit-min-active"`
+	ExitSuccessCooldownMinutes *int `yaml:"exit-success-cooldown-minutes"`
 	PrefetchMinutes     *int  `yaml:"prefetch-minutes"`
 	SuspectThreshold *int     `yaml:"suspect-threshold"`
 	TimeoutSeconds   *int     `yaml:"timeout-seconds"`
@@ -172,12 +178,16 @@ type businessDegradation struct {
 	Since  string `json:"since"`
 }
 
-// exitPenalty marks one egress temporarily removed from rotation after
-// consecutive attempts that failed to yield a healthy state (length anomaly,
-// model mismatch or transport-level errors). It is released automatically
-// once Until passes; a successful capture clears the entry immediately.
+// exitPenalty marks one egress temporarily out of rotation. Two kinds share
+// the structure: a failure penalty (consecutive attempts failed to yield a
+// healthy state - length anomaly, model mismatch or transport errors) and a
+// scheduled rest after a healthy capture (Success=true) that keeps fixed
+// endpoints from hammering the same address. Both are released automatically
+// once Until passes; a healthy capture still clears an entry immediately when
+// exit-success-cooldown-minutes is set to 0 (legacy behaviour).
 type exitPenalty struct {
 	Proxy     string `json:"proxy"`
+	Success   bool   `json:"success,omitempty"`
 	Failures  int    `json:"failures"`
 	LastError string `json:"last_error,omitempty"`
 	FirstAt   string `json:"first_at"`
@@ -249,6 +259,7 @@ func parseProbeConfig(block probeConfigYAML) probeConfig {
 		ExitFailThreshold:   probeDefaultsExitFailThreshold,
 		ExitPoolFailThreshold: probeDefaultsExitPoolFailThreshold,
 		ExitMinActive:       probeDefaultsExitMinActive,
+		ExitSuccessCooldown: time.Duration(probeDefaultsExitSuccessCooldownMinutes) * time.Minute,
 		Prefetch:            time.Duration(probeDefaultsPrefetchMinutes) * time.Minute,
 		SuspectThreshold:    probeDefaultsSuspectThreshold,
 		Timeout:             time.Duration(probeDefaultsTimeoutSeconds) * time.Second,
@@ -296,6 +307,9 @@ func parseProbeConfig(block probeConfigYAML) probeConfig {
 	}
 	if block.ExitMinActive != nil && *block.ExitMinActive > 0 {
 		cfg.ExitMinActive = *block.ExitMinActive
+	}
+	if block.ExitSuccessCooldownMinutes != nil && *block.ExitSuccessCooldownMinutes >= 0 {
+		cfg.ExitSuccessCooldown = time.Duration(*block.ExitSuccessCooldownMinutes) * time.Minute
 	}
 	if block.PrefetchMinutes != nil && *block.PrefetchMinutes >= 0 {
 		cfg.Prefetch = time.Duration(*block.PrefetchMinutes) * time.Minute
@@ -389,7 +403,7 @@ func configureProbeTrack(block probeConfigYAML) error {
 			markStateDirty()
 			continue
 		}
-		if penalty.Until == "" {
+		if penalty.Until == "" || penalty.Success {
 			continue
 		}
 		threshold := cfg.ExitFailThreshold
@@ -401,9 +415,10 @@ func configureProbeTrack(block probeConfigYAML) error {
 	probeTrack.mu.Unlock()
 	// The probe track never auto-starts. The dashboard's manual control is
 	// the only way to run full rounds; the prefetch watcher below is the one
-	// narrow automatic exception: it probes a model only while its active
-	// token's remaining validity is inside the prefetch window, parking a
-	// fresh token as candidate for a seamless hand-off.
+	// narrow automatic exception: while a model's active token is still
+	// comfortably far from expiry nothing happens at all, and only inside the
+	// final hand-off window (prefetch-minutes) does the watcher attempt one
+	// probe to park a successor token for a seamless takeover.
 	probeTrack.ensurePrefetchWatcher()
 	ensurePersistence()
 	return nil
@@ -472,6 +487,7 @@ func (e *probeEngine) roundLoop(cfg probeConfig, stop chan struct{}) {
 		e.mu.Unlock()
 		return
 	}
+	skipped := 0
 	for _, model := range cfg.Models {
 		select {
 		case <-stop:
@@ -484,7 +500,21 @@ func (e *probeEngine) roundLoop(cfg probeConfig, stop chan struct{}) {
 		if paused {
 			continue
 		}
+		if e.settledBaseline(model, cfg, time.Now().UTC()) {
+			// One healthy capture is enough: a model whose baseline is still
+			// comfortably far from expiry is skipped until its hand-off window
+			// comes up (the prefetch watcher refills it then). The row's "probe
+			// now" button remains available for an explicit refresh.
+			skipped++
+			continue
+		}
 		e.probeModel(model, cfg, stop)
+	}
+	if skipped > 0 {
+		e.mu.Lock()
+		e.runNote = fmt.Sprintf("已跳过 %d 个仍在有效期内（未临近到期）的模型，保留现有健康基线", skipped)
+		e.mu.Unlock()
+		markStateDirty()
 	}
 }
 
@@ -494,6 +524,31 @@ func (e *probeEngine) probeSuppressed(model string) bool {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	return e.paused[model] || e.probing[model]
+}
+
+// settledBaseline reports whether a model already holds a healthy baseline
+// whose remaining validity is still comfortably beyond the hand-off window.
+// While that is true there is nothing to do: one successful capture is
+// enough, and automatic activity stays silent until the value actually
+// approaches expiry (when the prefetch watcher takes over with a single
+// successor capture). With the automatic window disabled (prefetch-minutes:
+// 0) this gate stays open so fully-manual rounds behave exactly as before.
+func (e *probeEngine) settledBaseline(model string, cfg probeConfig, now time.Time) bool {
+	window := cfg.Prefetch
+	if window <= 0 {
+		return false
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	active, ok := e.values[model]
+	if !ok || !active.Valid || active.Value == "" {
+		return false
+	}
+	issued, ok := parseTurnStateTimestamp(active.Value)
+	if !ok {
+		return false
+	}
+	return issued.Add(cfg.TTL).Sub(now) > window
 }
 
 // setModelPaused pauses or resumes a model from the dashboard. Pausing keeps
@@ -522,8 +577,10 @@ func (e *probeEngine) setModelPaused(model string, paused bool) {
 // prefetch watch (smooth hand-off)
 
 // ensurePrefetchWatcher starts the single background watcher once per process.
-// It is the only automatic probing that exists in v1.5.15+: it never refreshes
-// a value that is safely outside the prefetch window.
+// It is the first of the two automatic behaviours in this engine and the only
+// one that replenishes tokens: a model whose baseline is still comfortably
+// valid is never touched, and only the final hand-off window
+// (prefetch-minutes) triggers one successor capture.
 func (e *probeEngine) ensurePrefetchWatcher() {
 	e.mu.Lock()
 	if e.prefetchStop != nil {
@@ -548,8 +605,10 @@ func (e *probeEngine) stopPrefetchWatcher() {
 }
 
 // prefetchWatchLoop scans every 30 seconds for models whose active token is
-// about to expire (remaining <= prefetch-minutes) and, only then, starts one
-// background probe to park a fresh token as the candidate. Per-model attempts
+// about to expire (remaining <= prefetch-minutes, default 3) and, only then,
+// starts one background probe to park a fresh token as the successor. A model
+// that still owns a comfortably-valid baseline fails the window test and is
+// left alone, a parked successor suppresses repeats, and per-model attempts
 // are throttled by prefetchRetryWindow so a failing probe cannot spin.
 func (e *probeEngine) prefetchWatchLoop(stop <-chan struct{}) {
 	ticker := time.NewTicker(30 * time.Second)
@@ -588,6 +647,9 @@ func (e *probeEngine) prefetchScan() {
 		}
 		remaining := issued.Add(cfg.TTL).Sub(now)
 		if remaining > cfg.Prefetch {
+			// The model still holds a baseline whose validity is comfortably
+			// beyond the hand-off window: there is nothing to replenish, one
+			// healthy capture is enough until it actually approaches expiry.
 			e.mu.Unlock()
 			continue
 		}
@@ -884,8 +946,9 @@ func (e *probeEngine) availableProxies(proxies []string, now time.Time) []string
 		until, err := time.Parse(time.RFC3339Nano, penalty.Until)
 		if penalty.Until == "" || err != nil || !now.Before(until) {
 			if penalty.Until != "" {
-				// Cool-down finished: release with a fresh failure window.
+				// Cool-down or rest finished: release with a fresh window.
 				penalty.Failures = 0
+				penalty.Success = false
 				penalty.Until = ""
 				e.exitPenalties[spec] = penalty
 				markStateDirty()
@@ -936,18 +999,24 @@ func (e *probeEngine) availableProxies(proxies []string, now time.Time) []string
 	return usable
 }
 
-// noteExitOutcome records one attempt result for an egress. A healthy capture
-// clears its penalty immediately; for plain (fixed-endpoint) egresses a streak
-// of consecutive failures reaching the configured threshold removes the egress
-// from rotation for exit-cooldown-minutes (set 0 to disable the removal).
+// noteExitOutcome records one attempt result for an egress. Rotating pools
+// (one endpoint that presents many source addresses, marked "# pool:..." in
+// the proxies file) are never benched: every connection draws a fresh address,
+// so a failing streak says nothing about the endpoint being broken - it only
+// reflects the current upstream state, which the model-level tracks already
+// describe. Their counters keep accumulating for the dashboard, a healthy
+// capture clears them entirely, and any cool-down recorded by an older policy
+// is cleared on the next observation.
 //
-// Rotating pools (one endpoint that presents many source addresses, marked
-// "# pool:..." in the proxies file) are never benched: every connection draws
-// a fresh address, so a failing streak says nothing about the endpoint being
-// broken - it only reflects the current upstream state, which the model-level
-// tracks already describe. Their counters keep accumulating for the dashboard,
-// and any cool-down recorded by an older policy is cleared on the next
-// observation.
+// Fixed (plain) endpoints get two kinds of temporary removal, both released
+// automatically once their window passes:
+//
+//   - a scheduled rest after a healthy capture (Success=true) for
+//     exit-success-cooldown-minutes, so consecutive attempts spread across
+//     the rotation instead of hammering the same address; set the duration to
+//     0 for the legacy behaviour (success clears the entry immediately);
+//   - a failure penalty: a streak of consecutive failures reaching
+//     exit-fail-threshold removes the endpoint for exit-cooldown-minutes.
 func (e *probeEngine) noteExitOutcome(spec string, healthy bool, errorText string) {
 	if spec == "" {
 		return
@@ -959,14 +1028,39 @@ func (e *probeEngine) noteExitOutcome(spec string, healthy bool, errorText strin
 		e.exitPenalties = map[string]exitPenalty{}
 	}
 	if healthy {
-		if _, ok := e.exitPenalties[spec]; ok {
-			delete(e.exitPenalties, spec)
-			markStateDirty()
+		if e.cfg.Config.ProxyPools[spec] {
+			if _, ok := e.exitPenalties[spec]; ok {
+				delete(e.exitPenalties, spec)
+				markStateDirty()
+			}
+			return
 		}
+		rest := e.cfg.Config.ExitSuccessCooldown
+		if rest <= 0 {
+			// Legacy behaviour: success puts the endpoint straight back into
+			// rotation.
+			if _, ok := e.exitPenalties[spec]; ok {
+				delete(e.exitPenalties, spec)
+				markStateDirty()
+			}
+			return
+		}
+		// Scheduled rest: the endpoint just served a healthy capture, so let
+		// the rotation spread the next attempts across other exits. It returns
+		// automatically when the window ends.
+		e.exitPenalties[spec] = exitPenalty{
+			Proxy:   spec,
+			Success: true,
+			FirstAt: now.Format(time.RFC3339Nano),
+			Until:   now.Add(rest).Format(time.RFC3339Nano),
+		}
+		markStateDirty()
 		return
 	}
 	penalty := e.exitPenalties[spec]
-	if penalty.Proxy == "" {
+	if penalty.Proxy == "" || penalty.Success {
+		// Fresh failure window (also converts a rest entry that an emergency
+		// release pushed back into rotation early).
 		penalty = exitPenalty{Proxy: spec, FirstAt: now.Format(time.RFC3339Nano)}
 	}
 	penalty.Failures++
@@ -1611,6 +1705,9 @@ func probeSummary() map[string]any {
 		}
 		if penalty, ok := probeTrack.exitPenalties[spec]; ok {
 			item["failures"] = penalty.Failures
+			if penalty.Success {
+				item["rest"] = true
+			}
 			if penalty.LastError != "" {
 				item["last_error"] = penalty.LastError
 			}
@@ -1643,6 +1740,7 @@ func probeSummary() map[string]any {
 		"exit_fail_threshold":   cfg.ExitFailThreshold,
 		"exit_pool_fail_threshold": cfg.ExitPoolFailThreshold,
 		"exit_cooldown_minutes": int(cfg.ExitCooldown / time.Minute),
+		"exit_success_cooldown_minutes": int(cfg.ExitSuccessCooldown / time.Minute),
 		"exit_min_active":       cfg.ExitMinActive,
 		"prefetch_minutes":      int(cfg.Prefetch / time.Minute),
 		"proxy_index":  probeTrack.proxyIndex,
