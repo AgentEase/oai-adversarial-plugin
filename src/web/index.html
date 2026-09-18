@@ -229,9 +229,10 @@
     el('pool-active').textContent=active.toLocaleString('zh-CN');
     el('pool-cooling').textContent=Math.max(0,total-active).toLocaleString('zh-CN');
     const threshold=probe.exit_fail_threshold||3;
+    const poolThreshold=probe.exit_pool_fail_threshold||10;
     const minutes=probe.exit_cooldown_minutes!==undefined?probe.exit_cooldown_minutes:180;
     const minActive=probe.exit_min_active||1;
-    el('pool-policy').textContent=threshold+' 次失败 → 冷却 '+(minutes>0?minutes+' 分钟':'关闭')+'（保底 '+minActive+' 个可用）';
+    el('pool-policy').textContent='普通出口 '+threshold+' 次失败 / 多出口池 '+poolThreshold+' 次失败 → 冷却 '+(minutes>0?minutes+' 分钟':'关闭');
     const frag=document.createDocumentFragment();
     for(const item of items){
       const tr=document.createElement('tr');
@@ -240,6 +241,7 @@
       let kind='IPv4';
       const hostPart=(spec.match(/:\/\/(\[?[^\]@\/]+\]?)/)||[])[1]||spec;
       if(hostPart.indexOf('[')===0||(hostPart.split(':').length>2&&hostPart.indexOf('.')<0))kind='IPv6';
+      if(item.pool){kind=item.label||'多出口池';}
       cell(tr,spec==='direct'?'本地直出':kind);
       const state=cell(tr,'');
       const badge=document.createElement('span');

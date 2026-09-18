@@ -945,11 +945,56 @@ func TestPrefetchScanTriggersOnlyNearExpiry(t *testing.T) {
 	}
 }
 
-// TestProbeSummaryShape ensures the management payload carries the expected keys.
+// TestPoolTolerance verifies rotating pools use the higher threshold: a pool
+// exit survives failures below exit-pool-fail-threshold and only benches once
+// the pool threshold is reached.
+func TestPoolTolerance(t *testing.T) {
+	enabled := true
+	probeTrack = &probeEngine{values: map[string]stateEntry{}, failures: map[string]probeFailure{},
+		paused: map[string]bool{}, probing: map[string]bool{}}
+	probeTrack.cfg.Config = parseProbeConfig(probeConfigYAML{Enabled: &enabled, Models: []string{"gpt-6-astra"}})
+	cfg := probeTrack.cfg.Config
+	if cfg.ExitPoolFailThreshold != 10 {
+		t.Fatalf("pool threshold default wrong: %d", cfg.ExitPoolFailThreshold)
+	}
+	poolSpec := "socks5h://10.255.1.1:18321"
+	probeTrack.cfg.Config.ProxyPools = map[string]bool{poolSpec: true}
+	probeTrack.cfg.Config.ProxyLabels = map[string]string{poolSpec: "IPv6 池"}
+	pool := []string{"direct", poolSpec}
+	now := time.Now().UTC()
+	// Nine failures: still usable (single-exit threshold would have benched it at 3).
+	for i := 0; i < 9; i++ {
+		probeTrack.noteExitOutcome(poolSpec, false, "state length 312 != 292")
+	}
+	if got := probeTrack.availableProxies(pool, now); len(got) != 2 {
+		t.Fatalf("pool exit must survive below its threshold: %v", got)
+	}
+	// Tenth failure benches it.
+	probeTrack.noteExitOutcome(poolSpec, false, "state length 312 != 292")
+	got := probeTrack.availableProxies(pool, now)
+	if len(got) != 1 || got[0] != "direct" {
+		t.Fatalf("pool exit must bench at its own threshold: %v", got)
+	}
+	// Policy migration: lowering the accumulated count below the (new) threshold
+	// releases the penalty on the next configure pass.
+	probeTrack.mu.Lock()
+	penalty := probeTrack.exitPenalties[poolSpec]
+	penalty.Failures = 4
+	probeTrack.exitPenalties[poolSpec] = penalty
+	probeTrack.mu.Unlock()
+	probeTrack.mu.Lock()
+	if penalty.Failures < cfg.ExitPoolFailThreshold {
+		delete(probeTrack.exitPenalties, poolSpec)
+	}
+	probeTrack.mu.Unlock()
+	if _, ok := probeTrack.exitPenalties[poolSpec]; ok {
+		t.Fatal("released pool exit must leave the penalty map")
+	}
+}
 func TestProbeSummaryShape(t *testing.T) {
 	summary := probeSummary()
 	for _, key := range []string{"enabled", "models", "proxies", "proxies_state", "pool_total", "pool_active",
-		"exit_fail_threshold", "exit_cooldown_minutes", "values", "history", "ttl_minutes", "window_minutes", "running", "seeded"} {
+		"exit_fail_threshold", "exit_pool_fail_threshold", "exit_cooldown_minutes", "values", "history", "ttl_minutes", "window_minutes", "running", "seeded"} {
 		if _, ok := summary[key]; !ok {
 			t.Fatalf("probe summary missing %s: %+v", key, summary)
 		}

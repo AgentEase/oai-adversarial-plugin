@@ -44,6 +44,7 @@ const (
 	probeDefaultsSuspectThreshold = 3
 	probeDefaultsExitCooldownMinutes = 180
 	probeDefaultsExitFailThreshold = 3
+	probeDefaultsExitPoolFailThreshold = 10
 	probeDefaultsExitMinActive = 1
 	probeDefaultsPrefetchMinutes = 5
 	prefetchRetryWindow = 5 * time.Minute
@@ -70,6 +71,7 @@ type probeConfig struct {
 	Cooldown            time.Duration
 	ExitCooldown        time.Duration
 	ExitFailThreshold   int
+	ExitPoolFailThreshold int
 	ExitMinActive       int
 	Prefetch            time.Duration
 	SuspectThreshold    int
@@ -77,6 +79,8 @@ type probeConfig struct {
 	Prompt              string
 	UpstreamURL         string
 	SecretsFile         string
+	ProxyPools          map[string]bool
+	ProxyLabels         map[string]string
 }
 
 // probeConfigYAML mirrors the YAML keys accepted under turn-state-override.probe.
@@ -95,6 +99,7 @@ type probeConfigYAML struct {
 	CooldownMinutes  *int     `yaml:"cooldown-minutes"`
 	ExitCooldownMinutes *int  `yaml:"exit-cooldown-minutes"`
 	ExitFailThreshold   *int  `yaml:"exit-fail-threshold"`
+	ExitPoolFailThreshold *int `yaml:"exit-pool-fail-threshold"`
 	ExitMinActive       *int  `yaml:"exit-min-active"`
 	PrefetchMinutes     *int  `yaml:"prefetch-minutes"`
 	SuspectThreshold *int     `yaml:"suspect-threshold"`
@@ -244,6 +249,7 @@ func parseProbeConfig(block probeConfigYAML) probeConfig {
 		Cooldown:            time.Duration(probeDefaultsCooldownMinutes) * time.Minute,
 		ExitCooldown:        time.Duration(probeDefaultsExitCooldownMinutes) * time.Minute,
 		ExitFailThreshold:   probeDefaultsExitFailThreshold,
+		ExitPoolFailThreshold: probeDefaultsExitPoolFailThreshold,
 		ExitMinActive:       probeDefaultsExitMinActive,
 		Prefetch:            time.Duration(probeDefaultsPrefetchMinutes) * time.Minute,
 		SuspectThreshold:    probeDefaultsSuspectThreshold,
@@ -251,6 +257,8 @@ func parseProbeConfig(block probeConfigYAML) probeConfig {
 		Prompt:              probeDefaultsPrompt,
 		UpstreamURL:         probeDefaultsUpstreamURL,
 		SecretsFile:         strings.TrimSpace(block.ProxiesFile),
+		ProxyPools:          map[string]bool{},
+		ProxyLabels:         map[string]string{},
 	}
 	if len(cfg.Models) == 0 {
 		cfg.Models = []string{"gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-luna", "gpt-5.6-terra"}
@@ -285,6 +293,9 @@ func parseProbeConfig(block probeConfigYAML) probeConfig {
 	if block.ExitFailThreshold != nil && *block.ExitFailThreshold > 0 {
 		cfg.ExitFailThreshold = *block.ExitFailThreshold
 	}
+	if block.ExitPoolFailThreshold != nil && *block.ExitPoolFailThreshold > 0 {
+		cfg.ExitPoolFailThreshold = *block.ExitPoolFailThreshold
+	}
 	if block.ExitMinActive != nil && *block.ExitMinActive > 0 {
 		cfg.ExitMinActive = *block.ExitMinActive
 	}
@@ -311,25 +322,45 @@ func parseProbeConfig(block probeConfigYAML) probeConfig {
 	return cfg
 }
 
-// loadProxiesFile reads the dedicated proxy secret file (one proxy per line,
-// "#" comments and blank lines ignored) and returns the parsed list.
-func loadProxiesFile(path string) ([]string, error) {
+// loadProxiesFile reads the dedicated proxy secret file (one proxy per line;
+// full-line "#" comments and blank lines ignored) and returns the parsed list
+// plus per-entry metadata. A trailing comment may declare a multi-exit pool
+// and a display label: "socks5h://10.0.0.1:18321  # pool:ipv6" marks the
+// entry as a rotating pool (higher cool-down tolerance).
+func loadProxiesFile(path string) ([]string, map[string]bool, map[string]string, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return nil, err
+		return nil, nil, nil, err
 	}
 	var proxies []string
+	pools := map[string]bool{}
+	labels := map[string]string{}
 	for _, line := range strings.Split(string(raw), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		proxies = append(proxies, line)
+		spec := line
+		comment := ""
+		if idx := strings.Index(line, "#"); idx >= 0 {
+			spec = strings.TrimSpace(line[:idx])
+			comment = strings.TrimSpace(line[idx+1:])
+		}
+		if spec == "" {
+			continue
+		}
+		proxies = append(proxies, spec)
+		for _, token := range strings.Fields(comment) {
+			if value, ok := strings.CutPrefix(token, "pool:"); ok && strings.TrimSpace(value) != "" {
+				pools[spec] = true
+				labels[spec] = "IPv6 池"
+			}
+		}
 	}
 	if len(proxies) == 0 {
-		return nil, fmt.Errorf("proxies file %s contains no entries", path)
+		return nil, nil, nil, fmt.Errorf("proxies file %s contains no entries", path)
 	}
-	return proxies, nil
+	return proxies, pools, labels, nil
 }
 
 func configureProbeTrack(block probeConfigYAML) error {
@@ -337,8 +368,11 @@ func configureProbeTrack(block probeConfigYAML) error {
 	var cfgErr string
 	if cfg.Enabled {
 		if strings.TrimSpace(cfg.SecretsFile) != "" {
-			if proxies, err := loadProxiesFile(cfg.SecretsFile); err == nil {
+			proxies, pools, labels, err := loadProxiesFile(cfg.SecretsFile)
+			if err == nil {
 				cfg.Proxies = proxies
+				cfg.ProxyPools = pools
+				cfg.ProxyLabels = labels
 			} else {
 				cfgErr = fmt.Sprintf("load proxies file: %v", err)
 			}
@@ -347,6 +381,22 @@ func configureProbeTrack(block probeConfigYAML) error {
 	probeTrack.mu.Lock()
 	probeTrack.stopLocked()
 	probeTrack.cfg = probeConfigState{Config: cfg, Error: cfgErr}
+	// Policy migration: an exit whose accumulated failures are below its
+	// (possibly raised) threshold is released at once; pool entries previously
+	// cooled by the lower fixed threshold start fresh.
+	for spec, penalty := range probeTrack.exitPenalties {
+		if penalty.Until == "" {
+			continue
+		}
+		threshold := cfg.ExitFailThreshold
+		if cfg.ProxyPools[spec] {
+			threshold = cfg.ExitPoolFailThreshold
+		}
+		if penalty.Failures < threshold {
+			delete(probeTrack.exitPenalties, spec)
+			markStateDirty()
+		}
+	}
 	probeTrack.mu.Unlock()
 	// The probe track never auto-starts. The dashboard's manual control is
 	// the only way to run full rounds; the prefetch watcher below is the one
@@ -917,6 +967,15 @@ func (e *probeEngine) noteExitOutcome(spec string, healthy bool, errorText strin
 	threshold := cfg.ExitFailThreshold
 	if threshold <= 0 {
 		threshold = probeDefaultsExitFailThreshold
+	}
+	// Rotating pools (many candidate source IPs behind one endpoint) are much
+	// more likely to recover on the next attempt, so they tolerate a longer
+	// streak before being benched.
+	if cfg.ProxyPools[spec] {
+		threshold = cfg.ExitPoolFailThreshold
+		if threshold <= 0 {
+			threshold = probeDefaultsExitPoolFailThreshold
+		}
 	}
 	if penalty.Failures >= threshold && cfg.ExitCooldown > 0 {
 		penalty.Until = now.Add(cfg.ExitCooldown).Format(time.RFC3339Nano)
@@ -1542,6 +1601,12 @@ func probeSummary() map[string]any {
 	activeCount := 0
 	for _, spec := range cfg.Proxies {
 		item := map[string]any{"proxy": spec, "active": true}
+		if cfg.ProxyPools[spec] {
+			item["pool"] = true
+		}
+		if label := cfg.ProxyLabels[spec]; label != "" {
+			item["label"] = label
+		}
 		if penalty, ok := probeTrack.exitPenalties[spec]; ok {
 			item["failures"] = penalty.Failures
 			if penalty.LastError != "" {
@@ -1574,6 +1639,7 @@ func probeSummary() map[string]any {
 		"pool_total":   len(cfg.Proxies),
 		"pool_active":  activeCount,
 		"exit_fail_threshold":   cfg.ExitFailThreshold,
+		"exit_pool_fail_threshold": cfg.ExitPoolFailThreshold,
 		"exit_cooldown_minutes": int(cfg.ExitCooldown / time.Minute),
 		"exit_min_active":       cfg.ExitMinActive,
 		"prefetch_minutes":      int(cfg.Prefetch / time.Minute),
