@@ -1,4 +1,4 @@
-# Example configuration for the O-Adversarial Plugin (plugin id: timezone-override).
+# Example configuration for the OAI-Adversarial Plugin (plugin id: timezone-override).
 # Copy the block below into your CPA config.yaml under `plugins.configs`.
 #
 # Notes:

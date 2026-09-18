@@ -1,4 +1,4 @@
-# O-Adversarial Plugin（O/对抗插件）
+# OAI-Adversarial Plugin（O/对抗插件）
 
 ## 开发说明与声明
 
