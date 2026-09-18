@@ -559,9 +559,11 @@ func (e *probeEngine) settledBaseline(model string, cfg probeConfig, now time.Ti
 }
 
 // setModelPaused pauses or resumes a model from the dashboard. Pausing keeps
-// the model out of rounds while preserving its value and failure record;
-// resuming clears the stale annotation and immediately starts one probe for
-// the model in the background (the user explicitly asked for it).
+// the model out of rounds while preserving its value and failure record; an
+// in-flight round for that model also stops at its next attempt boundary
+// (see probeModel). Resuming clears the stale annotation and immediately
+// starts one probe for the model in the background (the user explicitly
+// asked for it).
 func (e *probeEngine) setModelPaused(model string, paused bool) {
 	e.mu.Lock()
 	if e.paused == nil {
@@ -1178,6 +1180,16 @@ func (e *probeEngine) probeModel(model string, cfg probeConfig, stop chan struct
 		case <-stop:
 			return
 		default:
+		}
+		// The operator may pause the model while this round is in flight:
+		// honour the command at the next attempt boundary and leave without
+		// a failure annotation - pausing is a deliberate act, not a probe
+		// outcome (v1.5.20).
+		e.mu.Lock()
+		pausedMidRound := e.paused[model]
+		e.mu.Unlock()
+		if pausedMidRound {
+			return
 		}
 		rotation := e.availableProxies(proxies, time.Now().UTC())
 		if len(rotation) == 0 {

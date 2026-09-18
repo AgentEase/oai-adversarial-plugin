@@ -1048,6 +1048,67 @@ func TestPoolNeverBenched(t *testing.T) {
 		t.Fatal("healthy capture must clear the pool counters")
 	}
 }
+// TestPauseAbortsInFlightRound verifies the v1.5.20 fix: pausing a model
+// from the dashboard stops its already-running round at the next attempt
+// boundary without writing a failure annotation (a pause is a deliberate
+// operator command, not a probe outcome).
+func TestPauseAbortsInFlightRound(t *testing.T) {
+	enabled := true
+	interval := 2
+	probeTrack = &probeEngine{
+		values: map[string]stateEntry{}, failures: map[string]probeFailure{},
+		candidates: map[string]stateEntry{}, prefetchGate: map[string]time.Time{},
+		lastAttempt: map[string]time.Time{},
+		paused:      map[string]bool{}, probing: map[string]bool{},
+	}
+	cfg := parseProbeConfig(probeConfigYAML{
+		Enabled:         &enabled,
+		Models:          []string{"gpt-6-astra"},
+		IntervalSeconds: &interval,
+	})
+	cfg.CredFile = "/nonexistent/cred.json" // fails fast; exercises the real loop
+	probeTrack.cfg.Config = cfg
+
+	done := make(chan struct{})
+	go func() {
+		probeTrack.probeModel("gpt-6-astra", cfg, make(chan struct{}))
+		close(done)
+	}()
+	// Wait for the first attempt to land in the audit journal.
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		probeTrack.mu.Lock()
+		records := len(probeTrack.history)
+		probeTrack.mu.Unlock()
+		if records >= 1 {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	probeTrack.setModelPaused("gpt-6-astra", true)
+	select {
+	case <-done:
+	case <-time.After(6 * time.Second):
+		t.Fatal("pausing must abort the in-flight round")
+	}
+	probeTrack.mu.Lock()
+	total := probeTrack.probesTotal
+	_, annotated := probeTrack.failures["gpt-6-astra"]
+	probeTrack.mu.Unlock()
+	// The aborted round must not keep probing after the pause; a bug would
+	// fire the next attempt after the 2s interval.
+	time.Sleep(3 * time.Second)
+	probeTrack.mu.Lock()
+	after := probeTrack.probesTotal
+	probeTrack.mu.Unlock()
+	if after != total {
+		t.Fatalf("aborted round must not keep probing: %d -> %d", total, after)
+	}
+	if annotated {
+		t.Fatal("an operator pause must not write a failure annotation")
+	}
+}
+
 // TestPoolBudgetShare verifies the v1.5.19 adaptive per-round budget: plain
 // egresses contribute attempts-per-proxy tries each, rotating pools
 // contribute their own pool-attempts budget (default 100), an explicit
