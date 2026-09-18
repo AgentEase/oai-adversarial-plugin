@@ -213,6 +213,8 @@ type probeEngine struct {
 	probing        map[string]bool
 	abortCh        chan struct{}
 	halted         bool
+	queue          []probeTask
+	queueActive    bool
 	rejectDegraded bool
 	history        []probeRecord
 	proxyIndex     int
@@ -443,25 +445,60 @@ func currentProbeConfig() probeConfigState {
 // ---------------------------------------------------------------------------
 // engine lifecycle
 
+// probeTask is one queued probe: a model to probe, with Force marking a
+// one-off operator refresh (bypasses the settled-baseline gate and survives
+// a halted engine).
+type probeTask struct {
+	Model string
+	Force bool
+}
+
 func (e *probeEngine) start() {
 	e.mu.Lock()
-	if e.running {
+	if e.queueActive || len(e.queue) > 0 {
 		e.mu.Unlock()
 		return
 	}
-	e.running = true
-	e.runNote = ""
-	e.runStartedAt = time.Now().UTC().Format(time.RFC3339Nano)
-	e.runFinishedAt = ""
-	e.stopCh = make(chan struct{})
-	stop := e.stopCh
 	cfg := e.cfg.Config
 	// An explicit start re-ignites the engine: the automatic hand-off watcher
 	// resumes replenishing expiring baselines.
 	e.halted = false
+	e.runNote = ""
+	e.runStartedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	e.runFinishedAt = ""
 	e.mu.Unlock()
-	markStateDirty()
-	go e.roundLoop(cfg, stop)
+	if !cfg.Enabled {
+		e.mu.Lock()
+		e.runNote = "探测轨未启用（probe.enabled=false）"
+		e.runFinishedAt = time.Now().UTC().Format(time.RFC3339Nano)
+		e.mu.Unlock()
+		markStateDirty()
+		return
+	}
+	skipped := 0
+	for _, model := range cfg.Models {
+		if e.modelPaused(model) {
+			continue
+		}
+		if e.settledBaseline(model, cfg, time.Now().UTC()) {
+			// One healthy capture is enough: a model whose baseline is still
+			// comfortably far from expiry is skipped until its hand-off window
+			// comes up (the prefetch watcher refills it then). The row's "probe
+			// now" button remains available for an explicit refresh.
+			skipped++
+			continue
+		}
+		e.enqueueTask(model, false)
+	}
+	if skipped > 0 {
+		e.mu.Lock()
+		e.runNote = fmt.Sprintf("已跳过 %d 个仍在有效期内（未临近到期）的模型，保留现有健康基线", skipped)
+		if len(e.queue) == 0 && !e.queueActive {
+			e.runFinishedAt = time.Now().UTC().Format(time.RFC3339Nano)
+		}
+		e.mu.Unlock()
+		markStateDirty()
+	}
 }
 
 func (e *probeEngine) stop() {
@@ -476,14 +513,16 @@ func (e *probeEngine) stop() {
 	// Halt the engine: the automatic hand-off (prefetch) watcher must also
 	// stay silent until an explicit start / probe-now / resume re-ignites it.
 	e.halted = true
+	// "Stop all" also cancels every queued-but-not-started task.
+	hadQueued := len(e.queue) > 0
+	e.queue = nil
 	// In-round suspicion counters describe rounds that no longer exist;
 	// full failure annotations and business marks (non-round state) remain.
 	if len(e.suspects) > 0 {
 		e.suspects = map[string]probeSuspicion{}
 	}
-	runNote := "已停止所有探测（整轮与全部在途探测；在下一个尝试边界生效）"
-	if e.running || len(e.probing) > 0 {
-		e.runNote = runNote
+	if e.running || e.queueActive || hadQueued || len(e.probing) > 0 {
+		e.runNote = "已停止所有探测（已取消队列等待与在途探测；在下一个尝试边界生效）"
 	}
 	e.mu.Unlock()
 	markStateDirty()
@@ -510,63 +549,112 @@ func (e *probeEngine) abortSignal() <-chan struct{} {
 	return e.abortCh
 }
 
-// roundLoop drives one user-initiated round: every configured model is tried
-// once in priority order (paused models are skipped), sequentially. This is
-// the ONLY way probing runs - nothing is scheduled automatically - and
-// the loop exits when the operator stops it or the model list is exhausted.
-// A successful capture (model consistent + 292 bytes) is stored as the
-// model's persisted baseline; failures only annotate the dashboard.
-func (e *probeEngine) roundLoop(cfg probeConfig, stop chan struct{}) {
-	defer func() {
-		e.mu.Lock()
-		e.running = false
-		e.runFinishedAt = time.Now().UTC().Format(time.RFC3339Nano)
-		e.mu.Unlock()
-		markStateDirty()
-	}()
-	if !cfg.Enabled {
-		e.mu.Lock()
-		e.runNote = "探测轨未启用（probe.enabled=false）"
+// enqueueTask appends one probe task to the unified execution queue and
+// starts the worker when it is idle. A model already queued or currently
+// executing is never queued twice.
+func (e *probeEngine) enqueueTask(model string, force bool) {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return
+	}
+	e.mu.Lock()
+	if e.queue == nil {
+		e.queue = []probeTask{}
+	}
+	for _, task := range e.queue {
+		if task.Model == model {
+			e.mu.Unlock()
+			return
+		}
+	}
+	if e.probing[model] {
 		e.mu.Unlock()
 		return
 	}
-	skipped := 0
-	for _, model := range cfg.Models {
-		select {
-		case <-stop:
-			return
-		default:
-		}
-		e.mu.Lock()
-		paused := e.paused[model]
-		e.mu.Unlock()
-		if paused {
-			continue
-		}
-		if e.settledBaseline(model, cfg, time.Now().UTC()) {
-			// One healthy capture is enough: a model whose baseline is still
-			// comfortably far from expiry is skipped until its hand-off window
-			// comes up (the prefetch watcher refills it then). The row's "probe
-			// now" button remains available for an explicit refresh.
-			skipped++
-			continue
-		}
-		e.probeModel(model, cfg, stop)
+	e.queue = append(e.queue, probeTask{Model: model, Force: force})
+	active := e.queueActive
+	if !active {
+		e.queueActive = true
+		e.running = true
+		e.runStartedAt = time.Now().UTC().Format(time.RFC3339Nano)
+		e.runFinishedAt = ""
 	}
-	if skipped > 0 {
-		e.mu.Lock()
-		e.runNote = fmt.Sprintf("已跳过 %d 个仍在有效期内（未临近到期）的模型，保留现有健康基线", skipped)
-		e.mu.Unlock()
-		markStateDirty()
+	e.mu.Unlock()
+	markStateDirty()
+	if !active {
+		go e.queueLoop()
 	}
 }
 
-// probeSuppressed reports whether probing for a model is held off: the model
-// was paused from the dashboard or a round is already running for it.
+// modelPaused reports whether the model was paused from the dashboard.
+func (e *probeEngine) modelPaused(model string) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.paused[model]
+}
+
+// queueLoop is the single executor: it takes tasks from the head of the
+// queue in FIFO order, probes one model, waits the queue interval, then
+// moves on to the next task. All probing paths (start-round, one-off
+// refresh, resumed model, hand-off watcher) funnel through this queue, so
+// attempts are serialized and spread evenly across the interval instead of
+// running as independent per-model state machines. stop() cancels the
+// whole queue; a reload drains it.
+func (e *probeEngine) queueLoop() {
+	for {
+		e.mu.Lock()
+		if len(e.queue) == 0 {
+			e.queueActive = false
+			e.running = false
+			e.runFinishedAt = time.Now().UTC().Format(time.RFC3339Nano)
+			e.mu.Unlock()
+			markStateDirty()
+			return
+		}
+		task := e.queue[0]
+		e.queue = e.queue[1:]
+		cfg := e.cfg.Config
+		brake := e.abortCh
+		if brake == nil {
+			e.abortCh = make(chan struct{})
+			brake = e.abortCh
+		}
+		paused := e.paused[task.Model]
+		halted := e.halted
+		e.mu.Unlock()
+		// Re-evaluate at dequeue time: a task may have become obsolete while
+		// waiting (model paused, baseline replenished, engine halted). A
+		// one-off refresh (Force) survives both gates - it is an explicit
+		// command - but still respects an operator pause.
+		if cfg.Enabled && !paused && (task.Force || !halted) &&
+			(task.Force || !e.settledBaseline(task.Model, cfg, time.Now().UTC())) {
+			e.probeModel(task.Model, cfg, make(chan struct{}))
+		}
+		// The queue interval: the pacing between two tasks (and, inside a
+		// task, between retries). Interrupted by the global brake.
+		select {
+		case <-time.After(cfg.ProbeInterval):
+		case <-brake:
+			// The stop cleared the queue; the next loop iteration exits.
+		}
+	}
+}
+
+// probeSuppressed reports whether probing for a model is held off: the
+// model was paused from the dashboard, a probe is running for it, or a task
+// for it is already waiting in the unified queue.
 func (e *probeEngine) probeSuppressed(model string) bool {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	return e.paused[model] || e.probing[model]
+	if e.paused[model] || e.probing[model] {
+		return true
+	}
+	for _, task := range e.queue {
+		if task.Model == model {
+			return true
+		}
+	}
+	return false
 }
 
 // settledBaseline reports whether a model already holds a healthy baseline
@@ -595,12 +683,11 @@ func (e *probeEngine) settledBaseline(model string, cfg probeConfig, now time.Ti
 }
 
 // setModelPaused pauses or resumes a model from the dashboard. Pausing keeps
-// the model out of rounds while preserving its value and failure record; an
-// in-flight round for that model also stops at its next attempt boundary
-// (see probeModel). Resuming clears the stale annotation, re-ignites a
-// halted engine (returning the model to automatic care) and immediately
-// starts one probe for the model in the background (the user explicitly
-// asked for it).
+// the model out of the queue while preserving its value and failure record;
+// an in-flight probe for that model also stops at its next attempt boundary
+// (see probeModel). Resuming clears the stale annotation; if the engine is
+// running it queues one probe for the model, while a halted engine stays
+// halted and silent - only "start round" resumes automatic care for all.
 func (e *probeEngine) setModelPaused(model string, paused bool) {
 	e.mu.Lock()
 	if e.paused == nil {
@@ -615,12 +702,19 @@ func (e *probeEngine) setModelPaused(model string, paused bool) {
 	e.mu.Unlock()
 	markStateDirty()
 	if !paused {
-		// Resuming returns the model to automatic care: that deliberately
-		// re-ignites a halted engine (unlike a one-off "probe now").
+		// Resuming clears the pause so the model participates again. While
+		// the engine is running it is probed immediately via the unified
+		// queue; while the engine is halted (after "stop all") nothing is
+		// started and nothing is re-ignited - the model simply waits for the
+		// next explicit "start round", which is the only path that resumes
+		// automatic care for everyone. Single-model controls never wake
+		// other models.
 		e.mu.Lock()
-		e.halted = false
+		engineHalted := e.halted
 		e.mu.Unlock()
-		e.probeModelAsync(model)
+		if !engineHalted {
+			e.enqueueTask(model, false)
+		}
 	}
 }
 
@@ -730,43 +824,28 @@ func (e *probeEngine) prefetchScan() {
 	}
 }
 
-// probeModelAsync launches one background probe round for a single model on
-// explicit user request (the row's "probe now" control). It is always
-// honoured - even while the engine is halted after a global stop - but a
-// one-off model refresh never re-ignites the engine: the halt (and with it
-// the silent hand-off watcher) stays in place, and no other model is
-// disturbed. The deliberate global re-ignition happens on "start-round" and
-// on resuming a paused model (setModelPaused), which both express "return
-// this scope to automatic care".
+// probeModelAsync queues one probe for a single model on explicit user
+// request (the row's "probe now" control). The task is enqueued as a forced
+// one-off: it is honoured even while the engine is halted after a global
+// stop and skips the settled-baseline gate, but it never re-ignites the
+// engine (the halt and the silent hand-off watcher stay in place) and no
+// other model is disturbed. The deliberate global re-ignition happens on
+// "start-round" and on resuming a paused model.
 func (e *probeEngine) probeModelAsync(model string) {
-	e.probeModelAsyncImpl(model, true)
+	e.enqueueTask(model, true)
 }
 
-// probeModelAsyncFromWatcher launches the automatic hand-off probe. Unlike
-// the explicit entry point it is suppressed while the engine is halted: a
-// scan that raced with a dashboard stop must not resurrect probing.
+// probeModelAsyncFromWatcher queues the automatic hand-off probe. Unlike the
+// explicit entry point it is suppressed while the engine is halted: a scan
+// that raced with a dashboard stop must not resurrect probing.
 func (e *probeEngine) probeModelAsyncFromWatcher(model string) {
-	e.probeModelAsyncImpl(model, false)
-}
-
-func (e *probeEngine) probeModelAsyncImpl(model string, oneOff bool) {
-	model = strings.TrimSpace(model)
-	if model == "" {
-		return
-	}
 	e.mu.Lock()
-	if e.halted && !oneOff {
-		e.mu.Unlock()
-		return
-	}
-	cfg := e.cfg.Config
-	busy := e.probing[model]
-	if !cfg.Enabled || busy {
-		e.mu.Unlock()
-		return
-	}
+	halted := e.halted
 	e.mu.Unlock()
-	go e.probeModel(model, cfg, make(chan struct{}))
+	if halted {
+		return
+	}
+	e.enqueueTask(model, false)
 }
 
 // pausedModels lists the models currently paused from the dashboard.
@@ -1663,6 +1742,16 @@ func (e *probeEngine) appendRecord(record probeRecord) {
 	e.history = append(e.history, record)
 }
 
+// queueModels extracts the model names of the pending queue for the
+// dashboard snapshot.
+func queueModels(tasks []probeTask) []string {
+	models := make([]string, 0, len(tasks))
+	for _, task := range tasks {
+		models = append(models, task.Model)
+	}
+	return models
+}
+
 // ---------------------------------------------------------------------------
 // helpers
 
@@ -1919,6 +2008,8 @@ func probeSummary() map[string]any {
 		"reject_degraded":  probeTrack.rejectDegraded,
 		"running":      probeTrack.running,
 		"halted":       probeTrack.halted,
+		"queue_length": len(probeTrack.queue),
+		"queue_models": queueModels(probeTrack.queue),
 		"run_started_at":  probeTrack.runStartedAt,
 		"run_finished_at": probeTrack.runFinishedAt,
 		"run_note":        probeTrack.runNote,

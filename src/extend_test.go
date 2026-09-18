@@ -263,11 +263,21 @@ func TestProbePauseAndResume(t *testing.T) {
 		t.Fatalf("paused list wrong: %v", models)
 	}
 	state.setModelPaused("gpt-6-astra", false)
-	if state.probeSuppressed("gpt-6-astra") {
-		t.Fatal("resumed model must re-enter the queue")
-	}
 	if _, ok := state.failures["gpt-6-astra"]; ok {
 		t.Fatal("resume must clear the stale annotation")
+	}
+	// Resume queues a probe through the unified executor; the model is held
+	// while that task runs, then re-enters normal scheduling. Wait for the
+	// queue to drain (the probe itself fails fast on the default cred path).
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if !state.probeSuppressed("gpt-6-astra") {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if state.probeSuppressed("gpt-6-astra") {
+		t.Fatal("resumed model must re-enter normal scheduling")
 	}
 }
 
@@ -1216,18 +1226,17 @@ func TestWatcherSilentAfterStop(t *testing.T) {
 		t.Fatal("a halted engine must not arm the hand-off watcher")
 	}
 
-	// An explicit one-off request runs while halted but keeps the halt;
-	// the deliberate re-ignition paths are start-round / resuming a model.
+	// An explicit one-off request runs while halted but keeps the halt; the
+	// only re-ignition path is the explicit "start round".
 	if !halted {
 		t.Fatal("the engine must stay halted")
 	}
-	probeTrack.setModelPaused("gpt-6-astra", true)
-	probeTrack.setModelPaused("gpt-6-astra", false)
+	probeTrack.start()
 	probeTrack.mu.Lock()
 	reignited := !probeTrack.halted
 	probeTrack.mu.Unlock()
 	if !reignited {
-		t.Fatal("resuming a paused model must re-ignite the engine")
+		t.Fatal("start-round must re-ignite the engine")
 	}
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
@@ -1289,24 +1298,20 @@ func TestOneOffProbeDoesNotReignite(t *testing.T) {
 	if !probeTrack.prefetchGate["gpt-5.6-sol"].IsZero() {
 		t.Fatal("the halted engine must keep the watcher silent")
 	}
-	// Resuming a paused model re-ignites deliberately.
+	// Resuming a paused model while halted stays silent: the pause is lifted
+	// but nothing is probed and nothing re-ignites - only "start round"
+	// resumes automatic care for everyone.
 	probeTrack.setModelPaused("gpt-5.6-sol", true)
 	probeTrack.setModelPaused("gpt-5.6-sol", false)
 	probeTrack.mu.Lock()
-	reignited := !probeTrack.halted
+	stillHalted = probeTrack.halted
+	queuedAfterResume := len(probeTrack.queue)
 	probeTrack.mu.Unlock()
-	if !reignited {
-		t.Fatal("resuming a paused model must re-ignite the engine")
+	if !stillHalted {
+		t.Fatal("resuming while halted must not re-ignite the engine")
 	}
-	deadline = time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		probeTrack.mu.Lock()
-		busy := probeTrack.probing["gpt-5.6-sol"]
-		probeTrack.mu.Unlock()
-		if !busy {
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
+	if queuedAfterResume != 0 {
+		t.Fatal("resuming while halted must not queue a probe")
 	}
 }
 
