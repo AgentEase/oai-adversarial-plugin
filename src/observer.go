@@ -144,18 +144,20 @@ func turnStateOverrideMatches(config turnStateOverrideConfig, models ...string) 
 // returns the header replacement plus the record status:
 //
 //	""                not applicable (disabled, no match, or no value)
-//	"applied"         header replaced with a fresh probe-captured value
-//	"applied-config"  header replaced with the configured static value
+//	"applied"         header replaced with the model's healthy baseline
+//	"applied-config"  static fallback value (no fresh baseline available)
 //	"skipped-existing" fill mode found an existing client value
 //
-// A fresh probe-track value (when present and unexpired) wins over the static
-// configured value.
+// The healthy baseline table is seeded from recorded history and refreshed by
+// business observations and manual probe rounds. It wins over the static
+// configured value; the baseline keeps serving even while the probe track is
+// idle - it is cached protection, not probing.
 func applyTurnStateOverride(model, requestedModel string, headers http.Header) (http.Header, string) {
 	state := currentTurnStateOverride()
 	if state == nil {
 		return nil, ""
 	}
-	probeValue := ""
+	baseline := ""
 	matched := false
 	for _, candidate := range []string{model, requestedModel} {
 		candidate = strings.TrimSpace(candidate)
@@ -166,7 +168,7 @@ func applyTurnStateOverride(model, requestedModel string, headers http.Header) (
 			matched = true
 		}
 		if value := probeTrack.activeValueFor(candidate); value != "" {
-			probeValue = value
+			baseline = value
 			matched = true
 			break
 		}
@@ -174,31 +176,62 @@ func applyTurnStateOverride(model, requestedModel string, headers http.Header) (
 	if !matched {
 		return nil, ""
 	}
-	if !probeEnabled(state.Config.Probe) {
+	// An existing client value is kept only when it looks healthy (required
+	// length) and force is off; an unhealthy one (for example a 312-byte
+	// degraded state) is always replaced, whichever the mode.
+	existing := headerValue(headers, turnStateHeader)
+	keepExisting := existing != "" && len(existing) == probeRequiredStateLength && !state.Config.Force
+	if baseline == "" {
 		if !state.Config.Enabled || state.Config.Value == "" {
 			return nil, ""
 		}
-		if !state.Config.Force && headerValue(headers, turnStateHeader) != "" {
+		if keepExisting {
 			return nil, "skipped-existing"
 		}
 		return http.Header{turnStateHeader: []string{state.Config.Value}}, "applied-config"
 	}
-	// Probe mode: prefer the fresh captured value; fall back to the static
-	// value only when it is configured and no probe value is available yet.
-	if probeValue == "" {
-		if !state.Config.Enabled || state.Config.Value == "" {
-			return nil, ""
-		}
-		probeValue = state.Config.Value
-		if !state.Config.Force && headerValue(headers, turnStateHeader) != "" {
-			return nil, "skipped-existing"
-		}
-		return http.Header{turnStateHeader: []string{probeValue}}, "applied-config"
-	}
-	if !state.Config.Force && headerValue(headers, turnStateHeader) != "" {
+	if keepExisting {
 		return nil, "skipped-existing"
 	}
-	return http.Header{turnStateHeader: []string{probeValue}}, "applied"
+	return http.Header{turnStateHeader: []string{baseline}}, "applied"
+}
+
+// isHealthyTurnState reports whether an observed turn-state value is healthy:
+// exactly the required length and, when the upstream model is known, served by
+// a consistent model. An unknown upstream model only length-checks.
+func isHealthyTurnState(model, observedModel, state string) bool {
+	if len(state) != probeRequiredStateLength {
+		return false
+	}
+	if observedModel != "" && !probeModelConsistent(model, observedModel) {
+		return false
+	}
+	return true
+}
+
+// repairTurnStateHeader substitutes the model's healthy baseline for an
+// unhealthy upstream value on the response path ("丢弃并回灌"): the degraded
+// state is discarded and the last known-good state is delivered downstream
+// instead, so it is not fed back into the next request. Returns nil when no
+// repair applies (healthy value, no state, or no baseline yet), in which case
+// the response must pass through untouched.
+func repairTurnStateHeader(model, requestedModel, observedModel, state string) http.Header {
+	state = strings.TrimSpace(state)
+	if state == "" {
+		return nil
+	}
+	key := businessModelName(model, requestedModel)
+	if key == "" {
+		return nil
+	}
+	if isHealthyTurnState(key, observedModel, state) {
+		return nil
+	}
+	baseline := probeTrack.activeValueFor(key)
+	if baseline == "" || baseline == state {
+		return nil
+	}
+	return http.Header{turnStateHeader: []string{baseline}}
 }
 
 // turnStateModelMatched reports whether a single candidate model name is
@@ -235,11 +268,19 @@ func interceptNonStreamingResponse(raw []byte) (responseInterceptOutput, error) 
 	if err := json.Unmarshal(raw, &req); err != nil {
 		return responseInterceptOutput{}, fmt.Errorf("decode response interception: %w", err)
 	}
+	state := headerValue(req.ResponseHeaders, turnStateHeader)
+	upstream := ""
 	if model, ok := probeUpstreamModel(req.Body); ok {
+		upstream = model
 		history.observeModel(req.RequestID, "", model)
 	}
-	history.observeTurnState(req.RequestID, headerValue(req.ResponseHeaders, turnStateHeader), "response")
-	return responseInterceptOutput{}, nil
+	history.observeTurnState(req.RequestID, state, "response")
+	observeBusinessState(businessModelName(req.Model, req.RequestedModel), state, upstream)
+	out := responseInterceptOutput{}
+	if headers := repairTurnStateHeader(req.Model, req.RequestedModel, upstream, state); headers != nil {
+		out.Headers = headers
+	}
+	return out, nil
 }
 
 // interceptStreamChunk observes every successful stream chunk before it is
@@ -250,13 +291,23 @@ func interceptStreamChunk(raw []byte) (responseInterceptOutput, error) {
 	if err := json.Unmarshal(raw, &req); err != nil {
 		return responseInterceptOutput{}, fmt.Errorf("decode stream chunk interception: %w", err)
 	}
+	upstream := ""
 	if req.ChunkIndex != streamChunkHeaderInitIndex {
 		if model, ok := probeUpstreamModel(req.Body); ok {
+			upstream = model
 			history.observeModel(req.RequestID, "", model)
 		}
 	}
-	history.observeTurnState(req.RequestID, headerValue(req.ResponseHeaders, turnStateHeader), "stream")
-	return responseInterceptOutput{}, nil
+	state := headerValue(req.ResponseHeaders, turnStateHeader)
+	history.observeTurnState(req.RequestID, state, "stream")
+	if upstream != "" || state != "" {
+		observeBusinessState(businessModelName(req.Model, req.RequestedModel), state, upstream)
+	}
+	out := responseInterceptOutput{}
+	if headers := repairTurnStateHeader(req.Model, req.RequestedModel, upstream, state); headers != nil {
+		out.Headers = headers
+	}
+	return out, nil
 }
 
 // observeWebSocketEvent observes upstream websocket response events (the Codex
@@ -269,8 +320,18 @@ func observeWebSocketEvent(raw []byte) (struct{}, error) {
 	}
 	if model, ok := probeUpstreamModel(event.Payload); ok {
 		history.observeModel(event.RequestID, event.TraceID, model)
+		observeBusinessState(businessModelName(event.Model, event.RequestedModel), "", model)
 	}
 	return struct{}{}, nil
+}
+
+// businessModelName picks the model name used as the business-observation
+// key: the executed model first, falling back to the requested one.
+func businessModelName(model, requestedModel string) string {
+	if value := strings.TrimSpace(model); value != "" {
+		return value
+	}
+	return strings.TrimSpace(requestedModel)
 }
 
 // probeUpstreamModel extracts the model name that the upstream reported, from

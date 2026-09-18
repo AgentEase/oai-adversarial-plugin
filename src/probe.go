@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -20,15 +21,16 @@ import (
 	"golang.org/x/net/proxy"
 )
 
-// This file implements the V1.5 probe track: a background engine that, inside
-// the validity window of each model's X-Codex-Turn-State, sends a minimal
-// upstream request through a rotating proxy pool and captures a fresh state.
-// The captured values are hot-swapped into the rewrite engine so business
-// requests always overwrite with a currently-valid state.
+// This file implements the manual probe track: on explicit dashboard request
+// ("start-round") a single round walks the configured models in priority order
+// and captures a fresh X-Codex-Turn-State through the rotating egress pool.
+// Accepted captures (model-consistent, 292 bytes) replace the model's healthy
+// baseline, which the rewrite engine serves to business requests. Nothing is
+// scheduled automatically: no scan loop, no timers, no auto-recovery - idle
+// is the default state, and business observations refresh baselines passively.
 //
-// The probe track is deliberately isolated: it never touches the business
-// request path, only reads auth material, and can be switched off entirely
-// with probe.enabled=false.
+// The probe track never touches the business request path, only reads auth
+// material, and is gated by probe.enabled.
 
 const (
 	probeDefaultsTTLMinutes      = 55
@@ -143,33 +145,51 @@ type probeSuspicion struct {
 	Since     string `json:"since"`
 }
 
+// businessDegradation marks a model that real business traffic observed as
+// degraded (length anomaly or model mismatch). Unlike probe suspicions it
+// takes effect immediately - one unhealthy observation is enough - and it is
+// cleared by a healthy business observation or a successful probe round.
+type businessDegradation struct {
+	Model  string `json:"model"`
+	Reason string `json:"reason,omitempty"`
+	Since  string `json:"since"`
+}
+
 type probeEngine struct {
 	mu             sync.Mutex
 	cfg            probeConfigState
 	values         map[string]stateEntry
 	failures       map[string]probeFailure
 	suspects       map[string]probeSuspicion
+	business       map[string]businessDegradation
+	lastAttempt    map[string]time.Time
 	paused         map[string]bool
 	probing        map[string]bool
 	rejectDegraded bool
 	history        []probeRecord
 	proxyIndex     int
 	consecutive    int
-	lastScan       time.Time
 	lastActivity   string
 	stopCh         chan struct{}
 	running        bool
+	runNote        string
+	runStartedAt   string
+	runFinishedAt  string
+	seeded         int
 	probesTotal    uint64
 	probesOK       uint64
 	lastError      string
 }
 
+
 var probeTrack = &probeEngine{
-	values:         map[string]stateEntry{},
-	failures:       map[string]probeFailure{},
-	suspects:       map[string]probeSuspicion{},
-	paused:         map[string]bool{},
-	probing:        map[string]bool{},
+	values:       map[string]stateEntry{},
+	failures:     map[string]probeFailure{},
+	suspects:     map[string]probeSuspicion{},
+	business:     map[string]businessDegradation{},
+	lastAttempt:  map[string]time.Time{},
+	paused:       map[string]bool{},
+	probing:      map[string]bool{},
 	rejectDegraded: true,
 }
 
@@ -279,9 +299,9 @@ func configureProbeTrack(block probeConfigYAML) error {
 	probeTrack.stopLocked()
 	probeTrack.cfg = probeConfigState{Config: cfg, Error: cfgErr}
 	probeTrack.mu.Unlock()
-	if cfg.Enabled {
-		probeTrack.start()
-	}
+	// The probe track never auto-starts. The dashboard's manual
+	// control is the only way to run it; business traffic refreshes baselines
+	// passively and the rejection switch keeps working on its own.
 	ensurePersistence()
 	return nil
 }
@@ -303,16 +323,22 @@ func (e *probeEngine) start() {
 		return
 	}
 	e.running = true
+	e.runNote = ""
+	e.runStartedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	e.runFinishedAt = ""
 	e.stopCh = make(chan struct{})
 	stop := e.stopCh
+	cfg := e.cfg.Config
 	e.mu.Unlock()
-	go e.loop(stop)
+	markStateDirty()
+	go e.roundLoop(cfg, stop)
 }
 
 func (e *probeEngine) stop() {
 	e.mu.Lock()
 	e.stopLocked()
 	e.mu.Unlock()
+	markStateDirty()
 }
 
 func (e *probeEngine) stopLocked() {
@@ -323,80 +349,44 @@ func (e *probeEngine) stopLocked() {
 	e.stopCh = nil
 }
 
-func (e *probeEngine) loop(stop chan struct{}) {
-	// Small initial delay so plugin registration completes first.
-	select {
-	case <-time.After(5 * time.Second):
-	case <-stop:
-		return
-	}
-	for {
-		e.scanOnce(stop)
+// roundLoop drives one user-initiated round: every configured model is tried
+// once in priority order (paused models are skipped), sequentially. This is
+// the ONLY way probing runs - nothing is scheduled automatically - and
+// the loop exits when the operator stops it or the model list is exhausted.
+// A successful capture (model consistent + 292 bytes) is stored as the
+// model's persisted baseline; failures only annotate the dashboard.
+func (e *probeEngine) roundLoop(cfg probeConfig, stop chan struct{}) {
+	defer func() {
 		e.mu.Lock()
-		interval := e.cfg.Config.ScanInterval
+		e.running = false
+		e.runFinishedAt = time.Now().UTC().Format(time.RFC3339Nano)
 		e.mu.Unlock()
-		if interval <= 0 {
-			interval = time.Duration(probeDefaultsScanSeconds) * time.Second
-		}
-		select {
-		case <-time.After(interval):
-		case <-stop:
-			return
-		}
-	}
-}
-
-// scanOnce checks each model in priority order and probes the first one whose
-// state is missing or enters the configured probe window.
-func (e *probeEngine) scanOnce(stop chan struct{}) {
-	e.mu.Lock()
-	cfg := e.cfg.Config
-	e.lastScan = time.Now().UTC()
-	e.mu.Unlock()
+		markStateDirty()
+	}()
 	if !cfg.Enabled {
+		e.mu.Lock()
+		e.runNote = "探测轨未启用（probe.enabled=false）"
+		e.mu.Unlock()
 		return
 	}
 	for _, model := range cfg.Models {
-		if e.probeSuppressed(model) {
+		select {
+		case <-stop:
+			return
+		default:
+		}
+		e.mu.Lock()
+		paused := e.paused[model]
+		e.mu.Unlock()
+		if paused {
 			continue
 		}
-		if e.needsProbe(model, cfg) {
-			e.probeModel(model, cfg, stop)
-			select {
-			case <-stop:
-				return
-			default:
-			}
-		}
+		e.probeModel(model, cfg, stop)
 	}
 }
 
-// needsProbe reports whether a model's current state is missing or about to
-// expire (inside the configured probe window). A failure cooldown suppresses
-// new rounds until cooldown-minutes have elapsed since the failed round.
-func (e *probeEngine) needsProbe(model string, cfg probeConfig) bool {
-	e.mu.Lock()
-	entry, ok := e.values[model]
-	failure, hasFailure := e.failures[model]
-	e.mu.Unlock()
-	if hasFailure {
-		if until, err := time.Parse(time.RFC3339Nano, failure.CooldownUntil); err == nil && time.Now().UTC().Before(until) {
-			return false
-		}
-	}
-	if !ok || !entry.Valid || entry.Value == "" {
-		return true
-	}
-	generated, okTime := parseTurnStateTimestamp(entry.Value)
-	if !okTime {
-		return true
-	}
-	remaining := time.Until(generated.Add(cfg.TTL))
-	return remaining <= cfg.Window
-}
-
-// probeSuppressed reports whether automatic probing for a model is held off:
-// the model was paused from the dashboard or a round is already running.
+// probeSuppressed reports whether probing for a model is held off: the model
+// was paused from the dashboard or a round is already running for it.
 func (e *probeEngine) probeSuppressed(model string) bool {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -404,9 +394,9 @@ func (e *probeEngine) probeSuppressed(model string) bool {
 }
 
 // setModelPaused pauses or resumes a model from the dashboard. Pausing keeps
-// the model out of the automatic queue while preserving its value and failure
-// record; resuming clears the stale annotation and starts one probe round in
-// the background.
+// the model out of manual rounds while preserving its value and failure
+// record; resuming clears the stale annotation. Probing itself is never
+// started automatically - that is what the round control is for.
 func (e *probeEngine) setModelPaused(model string, paused bool) {
 	e.mu.Lock()
 	if e.paused == nil {
@@ -420,21 +410,6 @@ func (e *probeEngine) setModelPaused(model string, paused bool) {
 	}
 	e.mu.Unlock()
 	markStateDirty()
-	if !paused {
-		e.startProbeAsync(model)
-	}
-}
-
-// startProbeAsync launches one probe round in the background for the manual
-// resume action. probeModel guards against overlapping rounds itself.
-func (e *probeEngine) startProbeAsync(model string) {
-	e.mu.Lock()
-	cfg := e.cfg.Config
-	e.mu.Unlock()
-	if !cfg.Enabled {
-		return
-	}
-	go e.probeModel(model, cfg, make(chan struct{}))
 }
 
 // pausedModels lists the models currently paused from the dashboard.
@@ -532,6 +507,14 @@ func (e *probeEngine) degradedRejectReason(model string) string {
 			return reason
 		}
 	}
+	for key, mark := range e.business {
+		if !strings.HasPrefix(candidate, strings.ToLower(key)) {
+			continue
+		}
+		if mark.Reason != "" {
+			return mark.Reason + "（业务流量确认）"
+		}
+	}
 	for key, suspicion := range e.suspects {
 		if !strings.HasPrefix(candidate, strings.ToLower(key)) {
 			continue
@@ -582,6 +565,82 @@ func effectiveMaxAttempts(cfg probeConfig, proxyCount int) int {
 	return probeDefaultsMaxAttempts
 }
 
+// noteBusinessDegradation marks a model immediately upon a single unhealthy
+// business observation (state length anomaly or upstream model mismatch) and
+// triggers one gentle recovery round (throttled to at most once per five
+// minutes per model, and suppressed while a round or cooldown is active).
+func (e *probeEngine) noteBusinessDegradation(model, reason string) {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return
+	}
+	e.mu.Lock()
+	if e.business == nil {
+		e.business = map[string]businessDegradation{}
+	}
+	e.business[model] = businessDegradation{
+		Model:  model,
+		Reason: reason,
+		Since:  time.Now().UTC().Format(time.RFC3339Nano),
+	}
+	e.mu.Unlock()
+	markStateDirty()
+}
+
+// clearBusinessDegradation removes the business mark (healthy observation or
+// successful probe).
+func (e *probeEngine) clearBusinessDegradation(model string) {
+	e.mu.Lock()
+	_, present := e.business[model]
+	if present {
+		delete(e.business, model)
+	}
+	e.mu.Unlock()
+	if present {
+		markStateDirty()
+	}
+}
+
+// triggerRecovery was removed: recovery probing is user-initiated
+// only (the dashboard round control). Unhealthy observations keep marking the
+// model for the rejection switch, but never start upstream traffic on their
+// own.
+
+// observeBusinessState feeds one state value observed on real business
+// traffic into the engine:
+//
+//   - healthy (length 292, model consistent) -> stored as the active value
+//     with source "business" (zero upstream pressure), marks cleared;
+//   - unhealthy (length anomaly, or state empty + model mismatch) -> one
+//     observation is enough to mark the model degraded for the rejection
+//     switch and to trigger a gentle recovery round;
+//   - state empty with no mismatch -> no signal, ignored.
+func observeBusinessState(model, state, observedModel string) {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return
+	}
+	state = strings.TrimSpace(state)
+	consistent := observedModel == "" || probeModelConsistent(model, observedModel)
+	if state == "" {
+		if observedModel != "" && !consistent {
+			probeTrack.noteBusinessDegradation(model, "上游请求被路由至其它模型（模型不一致）")
+		}
+		return
+	}
+	if len(state) != probeRequiredStateLength {
+		probeTrack.noteBusinessDegradation(model, fmt.Sprintf("业务请求观测到状态长度异常（%d 字节）", len(state)))
+		return
+	}
+	if !consistent {
+		probeTrack.noteBusinessDegradation(model, "上游请求被路由至其它模型（模型不一致）")
+		return
+	}
+	cfg := currentProbeConfig().Config
+	probeTrack.storeValue(model, state, "business", "", cfg)
+	probeTrack.clearBusinessDegradation(model)
+}
+
 // probeModel runs the probe sequence for one model: repeated rounds of up to
 // attempts-per-proxy attempts per egress, rotating egress after each failed
 // round, until an acceptable state is captured (success clears any failure
@@ -596,16 +655,18 @@ func (e *probeEngine) probeModel(model string, cfg probeConfig, stop chan struct
 		e.mu.Unlock()
 		return
 	}
-	e.probing[model] = true
 	proxies := append([]string(nil), cfg.Proxies...)
-	startIndex := e.proxyIndex % len(proxies)
-	e.mu.Unlock()
 	if len(proxies) == 0 {
-		e.mu.Lock()
-		delete(e.probing, model)
 		e.mu.Unlock()
 		return
 	}
+	if e.lastAttempt == nil {
+		e.lastAttempt = map[string]time.Time{}
+	}
+	e.probing[model] = true
+	e.lastAttempt[model] = time.Now().UTC()
+	startIndex := e.proxyIndex % len(proxies)
+	e.mu.Unlock()
 	defer func() {
 		e.mu.Lock()
 		delete(e.probing, model)
@@ -628,10 +689,11 @@ func (e *probeEngine) probeModel(model string, cfg probeConfig, stop chan struct
 			record, value := e.probeOnce(model, proxySpec, cfg)
 			e.appendRecord(record)
 			if value != "" {
-				e.storeValue(model, value, proxySpec, cfg)
+				e.storeValue(model, value, "probe", proxySpec, cfg)
 				e.mu.Lock()
 				delete(e.failures, model)
 				delete(e.suspects, model)
+				delete(e.business, model)
 				e.proxyIndex = index
 				e.consecutive = 0
 				e.mu.Unlock()
@@ -655,8 +717,9 @@ func (e *probeEngine) probeModel(model string, cfg probeConfig, stop chan struct
 		e.proxyIndex = (startIndex + (round+1)*cfg.AttemptsPerHop) % len(proxies)
 		e.mu.Unlock()
 	}
-	// Retries exhausted: annotate the failure for the dashboard and start the
-	// cooldown window; the next round is suppressed until it elapses. The
+	// Retries exhausted: annotate the failure for the dashboard (attempt
+	// counters, last error and a cool-down hint). Nothing restarts
+	// automatically - the next attempt is a manual round. The
 	// in-round suspicion is promoted to the full annotation.
 	now := time.Now().UTC()
 	e.mu.Lock()
@@ -813,7 +876,7 @@ func (e *probeEngine) noteError(message string) {
 }
 
 // storeValue saves a freshly captured state as the active value for the model.
-func (e *probeEngine) storeValue(model, value, proxySpec string, cfg probeConfig) {
+func (e *probeEngine) storeValue(model, value, source, proxySpec string, cfg probeConfig) {
 	generated := ""
 	expires := ""
 	if ts, ok := parseTurnStateTimestamp(value); ok {
@@ -827,7 +890,7 @@ func (e *probeEngine) storeValue(model, value, proxySpec string, cfg probeConfig
 		GeneratedAt: generated,
 		CapturedAt:  time.Now().UTC().Format(time.RFC3339Nano),
 		ExpiresAt:   expires,
-		Source:      "probe",
+		Source:      source,
 		Proxy:       proxySpec,
 		Valid:       true,
 	}
@@ -837,12 +900,13 @@ func (e *probeEngine) storeValue(model, value, proxySpec string, cfg probeConfig
 	markStateDirty()
 }
 
-// activeValueFor returns the currently valid probe-captured state for a model.
+// activeValueFor returns the model's current healthy baseline value: one that
+// is stored (seed / business observation / manual probe) and still inside the
+// TTL window. Serving does not depend on the probe track being enabled - the
+// baseline is the plugin's cached known-good state and must keep protecting
+// requests while probing stays idle.
 func (e *probeEngine) activeValueFor(model string) string {
 	cfg := currentProbeConfig().Config
-	if !cfg.Enabled {
-		return ""
-	}
 	e.mu.Lock()
 	entry, ok := e.values[model]
 	e.mu.Unlock()
@@ -855,6 +919,87 @@ func (e *probeEngine) activeValueFor(model string) string {
 		}
 	}
 	return entry.Value
+}
+
+// seedBaselinesFromAudit restores missing baseline entries from recorded
+// history: first the deployment seeds file (last known-good values extracted
+// from server records by the open-source-prep scanner), then the newest
+// healthy (292-byte, decodable) turn-state values in the audit journal. A
+// fresh plugin instance therefore keeps protecting traffic with the last
+// known-good states before any business observation or manual probe refreshes
+// them, and nothing is drafted into the baseline unless it passes the same
+// length + decodability acceptance as probing.
+func (e *probeEngine) seedBaselinesFromAudit() {
+	type candidate struct {
+		value string
+		at    time.Time
+	}
+	best := map[string]candidate{}
+	// Deployment seeds file first (richest history, includes backups).
+	seedsPath := "/CLIProxyAPI/logs/.plugins/timezone-override/seeds.json"
+	if override := strings.TrimSpace(os.Getenv("LKS_TZ_STATE_FILE")); override != "" {
+		seedsPath = filepath.Join(filepath.Dir(override), "seeds.json")
+	}
+	if raw, err := os.ReadFile(seedsPath); err == nil {
+		var seeds map[string]string
+		if json.Unmarshal(raw, &seeds) == nil {
+			for model, value := range seeds {
+				model = strings.TrimSpace(model)
+				value = strings.TrimSpace(value)
+				if model == "" || len(value) != probeRequiredStateLength {
+					continue
+				}
+				if ts, ok := parseTurnStateTimestamp(value); ok {
+					best[model] = candidate{value: value, at: ts}
+				}
+			}
+		}
+	}
+	history.mu.Lock()
+	for _, record := range history.records {
+		model := strings.TrimSpace(record.Model)
+		if model == "" {
+			model = strings.TrimSpace(record.RequestedModel)
+		}
+		if model == "" || record.TurnStateLength != probeRequiredStateLength || record.TurnStateValue == "" {
+			continue
+		}
+		ts, ok := parseTurnStateTimestamp(record.TurnStateValue)
+		if !ok {
+			continue
+		}
+		if previous, exists := best[model]; !exists || ts.After(previous.at) {
+			best[model] = candidate{value: record.TurnStateValue, at: ts}
+		}
+	}
+	history.mu.Unlock()
+	seeded := 0
+	e.mu.Lock()
+	if e.values == nil {
+		e.values = map[string]stateEntry{}
+	}
+	cfg := e.cfg.Config
+	for model, found := range best {
+		if entry, ok := e.values[model]; ok && entry.Value != "" {
+			continue
+		}
+		e.values[model] = stateEntry{
+			Model:       model,
+			Value:       found.value,
+			ValueLength: len(found.value),
+			GeneratedAt: found.at.UTC().Format(time.RFC3339),
+			CapturedAt:  time.Now().UTC().Format(time.RFC3339Nano),
+			ExpiresAt:   found.at.Add(cfg.TTL).UTC().Format(time.RFC3339),
+			Source:      "seed",
+			Valid:       true,
+		}
+		seeded++
+	}
+	e.seeded += seeded
+	e.mu.Unlock()
+	if seeded > 0 {
+		markStateDirty()
+	}
 }
 
 func (e *probeEngine) appendRecord(record probeRecord) {
@@ -963,14 +1108,46 @@ func buildProbeTransport(spec string) (*http.Transport, error) {
 func probeSummary() map[string]any {
 	cfgState := currentProbeConfig()
 	cfg := cfgState.Config
+	now := time.Now().UTC()
 	probeTrack.mu.Lock()
-	values := make([]stateEntry, 0, len(probeTrack.values))
+	// Each value carries the real validity window derived from the token's own
+	// embedded timestamp (issue time) plus the configured validity duration:
+	// issued_at / expires_at / remaining_seconds / expired are computed fresh
+	// on every summary so the dashboard never relies on a stale estimate.
+	values := make([]map[string]any, 0, len(cfg.Models))
 	for _, model := range cfg.Models {
-		if entry, ok := probeTrack.values[model]; ok {
-			values = append(values, entry)
-		} else {
-			values = append(values, stateEntry{Model: model})
+		entry, ok := probeTrack.values[model]
+		if !ok {
+			entry = stateEntry{Model: model}
 		}
+		item := map[string]any{
+			"model":        entry.Model,
+			"value_length": entry.ValueLength,
+			"source":       entry.Source,
+			"proxy":        entry.Proxy,
+			"captured_at":  entry.CapturedAt,
+			"valid":        entry.Valid,
+		}
+		if entry.Value != "" {
+			item["value_preview"] = previewValue(entry.Value, turnStatePreviewLength)
+		}
+		if ts, okTime := parseTurnStateTimestamp(entry.Value); okTime {
+			expires := ts.Add(cfg.TTL)
+			item["issued_at"] = ts.Format(time.RFC3339)
+			item["expires_at"] = expires.Format(time.RFC3339)
+			item["remaining_seconds"] = int64(expires.Sub(now).Seconds())
+			item["expired"] = !now.Before(expires)
+		} else if entry.ExpiresAt != "" {
+			// Legacy fallback: values recorded before the embedded-timestamp
+			// pipeline still carry their stored window.
+			item["issued_at"] = entry.GeneratedAt
+			item["expires_at"] = entry.ExpiresAt
+			if exp, err := time.Parse(time.RFC3339, entry.ExpiresAt); err == nil {
+				item["remaining_seconds"] = int64(exp.Sub(now).Seconds())
+				item["expired"] = !now.Before(exp)
+			}
+		}
+		values = append(values, item)
 	}
 	history := make([]probeRecord, len(probeTrack.history))
 	copy(history, probeTrack.history)
@@ -1000,24 +1177,35 @@ func probeSummary() map[string]any {
 			suspects = append(suspects, suspicion)
 		}
 	}
+	businessMarks := make([]businessDegradation, 0, len(cfg.Models))
+	for _, model := range cfg.Models {
+		if mark, ok := probeTrack.business[model]; ok {
+			businessMarks = append(businessMarks, mark)
+		}
+	}
 	summary := map[string]any{
 		"enabled":      cfg.Enabled,
 		"error":        cfgState.Error,
 		"models":       append([]string(nil), cfg.Models...),
 		"proxies":      append([]string(nil), cfg.Proxies...),
 		"proxy_index":  probeTrack.proxyIndex,
-		"ttl_minutes":  int(cfg.TTL / time.Minute),
-		"window_minutes": int(cfg.Window / time.Minute),
+		"ttl_minutes":      int(cfg.TTL / time.Minute),
+		"window_minutes":   int(cfg.Window / time.Minute),
 		"scan_seconds": int(cfg.ScanInterval / time.Second),
 		"interval_seconds": int(cfg.ProbeInterval / time.Second),
 		"attempts_per_proxy": cfg.AttemptsPerHop,
 		"max_attempts_per_round": effectiveMaxAttempts(cfg, len(cfg.Proxies)),
 		"cooldown_minutes": int(cfg.Cooldown / time.Minute),
+		"business":        businessMarks,
 		"suspect_threshold": cfg.SuspectThreshold,
 		"suspects":        suspects,
 		"paused":           paused,
 		"reject_degraded":  probeTrack.rejectDegraded,
 		"running":      probeTrack.running,
+		"run_started_at":  probeTrack.runStartedAt,
+		"run_finished_at": probeTrack.runFinishedAt,
+		"run_note":        probeTrack.runNote,
+		"seeded":       probeTrack.seeded,
 		"probes_total": probeTrack.probesTotal,
 		"probes_ok":    probeTrack.probesOK,
 		"last_error":   probeTrack.lastError,

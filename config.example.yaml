@@ -27,20 +27,24 @@ plugins:
         models:
           - gpt-6-astra
 
-        # Fallback static value used when the probe track is disabled or has no
-        # fresh value yet. Only the pristine 292-byte state is considered valid
-        # by the probe acceptance rules; replace this with your own token.
+        # Fallback static value used when no fresh baseline is available yet
+        # (first start, no recorded history, no seeds file). The primary
+        # value is the per-model healthy baseline, which is seeded from
+        # server records and refreshed by business observations and manual
+        # probe rounds. Only the pristine 292-byte state is accepted.
         value: "REPLACE_WITH_YOUR_TOKEN"
 
         # true  = always replace an existing client value
-        # false = only fill when the client did not send a value
+        # false = keep a healthy (292-byte) client value; degraded-length
+        #         values are still replaced
         force: true
 
-        # ---- probe track ----------------------------------------------------
+        # ---- probe track (manual mode) --------------------------------------
         probe:
           enabled: true
 
-          # Probe priority order: the first model is refreshed first.
+          # Probe priority order for manual rounds: models are tried in this
+          # order, once each, until the round is stopped or the list ends.
           models:
             - gpt-6-astra
             - gpt-5.6-sol
@@ -59,26 +63,22 @@ plugins:
           # before the next one is used.
           proxies-file: "/CLIProxyAPI/logs/.plugins/proxies.conf"
 
-          # Cached state is considered valid for ttl-minutes; the last
-          # probe-window-minutes before expiry trigger a refresh.
+          # Baseline serving TTL (embedded in the token). Values older than
+          # this stop being served until a fresh one arrives.
           ttl-minutes: 55
-          probe-window-minutes: 5
 
-          # Scheduler cadence.
-          scan-interval-seconds: 30
+          # Retry policy for one manual round per model: N attempts per
+          # egress, then rotate; the round cap is computed automatically as
+          # (number of egress entries) x N. Success stores the baseline;
+          # failure only annotates the dashboard (cool-down hint), and
+          # nothing restarts automatically.
           probe-interval-seconds: 5
-
-          # Retry policy: N attempts per egress, then rotate; the round cap
-          # is computed automatically as (number of egress entries) x N, so a
-          # round only gives up after every IP had its full share of tries.
-          # Set max-attempts-per-round to a positive number to override.
-          # The model is annotated as failed on the dashboard after the cap
-          # and new rounds wait cooldown-minutes; success clears everything.
           attempts-per-proxy: 3
           # max-attempts-per-round: 0   # 0/absent = auto (egress count x 3)
           cooldown-minutes: 20
           # Degraded-model rejection is ON by default and restored from the
-          # state snapshot across reloads; toggle it from the dashboard.
+          # state snapshot across reloads; toggle it from the dashboard
+          # header (global switch, independent of the probe track).
           # suspect-threshold: in-round degradation-evidence failures needed
           # before the rejection switch treats the model as degraded (early
           # trigger; the full annotation still wins once the round completes).
@@ -88,3 +88,12 @@ plugins:
           timeout-seconds: 60
           prompt: "hi"
           upstream-url: "https://chatgpt.com/backend-api/codex/responses"
+
+        # ---- deployment seeds (optional) ------------------------------------
+        # The plugin seeds missing baselines from, in order:
+        #   1. /CLIProxyAPI/logs/.plugins/timezone-override/seeds.json
+        #      (map of model -> last known-good 292-byte value; produced by
+        #      the open-source-prep scanner from server records/backups)
+        #   2. the newest healthy values in its own audit journal
+        # A value is only ever drafted when it is exactly 292 bytes and its
+        # embedded timestamp decodes; existing baselines are never overwritten.

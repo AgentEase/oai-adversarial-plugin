@@ -41,6 +41,7 @@ type persistedState struct {
 	Values         []stateEntry    `json:"values,omitempty"`
 	Failures       []probeFailure  `json:"failures,omitempty"`
 	Suspects       []probeSuspicion `json:"suspects,omitempty"`
+	Business       []businessDegradation `json:"business,omitempty"`
 	ProbesTotal    uint64          `json:"probes_total,omitempty"`
 	ProbesOK       uint64          `json:"probes_ok,omitempty"`
 	ProbeHistory   []probeRecord   `json:"probe_history,omitempty"`
@@ -80,6 +81,10 @@ func markStateDirty() {
 func ensurePersistence() {
 	persistOnce.Do(func() {
 		loadPersistedState()
+		// After the snapshot is restored, fill any entry that has no value yet
+		// from the newest healthy (292-byte) turn-state values in the audit
+		// journal, so the baseline table is never empty after a fresh start.
+		probeTrack.seedBaselinesFromAudit()
 		go persistLoop(persistStop)
 	})
 }
@@ -137,6 +142,9 @@ func collectState() persistedState {
 	}
 	for _, suspicion := range probeTrack.suspects {
 		state.Suspects = append(state.Suspects, suspicion)
+	}
+	for _, mark := range probeTrack.business {
+		state.Business = append(state.Business, mark)
 	}
 	state.ProbesTotal = probeTrack.probesTotal
 	state.ProbesOK = probeTrack.probesOK
@@ -257,6 +265,14 @@ func applyPersistedState(state persistedState) {
 	for _, suspicion := range state.Suspects {
 		if strings.TrimSpace(suspicion.Model) != "" {
 			probeTrack.suspects[suspicion.Model] = suspicion
+		}
+	}
+	if probeTrack.business == nil {
+		probeTrack.business = map[string]businessDegradation{}
+	}
+	for _, mark := range state.Business {
+		if strings.TrimSpace(mark.Model) != "" {
+			probeTrack.business[mark.Model] = mark
 		}
 	}
 	probeTrack.probesTotal = state.ProbesTotal

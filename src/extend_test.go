@@ -2,8 +2,11 @@ package main
 
 import (
 	"bytes"
+	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -440,7 +443,7 @@ func TestPersistenceRoundTrip(t *testing.T) {
 	probeTrack.cfg.Config = cfg
 	probeTrack.setRejectDegraded(false)
 	probeTrack.setModelPaused("gpt-5.6-terra", true)
-	probeTrack.storeValue("gpt-6-astra", "sample-state-0001", "direct", cfg)
+	probeTrack.storeValue("gpt-6-astra", "sample-state-0001", "probe", "direct", cfg)
 	probeTrack.noteError("state length 312 != 292 (suspected degraded)")
 	probeTrack.noteProbeFailure("gpt-5.6-luna", probeRecord{Error: "state length 312 != 292 (suspected degraded)"}, cfg)
 	probeTrack.failures["gpt-5.6-sol"] = probeFailure{Model: "gpt-5.6-sol", Attempts: 30, Rounds: 10,
@@ -491,41 +494,202 @@ func TestPersistenceRoundTrip(t *testing.T) {
 	}
 }
 
-// TestProbeCooldownSuppressesNextRound verifies a failed model is not probed
-// again until its cooldown window elapses, and becomes eligible afterwards.
-func TestProbeCooldownSuppressesNextRound(t *testing.T) {
-	state := &probeEngine{values: map[string]stateEntry{}, failures: map[string]probeFailure{}}
-	cfg := parseProbeConfig(probeConfigYAML{})
-	if cfg.Cooldown != 20*time.Minute {
-		t.Fatalf("default cooldown wrong: %v", cfg.Cooldown)
+// TestBusinessObservation drives the event-driven strategy: one unhealthy
+// business observation marks the model degraded immediately; a healthy one
+// stores the value with source "business" and clears the mark.
+func TestBusinessObservation(t *testing.T) {
+	probeTrack = &probeEngine{values: map[string]stateEntry{}, failures: map[string]probeFailure{},
+		suspects: map[string]probeSuspicion{}, business: map[string]businessDegradation{},
+		lastAttempt: map[string]time.Time{},
+		paused:      map[string]bool{}, probing: map[string]bool{}}
+	probeTrack.cfg.Config = parseProbeConfig(probeConfigYAML{})
+	probeTrack.cfg.Config.Enabled = false // observations must never start upstream traffic in tests
+
+	// One length-anomaly observation marks degraded immediately.
+	observeBusinessState("gpt-6-astra", "short-312", "gpt-6-astra")
+	if _, ok := probeTrack.business["gpt-6-astra"]; !ok {
+		t.Fatal("single unhealthy observation must mark the model")
 	}
-	// No value and no failure -> needs probing.
-	if !state.needsProbe("gpt-6-astra", cfg) {
-		t.Fatal("missing value must need probe")
+	probeTrack.setRejectDegraded(true)
+	if message := degradedRejectMessage("gpt-6-astra"); !strings.Contains(message, "业务流量确认") {
+		t.Fatalf("business mark must feed the rejection switch: %q", message)
 	}
-	now := time.Now().UTC()
-	// Active cooldown suppresses the next round.
-	state.failures["gpt-6-astra"] = probeFailure{
-		Model: "gpt-6-astra", Attempts: 30, Rounds: 10,
-		FailedAt:      now.Format(time.RFC3339Nano),
-		CooldownUntil: now.Add(10 * time.Minute).Format(time.RFC3339Nano),
+
+	// One model-mismatch observation (state empty) marks too.
+	observeBusinessState("gpt-5.6-sol", "", "gpt-5.6-luna")
+	if _, ok := probeTrack.business["gpt-5.6-sol"]; !ok {
+		t.Fatal("model mismatch must mark the model")
 	}
-	if state.needsProbe("gpt-6-astra", cfg) {
-		t.Fatal("cooldown must suppress the next round")
+
+	// A healthy observation stores the value and clears the mark.
+	healthy := synthBusinessState(len("gpt-6-astra"))
+	observeBusinessState("gpt-6-astra", healthy, "gpt-6-astra")
+	if _, ok := probeTrack.business["gpt-6-astra"]; ok {
+		t.Fatal("healthy observation must clear the mark")
 	}
-	// Elapsed cooldown allows a fresh round.
-	state.failures["gpt-6-astra"] = probeFailure{
-		Model: "gpt-6-astra", Attempts: 30, Rounds: 10,
-		FailedAt:      now.Add(-30 * time.Minute).Format(time.RFC3339Nano),
-		CooldownUntil: now.Add(-10 * time.Minute).Format(time.RFC3339Nano),
+	if entry, ok := probeTrack.values["gpt-6-astra"]; !ok || entry.Source != "business" || entry.Value != healthy {
+		t.Fatalf("healthy observation must store the value: %+v", entry)
 	}
-	if !state.needsProbe("gpt-6-astra", cfg) {
-		t.Fatal("elapsed cooldown must allow a new round")
+
+	// Empty state with no mismatch is ignored.
+	observeBusinessState("gpt-5.6-terra", "", "")
+	if len(probeTrack.business) != 1 {
+		t.Fatalf("no-signal observation must not mark: %+v", probeTrack.business)
 	}
-	// A legacy annotation without cooldown_until does not suppress probing.
-	state.failures["gpt-6-astra"] = probeFailure{Model: "gpt-6-astra", Attempts: 30, Rounds: 10}
-	if !state.needsProbe("gpt-6-astra", cfg) {
-		t.Fatal("legacy annotation without cooldown must not suppress probing")
+}
+
+// synthBusinessState builds a deterministic value of the required length so
+// the healthy business-observation path can be exercised without real tokens.
+func synthBusinessState(seed int) string {
+	length := probeRequiredStateLength
+	var builder strings.Builder
+	for i := 0; i < length; i++ {
+		builder.WriteByte(byte('A' + (seed+i)%26))
+	}
+	return builder.String()
+}
+
+// TestManualRoundControl verifies the manual probing model: rounds only run
+// when started explicitly, a disabled track notes the refusal, and stop is
+// idempotent. The single configured model has no credential file, so the
+// round fails fast without network I/O.
+func TestManualRoundControl(t *testing.T) {
+	enabled := true
+	one := 1
+	probeTrack = &probeEngine{values: map[string]stateEntry{}, failures: map[string]probeFailure{},
+		lastAttempt: map[string]time.Time{},
+		paused:      map[string]bool{}, probing: map[string]bool{}}
+	probeTrack.cfg.Config = parseProbeConfig(probeConfigYAML{
+		Enabled:          &enabled,
+		Models:           []string{"gpt-6-astra"},
+		IntervalSeconds:  &one,
+		AttemptsPerHop:   &one,
+		MaxAttemptsRound: &one,
+	})
+
+	waitFinished := func() {
+		deadline := time.Now().Add(3 * time.Second)
+		for time.Now().Before(deadline) {
+			probeTrack.mu.Lock()
+			running := probeTrack.running
+			probeTrack.mu.Unlock()
+			if !running {
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		t.Fatal("round must finish")
+	}
+
+	// Disabled track: start records the refusal and finishes immediately.
+	probeTrack.cfg.Config.Enabled = false
+	probeTrack.start()
+	waitFinished()
+	probeTrack.mu.Lock()
+	note := probeTrack.runNote
+	probeTrack.mu.Unlock()
+	if !strings.Contains(note, "未启用") {
+		t.Fatalf("disabled track must note the refusal: %q", note)
+	}
+
+	// Enabled track: one round with a credential-less model fails fast and
+	// records its finish time.
+	probeTrack.cfg.Config.Enabled = true
+	probeTrack.start()
+	waitFinished()
+	probeTrack.mu.Lock()
+	finished := probeTrack.runFinishedAt
+	probeTrack.mu.Unlock()
+	if finished == "" {
+		t.Fatal("round must record its finish time")
+	}
+
+	// stop must be safe even when nothing is running.
+	probeTrack.stop()
+	probeTrack.stop()
+	probeTrack.mu.Lock()
+	running := probeTrack.running
+	probeTrack.mu.Unlock()
+	if running {
+		t.Fatal("stop must leave the engine idle")
+	}
+}
+
+// TestSeedBaselinesFromAudit restores missing baseline values from the
+// deployment seeds file and the newest healthy (292-byte, decodable) audit
+// records - the "last recorded 292-byte value as the initial baseline" rule.
+func TestSeedBaselinesFromAudit(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("LKS_TZ_STATE_FILE", filepath.Join(dir, "state.json"))
+	probeTrack = &probeEngine{values: map[string]stateEntry{}, failures: map[string]probeFailure{},
+		paused: map[string]bool{}, probing: map[string]bool{}}
+	probeTrack.cfg.Config = parseProbeConfig(probeConfigYAML{})
+	old := synthStateToken(time.Now().Add(-30 * time.Minute))
+	newer := synthStateToken(time.Now().Add(-10 * time.Minute))
+	fileSeed := synthStateToken(time.Now().Add(-20 * time.Minute))
+	seeds, _ := json.Marshal(map[string]string{
+		"gpt-5.6-sol":   fileSeed,
+		"gpt-5.6-terra": strings.Repeat("A", 312), // degraded: rejected
+	})
+	if err := os.WriteFile(filepath.Join(dir, "seeds.json"), seeds, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	history = auditState{}
+	history.record(auditRecord{RequestID: "seed-1", Model: "gpt-6-astra",
+		TurnStateLength: len(old), TurnStateValue: old})
+	history.record(auditRecord{RequestID: "seed-2", Model: "gpt-6-astra",
+		TurnStateLength: len(newer), TurnStateValue: newer})
+	probeTrack.seedBaselinesFromAudit()
+	entry, ok := probeTrack.values["gpt-6-astra"]
+	if !ok || entry.Value != newer || entry.Source != "seed" || entry.ValueLength != probeRequiredStateLength {
+		t.Fatalf("seed must adopt the newest healthy audit value: %+v", entry)
+	}
+	if entry, ok := probeTrack.values["gpt-5.6-sol"]; !ok || entry.Value != fileSeed || entry.Source != "seed" {
+		t.Fatalf("seeds file value must be adopted: %+v", entry)
+	}
+	if _, ok := probeTrack.values["gpt-5.6-terra"]; ok {
+		t.Fatal("a degraded (312-byte) seed must never be drafted")
+	}
+	// Existing entries are never overwritten by the seed pass.
+	probeTrack.values["gpt-5.6-luna"] = stateEntry{Model: "gpt-5.6-luna", Value: "busy", Valid: true}
+	probeTrack.seedBaselinesFromAudit()
+	if got := probeTrack.values["gpt-5.6-luna"].Value; got != "busy" {
+		t.Fatalf("seed must not touch existing entries: %q", got)
+	}
+}
+
+// TestRepairTurnStateHeader drives the "discard and backfill" rule: an
+// unhealthy upstream value is replaced by the model's healthy baseline on the
+// response path, while a healthy value passes through untouched.
+func TestRepairTurnStateHeader(t *testing.T) {
+	probeTrack = &probeEngine{values: map[string]stateEntry{}, failures: map[string]probeFailure{},
+		paused: map[string]bool{}, probing: map[string]bool{}}
+	probeTrack.cfg.Config = parseProbeConfig(probeConfigYAML{})
+	healthy := synthStateToken(time.Now().Add(-5 * time.Minute))
+	probeTrack.values["gpt-5.6-luna"] = stateEntry{Model: "gpt-5.6-luna", Value: healthy,
+		ValueLength: len(healthy), Valid: true}
+
+	// Length anomaly: replaced with the healthy baseline.
+	headers := repairTurnStateHeader("gpt-5.6-luna", "", "gpt-5.6-luna", strings.Repeat("A", 312))
+	if headers == nil || headers.Get(turnStateHeader) != healthy {
+		t.Fatalf("degraded state must be backfilled with the baseline: %+v", headers)
+	}
+	// Model mismatch: replaced too.
+	headers = repairTurnStateHeader("gpt-5.6-luna", "", "gpt-6-astra", strings.Repeat("A", 292))
+	if headers == nil || headers.Get(turnStateHeader) != healthy {
+		t.Fatalf("model mismatch must be backfilled: %+v", headers)
+	}
+	// Healthy and consistent: untouched.
+	if headers := repairTurnStateHeader("gpt-5.6-luna", "", "gpt-5.6-luna", healthy); headers != nil {
+		t.Fatalf("healthy state must pass through: %+v", headers)
+	}
+	// No state at all: untouched.
+	if headers := repairTurnStateHeader("gpt-5.6-luna", "", "gpt-5.6-luna", ""); headers != nil {
+		t.Fatalf("absent state must pass through: %+v", headers)
+	}
+	// No baseline for the model: untouched (nothing to backfill with).
+	if headers := repairTurnStateHeader("gpt-6-astra", "", "gpt-6-astra", strings.Repeat("B", 312)); headers != nil {
+		t.Fatalf("missing baseline must pass through: %+v", headers)
 	}
 }
 
@@ -585,30 +749,105 @@ func TestProbeConfigDefaultsAndOverrides(t *testing.T) {
 	}
 }
 
-// TestProbeValueLifecycle exercises store/expire semantics without network.
-func TestProbeValueLifecycle(t *testing.T) {
-	engine := &probeEngine{values: map[string]stateEntry{}}
+// TestActiveValueLifecycle exercises the baseline serving rules without
+// network: missing entries serve nothing, fresh decodable values serve, and
+// values that provably exceed the TTL stop serving.
+func TestActiveValueLifecycle(t *testing.T) {
+	probeTrack = &probeEngine{values: map[string]stateEntry{}, failures: map[string]probeFailure{},
+		paused: map[string]bool{}, probing: map[string]bool{}}
 	cfg := parseProbeConfig(probeConfigYAML{})
-	// Missing value needs a probe.
-	if !engine.needsProbe("gpt-6-astra", cfg) {
-		t.Fatal("missing value must need probe")
+	probeTrack.cfg.Config = cfg
+	if value := probeTrack.activeValueFor("gpt-6-astra"); value != "" {
+		t.Fatalf("missing entry must serve nothing: %q", value)
 	}
-	// A fresh token rejects probing; an old token triggers it.
-	fresh, _ := parseTurnStateTimestamp("gAAAAABqrJWYCQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0-P0BBQkNERUZHSElKS0xNTk9QUVJTVFVWV1hZWltcXV5fYGFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6e3x9fn-AgYKDhIWGh4iJiouMjY6PkJGSk5SVlpeYmZqbnJ2en6ChoqOkpaanqKmqq6ytrq-wsbKztLW2t7i5uru8vb6_wMHCw8TFxsfIycrLzM3Oz9DR0tPU1dbX2A==")
-	engine.values["gpt-6-astra"] = stateEntry{Model: "gpt-6-astra", Value: "AAAA", Valid: true}
-	if engine.needsProbe("gpt-6-astra", cfg) != true {
-		t.Fatal("undecodable value must need probe")
+	fresh := synthStateToken(time.Now())
+	probeTrack.values["gpt-6-astra"] = stateEntry{Model: "gpt-6-astra", Value: fresh, ValueLength: len(fresh), Valid: true}
+	if value := probeTrack.activeValueFor("gpt-6-astra"); value != fresh {
+		t.Fatalf("fresh value must serve: %q", value)
 	}
-	_ = fresh
+	expired := synthStateToken(time.Now().Add(-2 * cfg.TTL))
+	probeTrack.values["gpt-6-astra"] = stateEntry{Model: "gpt-6-astra", Value: expired, ValueLength: len(expired), Valid: true}
+	if value := probeTrack.activeValueFor("gpt-6-astra"); value != "" {
+		t.Fatalf("expired value must stop serving: %q", value)
+	}
+}
+
+// synthStateToken builds a Fernet-layout token (byte-exact 217-byte payload,
+// base64url 292 characters) whose embedded timestamp is the given instant, so
+// the validity logic can be exercised without real tokens.
+func synthStateToken(t time.Time) string {
+	raw := make([]byte, 217) // [1B version][8B ts][16B IV][160B cipher][32B HMAC]
+	raw[0] = 0x80
+	binary.BigEndian.PutUint64(raw[1:9], uint64(t.Unix()))
+	for i := 9; i < len(raw); i++ {
+		raw[i] = byte('A' + i%26)
+	}
+	return base64.URLEncoding.EncodeToString(raw)
 }
 
 // TestProbeSummaryShape ensures the management payload carries the expected keys.
 func TestProbeSummaryShape(t *testing.T) {
 	summary := probeSummary()
-	for _, key := range []string{"enabled", "models", "proxies", "values", "history", "ttl_minutes", "window_minutes"} {
+	for _, key := range []string{"enabled", "models", "proxies", "values", "history", "ttl_minutes", "window_minutes", "running", "seeded"} {
 		if _, ok := summary[key]; !ok {
 			t.Fatalf("probe summary missing %s: %+v", key, summary)
 		}
+	}
+}
+
+// TestValidityDisplay drives the token-derived validity window exposed to the
+// dashboard: issued_at/expires_at/remaining_seconds/expired are computed from
+// the embedded timestamp plus the configured validity duration (no capture-time
+// arithmetic).
+func TestValidityDisplay(t *testing.T) {
+	enabled := true
+	probeTrack = &probeEngine{values: map[string]stateEntry{}, failures: map[string]probeFailure{},
+		paused: map[string]bool{}, probing: map[string]bool{}}
+	cfg := parseProbeConfig(probeConfigYAML{Enabled: &enabled, TTLMinutes: nil})
+	probeTrack.cfg.Config = cfg
+	if cfg.TTL != 55*time.Minute {
+		t.Fatalf("default validity wrong: %v", cfg.TTL)
+	}
+	issued := time.Now().Add(-20 * time.Minute).Truncate(time.Second)
+	fresh := synthStateToken(issued)
+	if len(fresh) != probeRequiredStateLength {
+		t.Fatalf("synthetic token must be 292 characters: %d", len(fresh))
+	}
+	probeTrack.values["gpt-6-astra"] = stateEntry{Model: "gpt-6-astra", Value: fresh,
+		ValueLength: len(fresh), Source: "probe", Valid: true}
+	expiredTs := time.Now().Add(-2 * cfg.TTL).Truncate(time.Second)
+	stale := synthStateToken(expiredTs)
+	probeTrack.values["gpt-5.6-sol"] = stateEntry{Model: "gpt-5.6-sol", Value: stale,
+		ValueLength: len(stale), Source: "seed", Valid: true}
+
+	summary := probeSummary()
+	byModel := map[string]map[string]any{}
+	for _, item := range summary["values"].([]map[string]any) {
+		byModel[item["model"].(string)] = item
+	}
+	freshItem := byModel["gpt-6-astra"]
+	if freshItem == nil {
+		t.Fatalf("missing astra entry: %+v", summary["values"])
+	}
+	if got := freshItem["issued_at"]; got != issued.UTC().Format(time.RFC3339) {
+		t.Fatalf("issued_at must come from the token: %v vs %v", got, issued.UTC().Format(time.RFC3339))
+	}
+	if got := freshItem["expires_at"]; got != issued.Add(cfg.TTL).UTC().Format(time.RFC3339) {
+		t.Fatalf("expires_at wrong: %v", got)
+	}
+	if freshItem["expired"] != false {
+		t.Fatalf("fresh token must not be expired: %+v", freshItem)
+	}
+	remaining, ok := freshItem["remaining_seconds"].(int64)
+	if !ok || remaining < int64((cfg.TTL-21*time.Minute).Seconds()) || remaining > int64((cfg.TTL-19*time.Minute).Seconds()) {
+		t.Fatalf("remaining_seconds out of range: %v (%T)", freshItem["remaining_seconds"], freshItem["remaining_seconds"])
+	}
+	staleItem := byModel["gpt-5.6-sol"]
+	if staleItem == nil || staleItem["expired"] != true {
+		t.Fatalf("stale token must be flagged expired: %+v", staleItem)
+	}
+	if remaining, ok := staleItem["remaining_seconds"].(int64); !ok || remaining >= 0 {
+		t.Fatalf("expired token must report a negative remaining: %v", staleItem["remaining_seconds"])
 	}
 }
 
@@ -664,6 +903,8 @@ turn-state-override:
 func TestTurnStateOverrideApply(t *testing.T) {
 	turnStateOverride = atomic.Value{}
 	t.Cleanup(func() { turnStateOverride = atomic.Value{} })
+	// Isolate from other tests: the shared baseline table must be empty here.
+	probeTrack.values = map[string]stateEntry{}
 
 	config := `turn-state-override:
   enabled: true
@@ -689,10 +930,17 @@ func TestTurnStateOverrideApply(t *testing.T) {
 		t.Fatalf("requested model fallback must rewrite: %v %+v", status, headers)
 	}
 
-	// Fill mode keeps an existing client value.
-	clientHeaders := http.Header{turnStateHeader: {"CLIENT-STATE"}}
+	// Fill mode keeps a healthy-length existing client value.
+	healthyClient := synthBusinessState(3)
+	clientHeaders := http.Header{turnStateHeader: {healthyClient}}
 	if headers, status = applyTurnStateOverride("gpt-6-astra", "", clientHeaders); status != "skipped-existing" || headers != nil {
-		t.Fatalf("fill mode must skip existing: %v %+v", status, headers)
+		t.Fatalf("fill mode must skip a healthy existing value: %v %+v", status, headers)
+	}
+
+	// An unhealthy-length client value is replaced even in fill mode.
+	degradedHeaders := http.Header{turnStateHeader: {strings.Repeat("A", 312)}}
+	if headers, status = applyTurnStateOverride("gpt-6-astra", "", degradedHeaders); status != "applied-config" || headers.Get(turnStateHeader) != "REWRITTEN-STATE" {
+		t.Fatalf("degraded existing value must be replaced in fill mode: %v %+v", status, headers)
 	}
 
 	// Force mode replaces it.
@@ -723,6 +971,7 @@ func TestInterceptRequestAppliesRewrite(t *testing.T) {
 	history = auditState{}
 	turnStateOverride = atomic.Value{}
 	t.Cleanup(func() { turnStateOverride = atomic.Value{} })
+	probeTrack.values = map[string]stateEntry{}
 	if err := configureTurnStateOverride([]byte(`turn-state-override:
   enabled: true
   models: ["gpt-6-astra"]
@@ -829,6 +1078,7 @@ func TestTurnStateInjectedLengthRecorded(t *testing.T) {
 	history = auditState{}
 	turnStateOverride = atomic.Value{}
 	t.Cleanup(func() { turnStateOverride = atomic.Value{} })
+	probeTrack.values = map[string]stateEntry{}
 	if err := configureTurnStateOverride([]byte(`turn-state-override:
   enabled: true
   models: ["gpt-6-astra"]

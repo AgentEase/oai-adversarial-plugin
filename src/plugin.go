@@ -12,7 +12,7 @@ import (
 
 const (
 	pluginID                   = "timezone-override"
-	pluginVersion              = "1.5.11"
+	pluginVersion              = "1.5.12"
 	historyLimit               = 200
 	schemaVersion              = 6
 	streamChunkHeaderInitIndex = -1
@@ -387,11 +387,12 @@ func management(raw []byte) (managementResponse, error) {
 //
 //	{"model": "gpt-5.6-luna", "action": "pause"|"resume"}
 //	{"action": "reject-degraded", "enabled": true|false}
+//	{"action": "start-round"}   # start one user-initiated probe round
+//	{"action": "stop-round"}    # stop the running probe round
 //
-// Pause removes the model from the automatic probe queue; resume clears the
-// stale annotation, starts one probe round in the background and returns the
-// model to the queue. The reject switch gates the request-side interception
-// of degraded models.
+// Pause removes the model from manual rounds; resume clears the stale
+// annotation. Probing never starts automatically: start-round
+// walks the model list in priority order, and stop-round cancels it.
 func probeControl(body []byte) (managementResponse, error) {
 	var req struct {
 		Model   string `json:"model"`
@@ -415,6 +416,10 @@ func probeControl(body []byte) (managementResponse, error) {
 			return jsonErrorResponse(http.StatusBadRequest, "缺少 enabled 字段"), nil
 		}
 		probeTrack.setRejectDegraded(*req.Enabled)
+	case "start-round":
+		probeTrack.start()
+	case "stop-round":
+		probeTrack.stop()
 	default:
 		return jsonErrorResponse(http.StatusBadRequest, "不支持的操作："+action), nil
 	}
