@@ -44,6 +44,7 @@ type persistedState struct {
 	Suspects       []probeSuspicion `json:"suspects,omitempty"`
 	Business       []businessDegradation `json:"business,omitempty"`
 	ExitPenalties  []exitPenalty   `json:"exit_penalties,omitempty"`
+	DisabledExits  []string        `json:"disabled_exits,omitempty"`
 	ProbesTotal    uint64          `json:"probes_total,omitempty"`
 	ProbesOK       uint64          `json:"probes_ok,omitempty"`
 	ProbeHistory   []probeRecord   `json:"probe_history,omitempty"`
@@ -153,6 +154,11 @@ func collectState() persistedState {
 	}
 	for _, penalty := range probeTrack.exitPenalties {
 		state.ExitPenalties = append(state.ExitPenalties, penalty)
+	}
+	for spec, off := range probeTrack.disabledExits {
+		if off {
+			state.DisabledExits = append(state.DisabledExits, spec)
+		}
 	}
 	state.ProbesTotal = probeTrack.probesTotal
 	state.ProbesOK = probeTrack.probesOK
@@ -297,6 +303,14 @@ func applyPersistedState(state persistedState) {
 	for _, penalty := range state.ExitPenalties {
 		if strings.TrimSpace(penalty.Proxy) != "" {
 			probeTrack.exitPenalties[penalty.Proxy] = penalty
+		}
+	}
+	if probeTrack.disabledExits == nil {
+		probeTrack.disabledExits = map[string]bool{}
+	}
+	for _, spec := range state.DisabledExits {
+		if spec = strings.TrimSpace(spec); spec != "" {
+			probeTrack.disabledExits[spec] = true
 		}
 	}
 	probeTrack.probesTotal = state.ProbesTotal

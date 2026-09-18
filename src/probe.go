@@ -215,6 +215,7 @@ type probeEngine struct {
 	halted         bool
 	queue          []probeTask
 	queueActive    bool
+	disabledExits  map[string]bool
 	rejectDegraded bool
 	history        []probeRecord
 	proxyIndex     int
@@ -376,7 +377,16 @@ func loadProxiesFile(path string) ([]string, map[string]bool, map[string]string,
 		for _, token := range strings.Fields(comment) {
 			if value, ok := strings.CutPrefix(token, "pool:"); ok && strings.TrimSpace(value) != "" {
 				pools[spec] = true
-				labels[spec] = "IPv6 池"
+				name := strings.TrimSpace(value)
+				switch strings.ToLower(name) {
+				case "ipv6":
+					labels[spec] = "IPv6 池"
+				case "ipv4":
+					labels[spec] = "IPv4 池"
+				default:
+					// A custom label like "pool:DuckIP 洛杉矶" is shown as-is.
+					labels[spec] = name
+				}
 			}
 		}
 	}
@@ -818,6 +828,48 @@ func (e *probeEngine) prefetchScan() {
 	}
 }
 
+// setExitEnabled enables or disables one egress. A disabled egress is never
+// used by probing (whatever its cool-down state), but its counters and last
+// error stay visible on the dashboard. Returns false when the spec is not a
+// configured egress.
+func (e *probeEngine) setExitEnabled(spec string, enabled bool) bool {
+	spec = strings.TrimSpace(spec)
+	if spec == "" {
+		return false
+	}
+	configured := false
+	e.mu.Lock()
+	for _, candidate := range e.cfg.Config.Proxies {
+		if candidate == spec {
+			configured = true
+			break
+		}
+	}
+	if configured {
+		if e.disabledExits == nil {
+			e.disabledExits = map[string]bool{}
+		}
+		if enabled {
+			delete(e.disabledExits, spec)
+		} else {
+			e.disabledExits[spec] = true
+		}
+	}
+	e.mu.Unlock()
+	if configured {
+		markStateDirty()
+	}
+	return configured
+}
+
+// exitDisabled reports whether the egress is currently switched off from
+// the dashboard.
+func (e *probeEngine) exitDisabled(spec string) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.disabledExits[spec]
+}
+
 // resetExit clears the cool-down or scheduled rest of one egress and puts it
 // back into rotation immediately. An empty spec clears every entry. Returns
 // the number of entries removed (for the dashboard response).
@@ -1148,6 +1200,10 @@ func (e *probeEngine) availableProxies(proxies []string, now time.Time) []string
 	}
 	usable := make([]string, 0, len(proxies))
 	for _, spec := range proxies {
+		if e.disabledExits[spec] {
+			// Switched off from the dashboard: never used, no matter what.
+			continue
+		}
 		penalty, ok := e.exitPenalties[spec]
 		if !ok {
 			usable = append(usable, spec)
@@ -1204,7 +1260,14 @@ func (e *probeEngine) availableProxies(proxies []string, now time.Time) []string
 		markStateDirty()
 	}
 	if len(usable) == 0 && len(proxies) > 0 {
-		usable = append(usable, proxies[0])
+		// Last-resort fallback: the first egress that is not switched off.
+		// A disabled egress is never resurrected by rotation logic.
+		for _, spec := range proxies {
+			if !e.disabledExits[spec] {
+				usable = append(usable, spec)
+				break
+			}
+		}
 	}
 	return usable
 }
@@ -1981,13 +2044,17 @@ func probeSummary() map[string]any {
 	poolNow := time.Now().UTC()
 	pool := make([]map[string]any, 0, len(cfg.Proxies))
 	activeCount := 0
+	disabledCount := 0
 	for _, spec := range cfg.Proxies {
-		item := map[string]any{"proxy": spec, "active": true}
+		item := map[string]any{"proxy": spec, "active": true, "disabled": probeTrack.disabledExits[spec]}
 		if cfg.ProxyPools[spec] {
 			item["pool"] = true
 		}
 		if label := cfg.ProxyLabels[spec]; label != "" {
 			item["label"] = label
+		}
+		if probeTrack.disabledExits[spec] {
+			item["active"] = false
 		}
 		if penalty, ok := probeTrack.exitPenalties[spec]; ok {
 			item["failures"] = penalty.Failures
@@ -2013,6 +2080,9 @@ func probeSummary() map[string]any {
 		if item["active"] == true {
 			activeCount++
 		}
+		if item["disabled"] == true {
+			disabledCount++
+		}
 		pool = append(pool, item)
 	}
 	summary := map[string]any{
@@ -2023,6 +2093,7 @@ func probeSummary() map[string]any {
 		"proxies_state": pool,
 		"pool_total":   len(cfg.Proxies),
 		"pool_active":  activeCount,
+		"pool_disabled": disabledCount,
 		"exit_fail_threshold":   cfg.ExitFailThreshold,
 		"exit_pool_fail_threshold": cfg.ExitPoolFailThreshold,
 		"exit_cooldown_minutes": int(cfg.ExitCooldown / time.Minute),

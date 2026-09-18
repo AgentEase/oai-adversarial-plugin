@@ -1393,6 +1393,63 @@ func TestResetExit(t *testing.T) {
 	_ = cfg
 }
 
+// TestExitEnableDisable verifies the manual per-egress switch: a disabled
+// egress is never used by rotation (even when everything else is cooling and
+// even via the emergency/last-resort paths), and enabling it brings it back.
+func TestExitEnableDisable(t *testing.T) {
+	enabled := true
+	probeTrack = &probeEngine{
+		values: map[string]stateEntry{}, failures: map[string]probeFailure{},
+		candidates: map[string]stateEntry{}, prefetchGate: map[string]time.Time{},
+		lastAttempt: map[string]time.Time{},
+		paused:      map[string]bool{}, probing: map[string]bool{},
+	}
+	cfg := parseProbeConfig(probeConfigYAML{Enabled: &enabled, Models: []string{"gpt-6-astra"}})
+	cfg.Proxies = []string{"direct", "socks5://a:b@1.2.3.4:443"}
+	probeTrack.cfg.Config = cfg
+	pool := cfg.Proxies
+	now := time.Now().UTC()
+
+	if !probeTrack.setExitEnabled(pool[0], false) {
+		t.Fatal("disabling a configured exit must succeed")
+	}
+	if probeTrack.setExitEnabled("socks5://not-configured:1", false) {
+		t.Fatal("unknown exits must be rejected")
+	}
+	got := probeTrack.availableProxies(pool, now)
+	for _, spec := range got {
+		if spec == pool[0] {
+			t.Fatal("a disabled exit must not appear in rotation")
+		}
+	}
+
+	// Everything else cooling + emergency release must still skip it.
+	for i := 0; i < 3; i++ {
+		probeTrack.noteExitOutcome(pool[1], false, "boom")
+	}
+	got = probeTrack.availableProxies(pool, now)
+	for _, spec := range got {
+		if spec == pool[0] {
+			t.Fatal("the last-resort fallback must skip disabled exits")
+		}
+	}
+
+	// Enabling brings it back.
+	if !probeTrack.setExitEnabled(pool[0], true) {
+		t.Fatal("enabling must succeed for configured exits")
+	}
+	got = probeTrack.availableProxies(pool, now)
+	found := false
+	for _, spec := range got {
+		if spec == pool[0] {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("an enabled exit must return to rotation: %v", got)
+	}
+}
+
 // TestPoolBudgetShare verifies the v1.5.19 adaptive per-round budget: plain
 // egresses contribute attempts-per-proxy tries each, rotating pools
 // contribute their own pool-attempts budget (default 100), an explicit

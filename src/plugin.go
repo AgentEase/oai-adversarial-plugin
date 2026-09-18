@@ -12,7 +12,7 @@ import (
 
 const (
 	pluginID                   = "timezone-override"
-	pluginVersion              = "1.5.27"
+	pluginVersion              = "1.5.28"
 	historyLimit               = 200
 	schemaVersion              = 6
 	streamChunkHeaderInitIndex = -1
@@ -427,6 +427,14 @@ func probeControl(body []byte) (managementResponse, error) {
 		// Clear the cool-down / scheduled rest of one egress (or every
 		// egress when proxy is empty), returning them to rotation at once.
 		probeTrack.resetExit(req.Proxy)
+	case "exit-enabled":
+		proxy := strings.TrimSpace(req.Proxy)
+		if proxy == "" || req.Enabled == nil {
+			return jsonErrorResponse(http.StatusBadRequest, "缺少 proxy 或 enabled 字段"), nil
+		}
+		if !probeTrack.setExitEnabled(proxy, *req.Enabled) {
+			return jsonErrorResponse(http.StatusBadRequest, "未知出口："+proxy), nil
+		}
 	case "start-round":
 		probeTrack.start()
 	case "stop-round":
