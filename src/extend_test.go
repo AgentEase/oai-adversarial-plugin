@@ -1332,6 +1332,67 @@ func TestOneOffProbeDoesNotReignite(t *testing.T) {
 	}
 }
 
+// TestResetExit verifies the manual reset control: one egress's cool-down or
+// scheduled rest is cleared immediately, a full reset clears everything,
+// and a no-op reset leaves other entries untouched.
+func TestResetExit(t *testing.T) {
+	enabled := true
+	probeTrack = &probeEngine{
+		values: map[string]stateEntry{}, failures: map[string]probeFailure{},
+		candidates: map[string]stateEntry{}, prefetchGate: map[string]time.Time{},
+		lastAttempt: map[string]time.Time{},
+		paused:      map[string]bool{}, probing: map[string]bool{},
+	}
+	probeTrack.cfg.Config = parseProbeConfig(probeConfigYAML{Enabled: &enabled, Models: []string{"gpt-6-astra"}})
+	cfg := probeTrack.cfg.Config
+	pool := []string{"direct", "socks5://a:b@1.2.3.4:443"}
+	now := time.Now().UTC()
+	for _, spec := range pool {
+		for i := 0; i < 3; i++ {
+			probeTrack.noteExitOutcome(spec, false, "boom")
+		}
+	}
+	for _, spec := range pool {
+		penalty, ok := probeTrack.exitPenalties[spec]
+		if !ok || penalty.Until == "" {
+			t.Fatalf("exit must be cooling after the streak: %v", spec)
+		}
+	}
+	if removed := probeTrack.resetExit(pool[0]); removed != 1 {
+		t.Fatalf("single reset must remove one entry: %d", removed)
+	}
+	if _, ok := probeTrack.exitPenalties[pool[0]]; ok {
+		t.Fatal("the reset entry must be gone")
+	}
+	if _, ok := probeTrack.exitPenalties[pool[1]]; !ok {
+		t.Fatal("other entries must stay untouched")
+	}
+	// The reset exit is usable again even while the other one cools.
+	available := probeTrack.availableProxies(pool, now)
+	found := false
+	for _, spec := range available {
+		if spec == pool[0] {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("reset exit must return to rotation: %v", available)
+	}
+	if removed := probeTrack.resetExit(pool[0]); removed != 0 {
+		t.Fatalf("an already clean exit reports zero: %d", removed)
+	}
+	if removed := probeTrack.resetExit(""); removed != 1 {
+		t.Fatalf("full reset must clear the rest: %d", removed)
+	}
+	if len(probeTrack.exitPenalties) != 0 {
+		t.Fatal("full reset must empty the table")
+	}
+	if got := probeTrack.availableProxies(pool, now); len(got) != len(pool) {
+		t.Fatalf("everything must be usable after a full reset: %v", got)
+	}
+	_ = cfg
+}
+
 // TestPoolBudgetShare verifies the v1.5.19 adaptive per-round budget: plain
 // egresses contribute attempts-per-proxy tries each, rotating pools
 // contribute their own pool-attempts budget (default 100), an explicit

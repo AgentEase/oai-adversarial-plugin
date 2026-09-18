@@ -75,9 +75,9 @@
       <div class="card"><div class="label">冷却策略</div><div class="number" id="pool-policy" style="font-size:14px">—</div></div>
     </section>
     <section class="panel">
-      <div class="toolbar"><h2>代理出口池</h2><div class="actions"><span class="probe-note" id="pool-note">普通出口：每次成功后短暂轮休（分散流量）、连续失败达阈值进入冷却；轮换池（# pool:）永不冷却</span></div></div>
+      <div class="toolbar"><h2>代理出口池</h2><div class="actions"><span class="probe-note" id="pool-note">普通出口：每次成功后短暂轮休（分散流量）、连续失败达阈值进入冷却；轮换池（# pool:）永不冷却</span><button id="pool-reset-all" type="button" title="全部重置：立即清除所有出口的冷却 / 轮休">全部重置</button></div></div>
       <div class="table-wrap" id="pool-wrap"><table>
-        <thead><tr><th>出口</th><th>类型</th><th>状态</th><th>连续失败</th><th>冷却/轮休至（UTC+8）</th><th>剩余</th><th>最后错误</th></tr></thead>
+        <thead><tr><th>出口</th><th>类型</th><th>状态</th><th>连续失败</th><th>冷却/轮休至（UTC+8）</th><th>剩余</th><th>最后错误</th><th>操作</th></tr></thead>
         <tbody id="pool-rows"></tbody>
       </table></div>
     </section>
@@ -257,9 +257,17 @@
       const remaining=Number(item.remaining_seconds);
       cell(tr,cooling&&!isNaN(remaining)?fmtDuration(remaining):(cooling?'—':'—'),'');
       const err=cell(tr,item.last_error||'—');err.title=item.last_error||'';
+      const ops=cell(tr,'');
+      const reset=document.createElement('button');
+      reset.type='button';
+      reset.className='icon-btn';
+      reset.textContent='↺';
+      reset.title='重置：立即清除该出口的冷却 / 轮休，回归轮换';
+      reset.addEventListener('click',async()=>{reset.disabled=true;if(await probeControl({action:'reset-exit',proxy:spec})){setTimeout(refresh,600);}else reset.disabled=false;});
+      ops.append(reset);
       frag.append(tr);
     }
-    if(!items.length){const tr=document.createElement('tr');const td=cell(tr,'暂无出口配置。','empty');td.colSpan=7;frag.append(tr);}
+    if(!items.length){const tr=document.createElement('tr');const td=cell(tr,'暂无出口配置。','empty');td.colSpan=8;frag.append(tr);}
     el('pool-rows').replaceChildren(frag);
   }
   function renderProbe(probe){
@@ -328,6 +336,7 @@
       // even while the engine overall is halted; a parked model shows ▶ no
       // matter what the global engine state is.
       const activeSet=new Set(probe.active_models||[]);
+      const liveQueue=new Set(probe.queue_models||[]);
       const isPaused=!activeSet.has(entry.model);
       if(isPaused) tr.classList.add('paused-row');
       const failure=failureByModel[entry.model];
@@ -336,7 +345,17 @@
       const remaining=Number(entry.remaining_seconds);
       const hasRemaining=entry.remaining_seconds!==undefined&&!isNaN(remaining);
       const expired=entry.expired===true||(hasRemaining&&remaining<=0)||(entry.expires_at&&new Date(entry.expires_at).getTime()<=Date.now());
-      if(failure){
+      if(activeSet.has(entry.model)){
+        // Live truth wins over history: while this model is actually being
+        // probed, show that instead of a stale round-failure annotation.
+        const badge=document.createElement('span');
+        badge.className='badge state-ok';
+        const queued=liveQueue.has(entry.model);
+        badge.textContent=queued?'队列等待中':'探测中…';
+        const hist=failure?('；上次整轮 '+failure.attempts+' 次失败（悬停看详情）'):'';
+        badge.title='该模型正在进行探测'+(queued?'（已排入执行队列，等待轮次）':'（当前探测轮结果未出）')+hist;
+        ttl.append(badge);
+      }else if(failure){
         const badge=document.createElement('span');
         badge.className='badge state-fail';
         const until=failure.cooldown_until?new Date(failure.cooldown_until).getTime():0;
@@ -463,6 +482,7 @@
   el('reject-toggle').addEventListener('click',async()=>{const button=el('reject-toggle');button.disabled=true;const enable=!button.classList.contains('on');if(await probeControl({action:'reject-degraded',enabled:enable}))refresh();else button.disabled=false;});
   el('round-start').addEventListener('click',async()=>{const button=el('round-start');button.disabled=true;if(await probeControl({action:'start-round'}))refresh();else button.disabled=false;});
   el('round-stop').addEventListener('click',async()=>{const button=el('round-stop');button.disabled=true;if(await probeControl({action:'stop-round'}))refresh();else button.disabled=false;});
+  el('pool-reset-all').addEventListener('click',async()=>{const button=el('pool-reset-all');button.disabled=true;if(await probeControl({action:'reset-exit'})){setTimeout(refresh,600);}else button.disabled=false;});
   window.addEventListener('storage',event=>{if(event.key===null||['cli-proxy-auth','isLoggedIn','managementKey','apiBase','apiUrl'].includes(event.key))refresh();});
   window.addEventListener('focus',refresh);
   setInterval(()=>{if(!document.hidden)refresh();},5000);

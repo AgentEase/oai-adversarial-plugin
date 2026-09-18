@@ -818,6 +818,27 @@ func (e *probeEngine) prefetchScan() {
 	}
 }
 
+// resetExit clears the cool-down or scheduled rest of one egress and puts it
+// back into rotation immediately. An empty spec clears every entry. Returns
+// the number of entries removed (for the dashboard response).
+func (e *probeEngine) resetExit(spec string) int {
+	spec = strings.TrimSpace(spec)
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	removed := 0
+	if spec == "" {
+		removed = len(e.exitPenalties)
+		e.exitPenalties = map[string]exitPenalty{}
+	} else if _, ok := e.exitPenalties[spec]; ok {
+		delete(e.exitPenalties, spec)
+		removed = 1
+	}
+	if removed > 0 {
+		markStateDirty()
+	}
+	return removed
+}
+
 // probeModelAsync queues one probe for a single model on explicit user
 // request (the row's "probe now" control). The task is enqueued as a forced
 // one-off: it is honoured even while the engine is halted after a global
