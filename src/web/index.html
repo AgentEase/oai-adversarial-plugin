@@ -294,7 +294,7 @@
     el('probe-priority').textContent=models.length?models[0]:'—';
     el('probe-counts').textContent=Number(probe.probes_ok||0).toLocaleString('zh-CN')+' / '+Number(probe.probes_total||0).toLocaleString('zh-CN');
     el('probe-activity').textContent=probe.last_activity||probe.last_error||'—';
-    el('probe-times').textContent='手动模式 · 到期前 '+(probe.prefetch_minutes||3)+'m 预备接管 · 间隔 '+(probe.interval_seconds||5)+'s · 每出口尝试 '+(probe.attempts_per_proxy||3)+' 次 · 池探测预算 '+(probe.pool_attempts||100)+' 次 · 单轮上限 '+(probe.max_attempts_per_round||9)+' 次 · 失败冷却 '+(probe.cooldown_minutes||20)+'m · 疑似阈值 '+(probe.suspect_threshold||3)+' 次';
+    el('probe-times').textContent='手动模式 · 到期前 '+(probe.prefetch_minutes||3)+'m 预备接管 · 间隔 '+(probe.interval_seconds||5)+'s · 每出口尝试 '+(probe.attempts_per_proxy||3)+' 次 · 池探测预算 '+(probe.pool_attempts||100)+' 次 · 失败冷却 '+(probe.cooldown_minutes||20)+'m · 疑似阈值 '+(probe.suspect_threshold||3)+' 次';
     const values=probe.values||[];
     const failureByModel={};
     for(const failure of (probe.failures||[])){failureByModel[failure.model]=failure;}

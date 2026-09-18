@@ -1216,14 +1216,18 @@ func TestWatcherSilentAfterStop(t *testing.T) {
 		t.Fatal("a halted engine must not arm the hand-off watcher")
 	}
 
-	// An explicit request re-ignites the engine (and legitimately spawns a
-	// probe that fails fast on the missing credential file).
-	probeTrack.probeModelAsync("gpt-6-astra")
+	// An explicit one-off request runs while halted but keeps the halt;
+	// the deliberate re-ignition paths are start-round / resuming a model.
+	if !halted {
+		t.Fatal("the engine must stay halted")
+	}
+	probeTrack.setModelPaused("gpt-6-astra", true)
+	probeTrack.setModelPaused("gpt-6-astra", false)
 	probeTrack.mu.Lock()
 	reignited := !probeTrack.halted
 	probeTrack.mu.Unlock()
 	if !reignited {
-		t.Fatal("an explicit probe request must re-ignite the engine")
+		t.Fatal("resuming a paused model must re-ignite the engine")
 	}
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
@@ -1237,10 +1241,11 @@ func TestWatcherSilentAfterStop(t *testing.T) {
 	}
 }
 
-// TestExplicitRequestKeepsHaltWhileBusy verifies the v1.5.23 refinement: an
-// explicit request that cannot start anything (the model is busy) must not
-// silently lift the halt.
-func TestExplicitRequestKeepsHaltWhileBusy(t *testing.T) {
+// TestOneOffProbeDoesNotReignite verifies the v1.5.24 semantics: a one-off
+// "probe now" for a single model runs even while the engine is halted, but
+// it never re-ignites the engine (the halt and the silent watcher stay);
+// resuming a paused model is the deliberate re-ignition path.
+func TestOneOffProbeDoesNotReignite(t *testing.T) {
 	enabled := true
 	probeTrack = &probeEngine{
 		values: map[string]stateEntry{}, failures: map[string]probeFailure{},
@@ -1248,34 +1253,55 @@ func TestExplicitRequestKeepsHaltWhileBusy(t *testing.T) {
 		lastAttempt: map[string]time.Time{},
 		paused:      map[string]bool{}, probing: map[string]bool{},
 	}
-	cfg := parseProbeConfig(probeConfigYAML{Enabled: &enabled, Models: []string{"gpt-6-astra"}})
+	cfg := parseProbeConfig(probeConfigYAML{Enabled: &enabled, Models: []string{"gpt-6-astra", "gpt-5.6-sol"}})
 	cfg.CredFile = "/nonexistent/cred.json"
 	probeTrack.cfg.Config = cfg
 
 	probeTrack.stop() // halted
-	probeTrack.probing["gpt-6-astra"] = true
 	probeTrack.probeModelAsync("gpt-6-astra")
 	probeTrack.mu.Lock()
-	halted := probeTrack.halted
+	stillHalted := probeTrack.halted
 	probeTrack.mu.Unlock()
-	if !halted {
-		t.Fatal("a busy model must not lift the halt without starting anything")
+	if !stillHalted {
+		t.Fatal("a one-off probe must not re-ignite the halted engine")
 	}
-	// Once the model is free, an explicit request does start and re-ignites.
+	// The one-off probe itself still runs (and fails fast on the missing
+	// credential file). Wait for its record to land - checking the busy flag
+	// can race with an unscheduled goroutine.
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		probeTrack.mu.Lock()
+		records := len(probeTrack.history)
+		probeTrack.mu.Unlock()
+		if records > 0 {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 	probeTrack.mu.Lock()
-	delete(probeTrack.probing, "gpt-6-astra")
+	records := len(probeTrack.history)
 	probeTrack.mu.Unlock()
-	probeTrack.probeModelAsync("gpt-6-astra")
+	if records == 0 {
+		t.Fatal("the one-off probe must actually run")
+	}
+	// The watcher stays suppressed while halted.
+	probeTrack.prefetchScan()
+	if !probeTrack.prefetchGate["gpt-5.6-sol"].IsZero() {
+		t.Fatal("the halted engine must keep the watcher silent")
+	}
+	// Resuming a paused model re-ignites deliberately.
+	probeTrack.setModelPaused("gpt-5.6-sol", true)
+	probeTrack.setModelPaused("gpt-5.6-sol", false)
 	probeTrack.mu.Lock()
 	reignited := !probeTrack.halted
 	probeTrack.mu.Unlock()
 	if !reignited {
-		t.Fatal("a startable explicit request must re-ignite the engine")
+		t.Fatal("resuming a paused model must re-ignite the engine")
 	}
-	deadline := time.Now().Add(3 * time.Second)
+	deadline = time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
 		probeTrack.mu.Lock()
-		busy := probeTrack.probing["gpt-6-astra"]
+		busy := probeTrack.probing["gpt-5.6-sol"]
 		probeTrack.mu.Unlock()
 		if !busy {
 			break

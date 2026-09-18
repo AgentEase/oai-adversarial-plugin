@@ -597,7 +597,8 @@ func (e *probeEngine) settledBaseline(model string, cfg probeConfig, now time.Ti
 // setModelPaused pauses or resumes a model from the dashboard. Pausing keeps
 // the model out of rounds while preserving its value and failure record; an
 // in-flight round for that model also stops at its next attempt boundary
-// (see probeModel). Resuming clears the stale annotation and immediately
+// (see probeModel). Resuming clears the stale annotation, re-ignites a
+// halted engine (returning the model to automatic care) and immediately
 // starts one probe for the model in the background (the user explicitly
 // asked for it).
 func (e *probeEngine) setModelPaused(model string, paused bool) {
@@ -614,6 +615,11 @@ func (e *probeEngine) setModelPaused(model string, paused bool) {
 	e.mu.Unlock()
 	markStateDirty()
 	if !paused {
+		// Resuming returns the model to automatic care: that deliberately
+		// re-ignites a halted engine (unlike a one-off "probe now").
+		e.mu.Lock()
+		e.halted = false
+		e.mu.Unlock()
 		e.probeModelAsync(model)
 	}
 }
@@ -725,44 +731,37 @@ func (e *probeEngine) prefetchScan() {
 }
 
 // probeModelAsync launches one background probe round for a single model on
-// explicit user request (the row's "probe now" control or resuming a paused
-// model). An explicit request also re-ignites the engine after a global stop.
-// It is independent of the sequential round control: different models may be
-// probed concurrently, and a model that is already being probed is never
-// started twice.
+// explicit user request (the row's "probe now" control). It is always
+// honoured - even while the engine is halted after a global stop - but a
+// one-off model refresh never re-ignites the engine: the halt (and with it
+// the silent hand-off watcher) stays in place, and no other model is
+// disturbed. The deliberate global re-ignition happens on "start-round" and
+// on resuming a paused model (setModelPaused), which both express "return
+// this scope to automatic care".
 func (e *probeEngine) probeModelAsync(model string) {
 	e.probeModelAsyncImpl(model, true)
 }
 
 // probeModelAsyncFromWatcher launches the automatic hand-off probe. Unlike
-// the explicit entry point it never re-ignites a halted engine: a scan that
-// raced with a dashboard stop must not resurrect probing.
+// the explicit entry point it is suppressed while the engine is halted: a
+// scan that raced with a dashboard stop must not resurrect probing.
 func (e *probeEngine) probeModelAsyncFromWatcher(model string) {
 	e.probeModelAsyncImpl(model, false)
 }
 
-func (e *probeEngine) probeModelAsyncImpl(model string, explicit bool) {
+func (e *probeEngine) probeModelAsyncImpl(model string, oneOff bool) {
 	model = strings.TrimSpace(model)
 	if model == "" {
 		return
 	}
 	e.mu.Lock()
-	prevHalted := e.halted
-	if explicit {
-		e.halted = false
-	}
-	if e.halted {
+	if e.halted && !oneOff {
 		e.mu.Unlock()
 		return
 	}
 	cfg := e.cfg.Config
 	busy := e.probing[model]
 	if !cfg.Enabled || busy {
-		// Nothing will start: an explicit request must not silently lift the
-		// halt just because the model was busy or the track is disabled.
-		if explicit && prevHalted {
-			e.halted = true
-		}
 		e.mu.Unlock()
 		return
 	}
@@ -1775,19 +1774,29 @@ func probeSummary() map[string]any {
 		}
 		// Candidate slot (two-slot smooth hand-off): expose its validity when
 		// a fresh token is parked and waiting for the active one to expire.
+		// A candidate whose own validity has already lapsed is not shown:
+		// it can no longer take over (and is discarded on the next promote or
+		// hand-off scan), so a stale "预备就绪（00m 00s）" badge must not stick.
 		if candidate, ok := probeTrack.candidates[model]; ok && candidate.Valid && candidate.Value != "" {
 			citem := map[string]any{
 				"source":      candidate.Source,
 				"captured_at": candidate.CapturedAt,
 			}
+			show := true
 			if ts, okTime := parseTurnStateTimestamp(candidate.Value); okTime {
 				expires := ts.Add(cfg.TTL)
 				citem["issued_at"] = ts.Format(time.RFC3339)
 				citem["expires_at"] = expires.Format(time.RFC3339)
 				citem["remaining_seconds"] = int64(expires.Sub(now).Seconds())
-				citem["expired"] = !now.Before(expires)
+				expired := !now.Before(expires)
+				citem["expired"] = expired
+				if expired {
+					show = false
+				}
 			}
-			item["candidate"] = citem
+			if show {
+				item["candidate"] = citem
+			}
 		}
 		if ts, okTime := parseTurnStateTimestamp(entry.Value); okTime {
 			expires := ts.Add(cfg.TTL)
