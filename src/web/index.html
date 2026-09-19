@@ -5,32 +5,47 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>O/对抗插件 · CPA</title>
   <style>
-    :root{color-scheme:light dark;--bg:#f6f7fa;--card:#fff;--text:#172033;--muted:#64748b;--line:#e6eaf0;--accent:#345ce8;--soft:#edf2ff;--warn:#b45309;--warn-bg:#fef3e2;--ok:#24714e;--ok-bg:#eef8f2}
-    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.6 system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif}main{max-width:1280px;margin:0 auto;padding:36px 28px}header{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;margin-bottom:20px}.eyebrow{font-size:11px;font-weight:700;letter-spacing:.16em;color:var(--muted)}h1{font-size:28px;letter-spacing:-.04em;margin:5px 0 5px}p{margin:0;color:var(--muted)}code{font:12px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace}.target{display:flex;align-items:center;gap:9px;padding:8px 13px;border:1px solid var(--line);border-radius:100px;background:var(--card);white-space:nowrap}.dot{width:7px;height:7px;border-radius:50%;background:#2d9d70}.chip-grid{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.cards{display:grid;grid-template-columns:repeat(6,1fr);gap:16px;margin-bottom:22px}.card,.panel{background:var(--card);border:1px solid var(--line);border-radius:14px}.card{padding:18px 22px}.label{font-size:12px;color:var(--muted)}.number{font-size:30px;font-weight:650;line-height:1.5;font-variant-numeric:tabular-nums}.number.warn{color:var(--warn)}.number.ok{color:var(--ok)}.panel{overflow:hidden;margin-bottom:22px}.toolbar{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:18px 22px;border-bottom:1px solid var(--line)}h2{font-size:15px;margin:0}.actions{display:flex;align-items:center;gap:14px;color:var(--muted);font-size:12px}button{cursor:pointer;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--text);padding:7px 13px;font:inherit}button:hover{border-color:var(--accent);color:var(--accent)}button:disabled{opacity:.5;cursor:wait}a.primary{display:inline-block;background:var(--accent);border-radius:8px;padding:8px 13px;color:white;text-decoration:none}.table-wrap{overflow:auto}table{width:100%;border-collapse:collapse;text-align:left;white-space:nowrap}th{font-size:11px;color:var(--muted);font-weight:600;background:var(--bg);padding:11px 16px}td{padding:14px 16px;border-top:1px solid var(--line);vertical-align:top}td.model{max-width:200px;overflow:hidden;text-overflow:ellipsis}.time{font-size:12px;font-variant-numeric:tabular-nums}.sub{font-size:11px;color:var(--muted)}.badge{display:inline-block;padding:2px 9px;border-radius:6px;font-size:11px;font-weight:600;background:var(--soft);color:var(--accent)}.badge.inserted{background:var(--ok-bg);color:var(--ok)}.badge.unchanged{background:var(--bg);color:var(--muted)}.badge.mismatch{background:var(--warn-bg);color:var(--warn);margin-left:6px}.badge.override{background:#fff2d8;color:#a15c00;margin-left:6px}.badge.skipped{background:var(--bg);color:var(--muted);margin-left:6px}.badge.probe-ok{background:var(--ok-bg);color:var(--ok)}.badge.probe-fail{background:#fdecec;color:#b3261e}.badge.state-ok{background:var(--ok-bg);color:var(--ok)}.badge.state-warn{background:#fdeacd;color:#b45309}.badge.state-fail{background:#fdecec;color:#b3261e}.badge.state-rest{background:var(--soft);color:var(--accent)}.badge.state-off{background:var(--bg);color:var(--muted)}.icon-btn.off{opacity:.75}.turnstate{font-size:12px;font-variant-numeric:tabular-nums}.turnstate .src{color:var(--muted);font-size:11px;margin-left:6px}.empty{text-align:center;white-space:normal;color:var(--muted);padding:60px 24px}.footer{display:flex;justify-content:space-between;gap:16px;padding:15px 22px;color:var(--muted);font-size:11px}.login{padding:26px;max-width:460px;margin:0 auto}.login h2{margin-bottom:8px}.login p{font-size:12px;margin-bottom:16px}.hidden{display:none!important}.status{font-size:12px;color:var(--muted);margin-top:12px}.none{color:var(--muted)}.tabs{display:flex;gap:6px;margin:0 0 18px}.tabs button.tab{border-radius:10px;padding:8px 18px;color:var(--muted)}.tabs button.tab.active{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}.ttl-cell{font-variant-numeric:tabular-nums}.ttl-cell .bar{height:6px;border-radius:3px;background:var(--line);margin-top:6px;max-width:160px}.ttl-cell .bar i{display:block;height:6px;border-radius:3px;background:var(--accent)}.probe-note{font-size:11px;color:var(--muted)}.icon-btn{padding:2px 8px;border-radius:8px;font-size:12px;line-height:1.4}.icon-btn.paused{border-color:var(--accent);color:var(--accent)}.paused-row{opacity:.55}.switch-btn.on{background:var(--ok-bg);border-color:var(--ok);color:var(--ok)}
-    #view-router .toolbar,#view-router .actions{flex-wrap:wrap}#probe-times{flex-basis:100%}#probe-activity{overflow-wrap:anywhere}.ttl-cell>.badge{margin:0 4px 4px 0}
-    .settings-line{display:flex;align-items:center;flex-wrap:wrap;gap:10px;padding:14px 22px;border-bottom:1px solid var(--line);font-size:12px}.settings-line input{width:84px}.settings-line .sub{flex-basis:100%}input,select{border:1px solid var(--line);border-radius:7px;background:var(--card);color:var(--text);padding:7px 9px;font:inherit}.exit-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;padding:18px 22px;border-bottom:1px solid var(--line);background:var(--bg)}.exit-form label{display:flex;flex-direction:column;gap:5px;font-size:12px}.exit-form input,.exit-form select{width:100%;min-width:0}.exit-form .wide{grid-column:1/-1}.exit-form .check{flex-direction:row;align-items:center}.exit-form .check input{width:auto}.exit-form .actions{flex-wrap:wrap}.budget{font-variant-numeric:tabular-nums}.settings-error{color:var(--warn)}
-    #view-pool .toolbar,#view-pool .actions{flex-wrap:wrap}@media(max-width:720px){#view-pool .cards{grid-template-columns:repeat(2,minmax(0,1fr))!important}.exit-form{grid-template-columns:1fr;padding:14px}.settings-line{padding:14px}}
-    @media(max-width:1080px){.cards{grid-template-columns:repeat(3,1fr)}}
-    @media(max-width:720px){main{padding:22px 14px}header{flex-direction:column;gap:12px;margin-bottom:20px}.cards{grid-template-columns:repeat(2,1fr);gap:8px}.card{padding:13px}.number{font-size:25px}.toolbar{padding:14px}.actions{gap:9px}th,td{padding:12px 14px}.footer{padding:13px 14px;flex-wrap:wrap}.target code{font-size:11px}h1{font-size:25px}}
-    @media(prefers-color-scheme:dark){:root{--bg:#101622;--card:#182131;--text:#e3e9f4;--muted:#95a4bd;--line:#2b374b;--accent:#99adff;--soft:#283557;--warn:#f0b25e;--warn-bg:#3a2f1c;--ok:#83d4ad;--ok-bg:#183e31}.badge.inserted{background:#183e31;color:#83d4ad}.badge.override{background:#4a3a1e;color:#f0b25e}.badge.probe-fail{background:#3a2020;color:#f19a92}.badge.state-warn{background:#4a3a1e;color:#f0b25e}.badge.state-fail{background:#3a2020;color:#f19a92}a.primary{background:#4469e8;color:white}}
+    :root{color-scheme:light;--bg:#fff;--card:#fff;--subtle:#f6f6f6;--text:#2d2a26;--muted:#6d6760;--line:#e5e5e5;--control-line:#817b73;--accent:#383a34;--accent-ink:#fff;--soft:#eeefec;--warn:#895923;--warn-bg:#f5ecdf;--ok:#35654c;--ok-bg:#eaf2ed;--danger:#9c4439;--danger-bg:#f8eeeb;--scroll:#a29c95}
+    :root[data-theme="light"]{--bg:#faf9f5;--card:#f0eee8;--subtle:#e9e6df;--text:#2d2a26;--muted:#6d6760;--line:#dedbd3;--soft:#e5e7df;--accent:#42483b;--accent-ink:#fff}
+    :root[data-theme="dark"]{color-scheme:dark;--bg:#151412;--card:#1d1b18;--subtle:#262320;--text:#f6f4f1;--muted:#c9c3bb;--line:#3a3530;--control-line:#81786d;--accent:#e0ddd5;--accent-ink:#24221e;--soft:#363830;--warn:#efd0a3;--warn-bg:#3a3023;--ok:#b8dfc4;--ok-bg:#293e33;--danger:#f1b9ae;--danger-bg:#452e29;--scroll:#81786d}
+    *{box-sizing:border-box;scrollbar-width:thin;scrollbar-color:var(--scroll) var(--subtle)}
+    ::-webkit-scrollbar{width:9px;height:9px}::-webkit-scrollbar-track{background:var(--subtle)}::-webkit-scrollbar-thumb{background:var(--scroll);border:2px solid var(--subtle);border-radius:8px}::-webkit-scrollbar-thumb:hover{background:var(--muted)}::-webkit-scrollbar-corner{background:var(--subtle)}
+    body{margin:0;background:var(--bg);color:var(--text);font:14px/1.6 system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif}
+    main{max-width:1440px;margin:auto;padding:32px clamp(16px,3vw,40px) 40px}header{display:flex;align-items:center;justify-content:space-between;gap:24px;margin-bottom:28px}
+    .eyebrow{font-size:10px;font-weight:650;letter-spacing:.14em;color:var(--muted)}h1{font-size:26px;letter-spacing:-.04em;font-weight:650;margin:5px 0}h2{font-size:15px;font-weight:650;margin:0}p{margin:0;color:var(--muted)}header p{font-size:13px}code{font:12px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace}
+    .chip-grid{display:flex;justify-content:flex-end;gap:8px;align-items:center;flex-wrap:wrap;max-width:560px}.target{display:flex;align-items:center;gap:8px;padding:7px 10px;white-space:nowrap;font-size:12px}.dot{width:6px;height:6px;border-radius:50%;background:var(--ok)}
+    .tabs{display:flex;gap:24px;border-bottom:1px solid var(--line);margin:0 0 24px}.tabs button.tab{position:relative;border:0;border-radius:0;padding:12px 2px;background:transparent;color:var(--muted);font-size:14px}.tabs button.tab.active{color:var(--text);font-weight:650}.tabs button.tab.active:after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:2px;background:var(--accent)}
+    .cards{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:0;margin-bottom:24px;padding:18px 0;background:var(--card);border:1px solid var(--line);border-radius:10px}.cards-four{grid-template-columns:repeat(4,minmax(0,1fr))}.card{min-width:0;padding:0 22px;border-right:1px solid var(--line)}.card:last-child{border:0}.label{font-size:12px;color:var(--muted);margin-bottom:6px}.number{font-size:28px;font-weight:600;line-height:1.5;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}.number.warn{color:var(--warn)}.number.ok{color:var(--ok)}#probe-status{font-size:22px}#probe-priority{font-size:18px}#probe-activity,#pool-policy{font-size:12px;font-weight:450;line-height:1.7}
+    .panel{background:var(--card);border:1px solid var(--line);border-radius:10px;overflow:hidden;margin-bottom:24px}.toolbar{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;padding:18px 22px;border-bottom:1px solid var(--line)}.actions{display:flex;align-items:center;flex-wrap:wrap;gap:8px;color:var(--muted);font-size:12px}#probe-times{flex-basis:100%;margin-top:2px}
+    button,a.primary{cursor:pointer;border:1px solid var(--control-line);border-radius:7px;background:transparent;color:var(--text);padding:7px 12px;min-height:36px;font:inherit;font-size:12px;text-decoration:none}button:hover:not(:disabled){background:var(--subtle);border-color:var(--muted)}button:disabled{opacity:.55;cursor:not-allowed}button.primary,a.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}button.primary:hover:not(:disabled),a.primary:hover{background:var(--text);color:var(--bg)}a.primary{display:inline-block}
+    :is(button,a,input,select,summary,[tabindex]):focus-visible{outline:2px solid var(--accent);outline-offset:3px}.switch-btn.on{background:var(--ok-bg);border-color:var(--ok);color:var(--ok)}.icon-btn{font-size:12px;padding:5px 9px;min-height:32px}.icon-btn.paused{color:var(--accent)}.control-cell{white-space:nowrap}.control-cell button+button{margin-left:6px}
+    .table-wrap{overflow:auto;scrollbar-gutter:stable}table{width:100%;border-collapse:collapse;text-align:left;white-space:nowrap}th{font-size:11px;color:var(--muted);font-weight:550;background:var(--subtle);padding:12px 18px}td{padding:16px 18px;border-top:1px solid var(--line);vertical-align:top;font-size:12px}td.model{max-width:210px;white-space:normal;overflow-wrap:anywhere;font-weight:550}tbody tr:hover{background:var(--subtle)}.time{font-size:12px;font-variant-numeric:tabular-nums}.sub,.probe-note{font-size:12px;color:var(--muted)}.none{color:var(--muted)}.src{font-size:11px;color:var(--muted);margin-left:6px}#probe-history td:last-child{min-width:200px;max-width:440px;white-space:normal;overflow-wrap:anywhere}
+    .badge{display:inline-block;padding:3px 8px;border-radius:5px;font-size:11px;font-weight:550;line-height:1.6;background:var(--soft);color:var(--accent)}.badge.inserted,.badge.probe-ok,.badge.state-ok{background:var(--ok-bg);color:var(--ok)}.badge.mismatch,.badge.override,.badge.state-warn{background:var(--warn-bg);color:var(--warn)}.badge.mismatch,.badge.override,.badge.skipped{margin-left:6px}.badge.probe-fail,.badge.state-fail{background:var(--danger-bg);color:var(--danger)}.badge.unchanged,.badge.skipped,.badge.state-off{background:var(--subtle);color:var(--muted)}.badge.state-rest{background:var(--soft);color:var(--accent)}.ttl-cell>.badge{margin:0 4px 5px 0}.paused-row td.model{color:var(--muted)}.ttl-cell,.turnstate,.budget{font-variant-numeric:tabular-nums}.ttl-cell .bar{height:4px;border-radius:2px;background:var(--line);margin:8px 0;max-width:150px}.ttl-cell .bar i{display:block;height:100%;border-radius:inherit;background:var(--ok)}
+    .probe-settings{border-bottom:1px solid var(--line)}.probe-settings summary{display:flex;align-items:center;flex-wrap:wrap;gap:12px;padding:14px 22px;cursor:pointer;list-style:none;font-size:12px}.probe-settings summary::-webkit-details-marker{display:none}.probe-settings summary:after{content:"";width:7px;height:7px;border:solid var(--muted);border-width:0 1.5px 1.5px 0;transform:rotate(45deg);margin-left:auto;margin-right:4px}.probe-settings[open] summary:after{transform:rotate(225deg)}.probe-settings summary:hover{background:var(--subtle)}.settings-title{font-weight:600}.settings-body{display:grid;grid-template-columns:1fr 1fr;padding:0 22px 18px;gap:24px}.settings-line{display:flex;align-items:center;flex-wrap:wrap;gap:8px;font-size:12px;padding:14px 0 0;border-top:1px solid var(--line)}.settings-line label{flex-basis:100%;font-weight:550}.settings-line input{width:84px}.settings-line .sub,.settings-line [role=status]{flex-basis:100%}.settings-error{color:var(--danger)}
+    input,select{border:1px solid var(--control-line);border-radius:6px;background:var(--bg);color:var(--text);padding:8px 10px;font:inherit;min-height:36px}input[type=checkbox]{accent-color:var(--accent);min-height:auto}input::placeholder{color:var(--muted)}.exit-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px 24px;padding:22px;border-bottom:1px solid var(--line);background:var(--subtle)}.exit-form label{display:flex;flex-direction:column;gap:6px;font-size:12px}.exit-form input,.exit-form select{width:100%;min-width:0}.exit-form .wide{grid-column:1/-1}.exit-form .check{flex-direction:row;flex-wrap:wrap;align-items:center}.exit-form .check input{width:auto}
+    .exit-item{padding:20px 22px;border-top:1px solid var(--line)}.exit-item:first-child{border-top:0}.exit-main{display:grid;grid-template-columns:minmax(180px,1fr) minmax(90px,.38fr) minmax(150px,.6fr) auto;gap:20px;align-items:center}.exit-identity{min-width:0}.exit-name{font-size:14px;font-weight:600;margin:0 0 4px;overflow-wrap:anywhere}.exit-address{font:12px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace;color:var(--muted);overflow-wrap:anywhere}.exit-kind{font-size:11px;color:var(--muted);margin-left:8px}.exit-budget .label{margin-bottom:3px}.exit-meta{display:flex;flex-wrap:wrap;gap:6px 20px;margin-top:14px;padding-top:12px;border-top:1px solid var(--line);font-size:12px;color:var(--muted);overflow-wrap:anywhere}.exit-error{flex-basis:100%;min-width:0;white-space:normal}.exit-ops{display:flex;gap:8px;flex-wrap:wrap}.exit-ops .edit{background:var(--soft);border-color:transparent;color:var(--accent)}.exit-ops .edit:hover{border-color:var(--accent)}
+    .empty{text-align:center;white-space:normal;color:var(--muted);padding:48px 24px;font-size:13px}.footer{display:flex;justify-content:space-between;flex-wrap:wrap;gap:12px;padding:14px 22px;border-top:1px solid var(--line);color:var(--muted);font-size:11px}.login{padding:28px;max-width:480px;margin:auto}.login h2{margin-bottom:8px}.login p{font-size:12px;margin-bottom:16px}.hidden{display:none!important}.status{font-size:12px;color:var(--muted);margin-top:12px}
+    @media(max-width:1100px){header{align-items:flex-start;flex-direction:column;gap:14px}.chip-grid{justify-content:flex-start;max-width:none}.cards:not(.cards-four){grid-template-columns:repeat(3,minmax(0,1fr));row-gap:20px}.cards:not(.cards-four) .card:nth-child(3){border-right:0}.exit-main{grid-template-columns:minmax(0,1fr) auto}.exit-identity{grid-column:1;grid-row:1}.exit-state{grid-column:1;grid-row:2}.exit-budget{grid-column:1;grid-row:3}.exit-ops{grid-column:2;grid-row:1/4;flex-direction:column}}
+    @media(max-width:720px){main{padding:22px 14px}.cards,.cards:not(.cards-four){grid-template-columns:repeat(2,minmax(0,1fr));row-gap:20px}.card{padding:0 14px}.card:nth-child(even){border-right:0}.cards:not(.cards-four) .card:nth-child(3){border-right:1px solid var(--line)}h1{font-size:24px}.number{font-size:24px}.toolbar,.exit-item{padding:16px}.toolbar>.actions{flex-basis:100%}.settings-body{grid-template-columns:1fr;padding:0 16px 18px;gap:18px}.probe-settings summary{padding:14px 16px}#settings-summary{order:3;flex-basis:100%}.exit-form{grid-template-columns:1fr;padding:16px}.exit-main{gap:12px}.tabs{gap:22px}button,.icon-btn,input,select,a.primary{min-height:44px}.table-wrap{max-width:100%}th,td{padding:12px}.chip-grid{gap:4px}.target{padding:4px 7px}.footer{padding:14px 16px}#probe-values-wrap th:last-child,#probe-values-wrap td:last-child{position:sticky;right:0;background:var(--card);border-left:1px solid var(--line)}.control-cell button{display:block;margin:0 0 6px!important}}
+    @media(forced-colors:active){button,.badge,.tabs button.tab.active{border:1px solid ButtonText}.tabs button.tab.active:after{background:Highlight}}
   </style>
 </head>
 <body>
 <main>
   <header>
-    <div><div class="eyebrow">CPA / O-ADVERSARIAL-PLUGIN</div><h1>O/对抗插件</h1><p>请求时区、上游模型一致性、Turn-State 观测覆写与探测轨状态。</p></div>
-    <div class="chip-grid"><div class="target"><span class="dot"></span><code>America/Los_Angeles</code></div><div class="target hidden" id="override-chip" title="请求侧 X-Codex-Turn-State 覆写状态"><span class="dot" id="override-dot"></span><code id="override-label">覆写：—</code></div><div class="target" title="探测轨状态"><span class="dot" id="probe-dot"></span><code id="probe-label">探测：—</code></div><button id="reject-toggle" type="button" class="switch-btn" title="业务流量确认异常时按此开关拦截；探测失败仅在没有可用健康基线时参与拦截，预备失败不影响仍有效的业务值">降智请求拒绝：—</button></div>
+    <div><div class="eyebrow">CPA / O-ADVERSARIAL-PLUGIN</div><h1>O/对抗插件</h1><p>查看请求处理、管理健康基线与探测出口。</p></div>
+    <div class="chip-grid"><div class="target"><span class="dot"></span><code>America/Los_Angeles</code></div><div class="target hidden" id="override-chip" title="请求侧 X-Codex-Turn-State 覆写状态"><span class="dot" id="override-dot"></span><code id="override-label">覆写：—</code></div><div class="target" title="探测引擎状态"><span class="dot" id="probe-dot"></span><code id="probe-label">探测：—</code></div><button id="reject-toggle" type="button" class="switch-btn" title="业务流量确认异常时按此开关拦截；探测失败仅在没有可用健康基线时参与拦截，预备失败不影响仍有效的业务值">异常请求拦截：—</button></div>
   </header>
-  <nav class="tabs">
-    <button id="tab-records" type="button" class="tab active">请求记录</button>
-    <button id="tab-router" type="button" class="tab">状态路由台</button>
+  <nav class="tabs" aria-label="插件功能">
+    <button id="tab-records" type="button" class="tab active" aria-current="page">请求记录</button>
+    <button id="tab-router" type="button" class="tab">探测控制台</button>
     <button id="tab-pool" type="button" class="tab">代理池</button>
   </nav>
   <section id="view-records">
     <section class="cards" aria-label="处理统计">
       <div class="card"><div class="label">已处理请求</div><div class="number" id="total">—</div></div>
       <div class="card"><div class="label">已替换时区</div><div class="number" id="replaced">—</div></div>
-      <div class="card"><div class="label">原时区缺失 · 已补入</div><div class="number" id="inserted">—</div></div>
+      <div class="card"><div class="label">已补充时区</div><div class="number" id="inserted">—</div></div>
       <div class="card"><div class="label">上游模型不一致</div><div class="number warn" id="mismatches">—</div></div>
       <div class="card"><div class="label">Turn-State 已覆写</div><div class="number" id="overridden">—</div></div>
       <div class="card"><div class="label">含 Turn-State</div><div class="number" id="turnstates">—</div></div>
@@ -41,7 +56,7 @@
         <h2>请先登录 CPA 管理页</h2><p id="auth-message" role="status"></p>
         <a class="primary" id="management-login" target="_top">返回 CPA 管理页</a>
       </div>
-      <div class="table-wrap hidden" id="results"><table>
+      <div class="table-wrap hidden" id="results" tabindex="0" role="region" aria-label="最近请求，可横向滚动"><table>
         <thead><tr><th>请求时间（UTC+8）</th><th>模型</th><th>上游响应模型</th><th>原时区</th><th>替换后时区</th><th>处理方式</th><th>X-Codex-Turn-State</th></tr></thead>
         <tbody id="rows"></tbody>
       </table></div>
@@ -49,35 +64,40 @@
     </section>
   </section>
   <section id="view-router" class="hidden">
-    <section class="cards" aria-label="探测轨统计" style="grid-template-columns:repeat(4,1fr)">
-      <div class="card"><div class="label">探测轨</div><div class="number" id="probe-status">—</div></div>
-      <div class="card"><div class="label">优先探测模型</div><div class="number" id="probe-priority" style="font-size:18px">—</div></div>
+    <section class="cards cards-four" aria-label="探测统计">
+      <div class="card"><div class="label">探测状态</div><div class="number" id="probe-status">—</div></div>
+      <div class="card"><div class="label">优先探测模型</div><div class="number" id="probe-priority">—</div></div>
       <div class="card"><div class="label">探测成功 / 总探测</div><div class="number" id="probe-counts">—</div></div>
-      <div class="card"><div class="label">最近探测活动</div><div class="number" id="probe-activity" style="font-size:14px">—</div></div>
+      <div class="card"><div class="label">最近探测活动</div><div class="number" id="probe-activity">—</div></div>
     </section>
     <section class="panel">
-      <div class="toolbar"><h2>模型状态值（健康基线）</h2><div class="actions"><button id="round-start" type="button" class="switch-btn" title="启用自动预备并开始一轮探测：跳过健康值仍充裕或已备好接班值的模型；所有任务串行执行">开始探测</button><button id="round-stop" type="button" title="取消本轮排队和在途探测，在下一个尝试边界生效；保持自动预备原状态，临近到期时仍可再次探测">停止当前轮</button><button id="all-stop" type="button" title="取消所有探测并停止自动预备；重启后保持停止，直到再次点击开始探测；已获得的健康值保留">停止全部</button><span id="probe-times" class="probe-note">—</span></div></div>
-      <div class="settings-line"><label for="prefetch-minutes">提前预备</label><input id="prefetch-minutes" type="number" min="0" step="1" inputmode="numeric" aria-label="提前预备分钟数"><span>分钟</span><button id="prefetch-save" type="button">确认保存</button><span id="prefetch-feedback" role="status"></span><span class="sub">0 表示关闭自动预备。保存后重启保留；不会解除全部停止或模型暂停。</span></div>
-      <div class="settings-line"><label for="probe-interval-seconds">串行间隔</label><input id="probe-interval-seconds" type="number" min="1" max="3600" step="1" inputmode="numeric" aria-label="探测串行间隔秒数"><span>秒</span><button id="probe-interval-save" type="button">确认保存</button><span id="probe-interval-feedback" role="status"></span><span class="sub">1–3600 秒，控制重试和跨模型间隔。下一次等待起生效，已开始的等待按原值结束；重启保留。</span></div>
-      <div class="table-wrap" id="probe-values-wrap"><table>
-        <thead><tr><th>模型</th><th>状态长度</th><th>来源</th><th>签发时间（UTC+8）</th><th>到期时间（UTC+8）</th><th>真实剩余</th><th>控制</th></tr></thead>
+      <div class="toolbar"><h2>模型健康基线</h2><div class="actions"><button id="round-start" type="button" class="primary" title="启用自动预备并开始一轮探测：跳过健康值仍充裕或已备好接班值的模型；所有任务串行执行">开始探测</button><button id="round-stop" type="button" title="取消本轮排队和在途探测，在下一个尝试边界生效；保持自动预备原状态，临近到期时仍可再次探测">停止当前轮</button><button id="all-stop" type="button" title="取消所有探测并停止自动预备；重启后保持停止，直到再次点击开始探测；已获得的健康值保留">停止全部</button><span id="probe-times" class="probe-note">—</span></div></div>
+      <details class="probe-settings" id="probe-settings">
+        <summary><span class="settings-title">探测设置</span><span class="sub" id="settings-summary">提前预备 · 串行间隔</span></summary>
+        <div class="settings-body">
+      <div class="settings-line"><label for="prefetch-minutes">提前预备</label><input id="prefetch-minutes" type="number" min="0" step="1" inputmode="numeric" aria-label="提前预备分钟数"><span>分钟</span><button id="prefetch-save" type="button">确认保存</button><span id="prefetch-feedback" role="status"></span><span class="sub">有效期结束前提前准备下一份健康值。0 关闭自动预备；保存不会恢复已停止或暂停的探测。</span></div>
+      <div class="settings-line"><label for="probe-interval-seconds">串行间隔</label><input id="probe-interval-seconds" type="number" min="1" max="3600" step="1" inputmode="numeric" aria-label="探测串行间隔秒数"><span>秒</span><button id="probe-interval-save" type="button">确认保存</button><span id="probe-interval-feedback" role="status"></span><span class="sub">1–3600 秒，设置重试与跨模型探测的等待时间。下一次等待起生效，重启后保留。</span></div>
+        </div>
+      </details>
+      <div class="table-wrap" id="probe-values-wrap" tabindex="0" role="region" aria-label="模型健康基线，可横向滚动"><table>
+        <thead><tr><th>模型</th><th>状态长度</th><th>来源</th><th>签发时间（UTC+8）</th><th>到期时间（UTC+8）</th><th>有效期 / 状态</th><th>操作</th></tr></thead>
         <tbody id="probe-values"></tbody>
       </table></div>
     </section>
     <section class="panel">
-      <div class="toolbar"><h2>探测轨迹</h2><div class="actions"><span class="probe-note">按最新在前，最多 200 条</span></div></div>
-      <div class="table-wrap" id="probe-history-wrap"><table>
+      <div class="toolbar"><h2>探测记录</h2><div class="actions"><span class="probe-note">最近 50 条 · 最新在前</span></div></div>
+      <div class="table-wrap" id="probe-history-wrap" tabindex="0" role="region" aria-label="探测记录，可横向滚动"><table>
         <thead><tr><th>时间（UTC+8）</th><th>模型</th><th>出口</th><th>结果</th><th>耗时</th><th>说明</th></tr></thead>
         <tbody id="probe-history"></tbody>
       </table></div>
     </section>
   </section>
   <section id="view-pool" class="hidden">
-    <section class="cards" aria-label="代理池统计" style="grid-template-columns:repeat(4,1fr)">
+    <section class="cards cards-four" aria-label="代理池统计">
       <div class="card"><div class="label">出口总数</div><div class="number" id="pool-total">—</div></div>
       <div class="card"><div class="label">可用出口</div><div class="number ok" id="pool-active">—</div></div>
       <div class="card"><div class="label">冷却 / 轮休</div><div class="number warn" id="pool-cooling">—</div></div>
-      <div class="card"><div class="label">冷却策略</div><div class="number" id="pool-policy" style="font-size:14px">—</div></div>
+      <div class="card"><div class="label">冷却策略</div><div class="number" id="pool-policy">—</div></div>
     </section>
     <section class="panel">
       <div class="toolbar"><h2>代理出口池</h2><div class="actions"><span class="probe-note" id="pool-note">普通出口成功后轮休，聚合池永不冷却</span><button id="pool-add" type="button">新增代理 / 聚合池</button><button id="pool-reset-all" type="button" title="全部重置：立即清除所有出口的冷却 / 轮休">全部重置</button></div></div>
@@ -94,15 +114,53 @@
         <div class="actions wide"><button id="exit-save" type="button">确认保存</button><button id="exit-cancel" type="button">取消</button><span id="exit-feedback" role="status"></span></div>
         <p class="sub wide">保存后加入总代理池，后续尝试使用新参数；已发出的请求允许结束。不会自动启动探测，也不会解除原有禁用状态。面板配置优先于配置文件并在重启后保留。</p>
       </div>
-      <div class="table-wrap" id="pool-wrap"><table>
-        <thead><tr><th>出口</th><th>类型</th><th>每轮预算</th><th>状态</th><th>连续失败</th><th>冷却/轮休至（UTC+8）</th><th>剩余</th><th>最后错误</th><th>操作</th></tr></thead>
-        <tbody id="pool-rows"></tbody>
-      </table></div>
+      <div id="pool-wrap"><div id="pool-rows" role="list" aria-label="代理出口"></div></div>
     </section>
   </section>
   <p class="status" id="status" role="status"></p>
 </main>
 <script>
+  // CPA applies white/dark on <html>; its unmarked light theme is warm paper.
+  // Iframe documents do not inherit CSS variables, so copy only visual tokens.
+  function setupThemeSync(){
+    const root=document.documentElement;
+    const media=window.matchMedia('(prefers-color-scheme: dark)');
+    const hostTokens={'--bg':'--bg-secondary','--card':'--bg-primary','--subtle':'--bg-tertiary','--text':'--text-primary','--muted':'--text-secondary','--line':'--border-color'};
+    function sync(){
+      let host=null,theme='auto';
+      try{if(window.parent!==window)host=window.parent.document.documentElement;}catch{}
+      if(host){
+        theme=host.getAttribute('data-theme')||'light';
+        const style=window.parent.getComputedStyle(host);
+        for(const [local,remote] of Object.entries(hostTokens)){
+          const value=style.getPropertyValue(remote).trim();
+          if(value)root.style.setProperty(local,value);else root.style.removeProperty(local);
+        }
+      }else{
+        for(const local of Object.keys(hostTokens))root.style.removeProperty(local);
+        try{
+          const saved=JSON.parse(localStorage.getItem('cli-proxy-theme')||'null');
+          theme=saved?.state?.theme||'auto';
+        }catch{}
+      }
+      const resolved=['white','light','dark'].includes(theme)?theme:media.matches?'dark':'white';
+      root.setAttribute('data-theme',resolved);
+    }
+    sync();
+    let observer;
+    try{
+      if(window.parent!==window){
+        observer=new MutationObserver(sync);
+        observer.observe(window.parent.document.documentElement,{attributes:true,attributeFilter:['data-theme','class','style']});
+      }
+    }catch{}
+    media.addEventListener('change',sync);
+    const onStorage=event=>{if(event.key===null||event.key==='cli-proxy-theme')sync();};
+    window.addEventListener('storage',onStorage);
+    window.addEventListener('pageshow',sync);
+    return sync;
+  }
+  setupThemeSync();
   const el = id => document.getElementById(id);
   const prefix = location.pathname.split('/v0/resource/plugins/')[0];
   const endpoint = prefix + '/v0/management/timezone-override/requests';
@@ -112,7 +170,7 @@
   function fmtBeijing(value){if(!value)return '—';const date=new Date(value);if(isNaN(date.getTime()))return String(value);return shanghai.format(date).replace(/\//g,'-');}
   function fmtDuration(seconds){const total=Math.max(0,Math.floor(Number(seconds)||0));const days=Math.floor(total/86400),hours=Math.floor(total%86400/3600),minutes=Math.floor(total%3600/60),secs=total%60;const pad=n=>n<10?'0'+n:''+n;if(days>0)return days+'d '+pad(hours)+'h';if(hours>0)return hours+'h '+pad(minutes)+'m';return minutes+'m '+pad(secs)+'s';}
   const labels = {inserted:'已补入',replaced:'已替换',unchanged:'已一致','applied-config':'已覆写（配置值）'};
-  const sources = {request:'来自请求',response:'来自响应',stream:'来自流',probe:'探测轨',business:'业务观测',seed:'历史种子'};
+  const sources = {request:'来自请求',response:'来自响应',stream:'来自流',probe:'探测获取',business:'业务观测',seed:'历史种子'};
   let loading = false, rejectedKey = '';
   let prefetchDirty=false,prefetchSaving=false,prefetchLimit=54,editingExitID='',exitSaving=false,controlRevision=0;
   let intervalDirty=false,intervalSaving=false;
@@ -191,7 +249,7 @@
     if(override.error){
       // Configuration errors must stay visible; the steady rewrite state stays hidden.
       overrideChip.classList.remove('hidden');
-      el('override-label').textContent='覆写：配置错误';el('override-dot').style.background='#dc2626';
+      el('override-label').textContent='覆写：配置错误';el('override-dot').style.background='var(--danger)';
     }else if(override.enabled){
       overrideChip.classList.add('hidden');
     }else{
@@ -251,7 +309,7 @@
     const active=Number(probe.pool_active!==undefined?probe.pool_active:items.filter(i=>i.active!==false).length);
     el('pool-total').textContent=total.toLocaleString('zh-CN');
     el('pool-active').textContent=active.toLocaleString('zh-CN');
-    el('pool-cooling').textContent=Math.max(0,total-active).toLocaleString('zh-CN');
+    el('pool-cooling').textContent=items.filter(item=>item.active===false&&!item.disabled).length.toLocaleString('zh-CN');
     const threshold=probe.exit_fail_threshold||3;
     const poolThreshold=probe.exit_pool_fail_threshold||10;
     const minutes=probe.exit_cooldown_minutes!==undefined?probe.exit_cooldown_minutes:180;
@@ -261,59 +319,48 @@
     el('pool-policy').textContent='普通出口：成功轮休 '+(successMin>0?successMin+' 分钟':'关闭')+' · 连续 '+threshold+' 次失败冷却 '+(minutes>0?minutes+' 分钟':'关闭')+' · 轮换池永不冷却'+(disabledCount>0?(' · 已禁用 '+disabledCount+' 个'):'');
     const frag=document.createDocumentFragment();
     for(const item of items){
-      const tr=document.createElement('tr');
+      const row=document.createElement('article');row.className='exit-item';row.setAttribute('role','listitem');
+      const main=document.createElement('div');main.className='exit-main';
+      const identityBox=document.createElement('div');identityBox.className='exit-identity';
       const spec=String(item.proxy||'—');
-      const name=cell(tr,item.label||proxyLabel(spec),'model');
-      if(item.label){const endpoint=document.createElement('div');endpoint.className='sub';endpoint.textContent=proxyLabel(spec);name.append(endpoint);}
-      let kind='IPv4';
-      const hostPart=(spec.match(/:\/\/(\[?[^\]@\/]+\]?)/)||[])[1]||spec;
-      if(hostPart.indexOf('[')===0||(hostPart.split(':').length>2&&hostPart.indexOf('.')<0))kind='IPv6';
-      if(item.pool){kind='Pool 聚合池';}
-      cell(tr,spec==='direct'?'本地直出':kind);
+      const name=document.createElement('h3');name.className='exit-name';name.textContent=item.label||proxyLabel(spec);
+      const address=document.createElement('div');address.className='exit-address';address.textContent=proxyLabel(spec);
+      identityBox.append(name,address);
+      const state=document.createElement('div');state.className='exit-state';
+      const badge=document.createElement('span');
+      const cooling=item.active===false,resting=item.rest===true,disabled=item.disabled===true;
+      badge.className='badge '+(disabled?'state-off':cooling?(resting?'state-rest':'state-warn'):'state-ok');
+      badge.textContent=disabled?'已禁用':cooling?(resting?'轮休中':'冷却中'):'可用';
+      const kind=document.createElement('span');kind.className='exit-kind';kind.textContent=spec==='direct'?'直连':item.pool?'聚合池':'单代理';
+      state.append(badge,kind);
+      const budget=document.createElement('div');budget.className='exit-budget';
+      const budgetLabel=document.createElement('div');budgetLabel.className='label';budgetLabel.textContent='每轮探测预算';
       const base=item.attempts||(item.pool?(probe.pool_attempts??100):(probe.attempts_per_proxy??3));
       const multiplier=item.multiplier??1;
-      cell(tr,base+' × '+multiplier+' = '+(item.budget??Math.ceil(base*multiplier))+' 次','budget');
-      const state=cell(tr,'');
-      const badge=document.createElement('span');
-      const cooling=item.active===false;
-      const resting=item.rest===true;
-      const disabled=item.disabled===true;
-      if(disabled){
-        badge.className='badge state-off';
-        badge.textContent='已禁用';
-        badge.title='该出口已被手动禁用，不参与任何探测；其计数与错误信息仍保留';
-      }else{
-        badge.className='badge '+(cooling?(resting?'state-rest':'state-warn'):'state-ok');
-        badge.textContent=cooling?(resting?'轮休中':'冷却中'):'可用';
-        if(resting){badge.title='该出口刚刚成功获取过状态值，短暂轮休以分散出口使用；到期自动回归轮换';}
-      }
-      state.append(badge);
-      cell(tr,String(item.failures||0));
-      cell(tr,item.until?fmtBeijing(item.until):'—','time');
-      const remaining=Number(item.remaining_seconds);
-      cell(tr,cooling&&!isNaN(remaining)?fmtDuration(remaining):(cooling?'—':'—'),'');
-      const err=cell(tr,item.last_error||'—');err.title=item.last_error||'';
-      const ops=cell(tr,'');
-      const toggle=document.createElement('button');
-      toggle.type='button';
-      toggle.className='icon-btn'+(disabled?'':' off');
-      toggle.textContent=disabled?'启用':'禁用';
-      toggle.title=disabled?'启用：重新允许该出口参与探测':'禁用：完全停止使用该出口（计数保留；无论冷却/轮休状态）';
+      const budgetValue=document.createElement('div');budgetValue.className='budget';budgetValue.textContent=base+' × '+multiplier+' = '+(item.budget??Math.ceil(base*multiplier))+' 次';
+      budget.append(budgetLabel,budgetValue);
+      const ops=document.createElement('div');ops.className='exit-ops';
+      const edit=document.createElement('button');edit.type='button';edit.className='edit';edit.textContent='编辑';edit.disabled=!item.id||exitSaving;
+      edit.addEventListener('click',()=>openExitEditor(item));
       const identity=item.id?{id:item.id}:{proxy:spec};
+      const toggle=document.createElement('button');toggle.type='button';toggle.textContent=disabled?'启用':'禁用';
+      toggle.title=disabled?'允许该出口参与探测':'停止使用该出口，保留计数与历史';
       toggle.addEventListener('click',async()=>{toggle.disabled=true;if(await probeControl({action:'exit-enabled',...identity,enabled:disabled})){setTimeout(refresh,600);}else toggle.disabled=false;});
-      ops.append(toggle);
-      const reset=document.createElement('button');
-      reset.type='button';
-      reset.className='icon-btn';
-      reset.textContent='↺';
-      reset.title='重置：立即清除该出口的冷却 / 轮休，回归轮换';
+      const reset=document.createElement('button');reset.type='button';reset.textContent='重置';reset.title='清除冷却、轮休与连续失败计数；不解除禁用';
       reset.addEventListener('click',async()=>{reset.disabled=true;if(await probeControl({action:'reset-exit',...identity})){setTimeout(refresh,600);}else reset.disabled=false;});
-      ops.append(reset);
-      const edit=document.createElement('button');edit.type='button';edit.className='icon-btn';edit.textContent='编辑';edit.disabled=!item.id||exitSaving;
-      edit.addEventListener('click',()=>openExitEditor(item));ops.append(edit);
-      frag.append(tr);
+      ops.append(edit,toggle,reset);
+      main.append(identityBox,state,budget,ops);
+      const meta=document.createElement('div');meta.className='exit-meta';
+      const failures=document.createElement('span');failures.textContent='连续失败 '+(item.failures||0)+' 次';meta.append(failures);
+      if(item.until){
+        const until=document.createElement('span');until.textContent=(resting?'轮休至 ':'冷却至 ')+fmtBeijing(item.until)+'（UTC+8）';meta.append(until);
+        const remaining=Number(item.remaining_seconds);
+        if(cooling&&Number.isFinite(remaining)){const left=document.createElement('span');left.textContent='剩余 '+fmtDuration(remaining);meta.append(left);}
+      }
+      if(item.last_error){const error=document.createElement('div');error.className='exit-error';error.textContent='最近错误：'+item.last_error;meta.append(error);}
+      row.append(main,meta);frag.append(row);
     }
-    if(!items.length){const tr=document.createElement('tr');const td=cell(tr,'暂无出口配置。','empty');td.colSpan=9;frag.append(tr);}
+    if(!items.length){const empty=document.createElement('div');empty.className='empty';empty.textContent='暂无出口。添加代理后可在这里管理探测预算和启用状态。';frag.append(empty);}
     el('pool-rows').replaceChildren(frag);
     el('pool-note').textContent=probe.settings_error||('保存不会启动探测；'+(probe.max_attempts_explicit?'整轮上限 '+probe.max_attempts_per_round+' 次优先于各出口预算':'整轮上限按各出口预算合计'));
     el('pool-add').disabled=exitSaving||!!probe.settings_error;
@@ -334,6 +381,8 @@
     const intervalSeconds=probe.interval_seconds??5;
     if(!intervalDirty&&!intervalSaving){el('probe-interval-seconds').value=String(intervalSeconds);el('probe-interval-feedback').textContent=probe.settings_error||('当前生效：'+intervalSeconds+' 秒'+(probe.interval_override?'（面板设置）':'（配置默认）'));}
     el('probe-interval-save').disabled=intervalSaving||!!probe.settings_error;
+    el('settings-summary').textContent=probe.settings_error?'设置异常 · 展开查看':('提前预备 '+prefetchMinutes+' 分钟 · 串行间隔 '+intervalSeconds+' 秒');
+    el('settings-summary').classList.toggle('settings-error',!!probe.settings_error);
     const autoPrefetch=probe.prefetch_enabled??(ready&&!probe.halted&&prefetchMinutes>0);
     if(probe.stopping){
       el('probe-label').textContent='探测：正在停止';
@@ -342,12 +391,12 @@
       el('probe-status').className='number warn';
     }else if(probe.running){
       el('probe-label').textContent='探测：运行中';
-      el('probe-dot').style.background='#16a34a';
+      el('probe-dot').style.background='var(--ok)';
       el('probe-status').textContent='运行中';
       el('probe-status').className='number ok';
     }else if(!ready){
       el('probe-label').textContent=probe.error?'探测：配置错误':noDetection?'探测：不检测':'探测：关闭';
-      el('probe-dot').style.background=probe.error?'#dc2626':'var(--muted)';
+      el('probe-dot').style.background=probe.error?'var(--danger)':'var(--muted)';
       el('probe-status').textContent=probe.error?'配置错误':noDetection?'不检测':'未启用';
       el('probe-status').className='number';
     }else if(probe.halted){
@@ -382,8 +431,8 @@
     for(const mark of (probe.business||[])){businessByModel[mark.model]=mark;}
     const rejectBtn=el('reject-toggle');
     rejectBtn.disabled=false;
-    if(probe.reject_degraded){rejectBtn.classList.add('on');rejectBtn.textContent='降智请求拒绝：已开启';}
-    else{rejectBtn.classList.remove('on');rejectBtn.textContent='降智请求拒绝：已关闭';}
+    if(probe.reject_degraded){rejectBtn.classList.add('on');rejectBtn.textContent='异常请求拦截：已开启';}
+    else{rejectBtn.classList.remove('on');rejectBtn.textContent='异常请求拦截：已关闭';}
     const vfrag=document.createDocumentFragment();
     for(const entry of values){
       const tr=document.createElement('tr');
@@ -469,7 +518,7 @@
         cb.className='badge state-ok';
         const cr=Number(entry.candidate.remaining_seconds);
         cb.textContent='预备就绪'+(isNaN(cr)?'':'（'+fmtDuration(cr)+'）');
-        cb.title='已提前备好接班 token（来源：'+(entry.candidate.source||'探测轨')+'）；当前值到期后自动无缝接管，业务无感';
+        cb.title='已提前备好预备状态值（来源：'+(entry.candidate.source||'探测获取')+'）；当前值到期时，如预备值仍有效则自动接管';
         ttl.append(cb);
       }
       if(expired){
@@ -479,11 +528,11 @@
         badge.title='该基线的真实有效期已结束（按 token 内嵌签发时间戳 + 有效期时长推算）；到期后不再对外提供本值，直到获得新的健康值';
         ttl.append(badge);
       }
-      const control=cell(tr,'');
+      const control=cell(tr,'','control-cell');
       const toggle=document.createElement('button');
       toggle.type='button';
       toggle.className='icon-btn'+(isPaused?' paused':'');
-      toggle.textContent=isPaused?'▶':'⏸';
+      toggle.textContent=isPaused?'恢复':'暂停';
       toggle.title=isPaused?'恢复：解除该模型暂停并探测一次；不改变全局自动预备状态':'暂停该模型：取消排队与在途探测，并停止该模型的自动预备；已有健康值保留';
       toggle.disabled=!!probe.stopping;
       toggle.addEventListener('click',async()=>{toggle.disabled=true;if(await probeControl({model:entry.model,action:isPaused?'resume':'pause'}))refresh();else toggle.disabled=false;});
@@ -491,7 +540,7 @@
       const probeNow=document.createElement('button');
       probeNow.type='button';
       probeNow.className='icon-btn';
-      probeNow.textContent='⟳';
+      probeNow.textContent='探测一次';
       probeNow.title='探测一次：加入统一串行队列；新值先作为接班值，不改变全局自动预备状态；已暂停模型请先恢复';
       probeNow.disabled=!ready||probe.stopping||isPaused||isActive;
       probeNow.addEventListener('click',async()=>{probeNow.disabled=true;if(await probeControl({model:entry.model,action:'probe-model'})){setTimeout(refresh,1500);}else probeNow.disabled=false;});
@@ -523,13 +572,14 @@
       }else{detail.textContent=record.error||'—';detail.classList.add('none');}
       hfrag.append(tr);
     }
-    if(!history.length){const tr=document.createElement('tr');const td=cell(tr,'暂无探测轨迹。','empty');td.colSpan=6;hfrag.append(tr);}
+    if(!history.length){const tr=document.createElement('tr');const td=cell(tr,'暂无探测记录。','empty');td.colSpan=6;hfrag.append(tr);}
     el('probe-history').replaceChildren(hfrag);
   }
   function switchTab(name){
     for(const key of ['records','router','pool']){
       const active=key===name;
       el('tab-'+key).classList.toggle('active',active);
+      el('tab-'+key).setAttribute('aria-current',active?'page':'false');
       el('view-'+key).classList.toggle('hidden',!active);
     }
   }
@@ -588,6 +638,8 @@
     el('exit-username').value='';el('exit-password').value='';el('exit-clear-auth').checked=false;
     el('exit-auth-note').textContent=item?.has_auth?'已配置认证；凭据不回显':'未配置认证';el('exit-feedback').textContent='';
     for(const name of ['username','password','clear-auth'])el('exit-'+name).disabled=item?.proxy==='direct';
+    el('exit-form').scrollIntoView({block:'nearest'});
+    el('exit-label').focus({preventScroll:true});
   }
   function closeExitEditor(){el('exit-form').classList.add('hidden');el('exit-url').value='';el('exit-username').value='';el('exit-password').value='';editingExitID='';}
   el('pool-add').addEventListener('click',()=>openExitEditor(null));

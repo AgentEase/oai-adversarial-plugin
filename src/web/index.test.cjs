@@ -7,7 +7,7 @@ const vm = require('node:vm');
 // storage, management credentials or upstream network calls are involved.
 class Element {
   constructor(tag='div') {
-    this.tagName=tag; this.children=[]; this.style={}; this.className=''; this.events={}; this.text='';
+    this.tagName=tag; this.children=[]; this.style={setProperty(name,value){this[name]=value;},removeProperty(name){delete this[name];}}; this.attributes={}; this.className=''; this.events={}; this.text='';
     this.classList={
       contains:name=>this.className.split(' ').includes(name),
       add:name=>{if(!this.classList.contains(name))this.className+=' '+name;},
@@ -20,22 +20,35 @@ class Element {
   append(...items){for(const item of items){if(item.tagName==='fragment')this.children.push(...item.children);else this.children.push(item);}}
   replaceChildren(...items){this.text='';this.children=[];this.append(...items);}
   addEventListener(name,fn){this.events[name]=fn;}
+  setAttribute(name,value){this.attributes[name]=value;}
+  getAttribute(name){return this.attributes[name]??null;}
+  scrollIntoView(){}
+  focus(){this.focused=true;}
 }
 
-function panel() {
+function panel(options={}) {
   const nodes=new Map();
   const get=id=>{if(!nodes.has(id))nodes.set(id,new Element());return nodes.get(id);};
+  const root=new Element('html'),host=new Element('html'),windowEvents={},mediaEvents={};
+  if(options.hostTheme)host.setAttribute('data-theme',options.hostTheme);
+  let storedTheme=options.storedTheme;
+  const media={matches:!!options.darkSystem,addEventListener:(name,fn)=>{mediaEvents[name]=fn;}};
+  let onMutation;
+  const win={addEventListener:(name,fn)=>{(windowEvents[name]??=[]).push(fn);},matchMedia:()=>media};
+  win.parent=options.embedded?{document:{documentElement:host},getComputedStyle:()=>({getPropertyValue:name=>options.hostTokens?.[name]||''})}:win;
+  if(options.crossOrigin)Object.defineProperty(win,'parent',{get(){throw new Error('cross origin');}});
   const context=vm.createContext({
-    document:{getElementById:get,createElement:tag=>new Element(tag),createDocumentFragment:()=>new Element('fragment')},
+    document:{documentElement:root,getElementById:get,createElement:tag=>new Element(tag),createDocumentFragment:()=>new Element('fragment')},
     location:{pathname:'/management.html',host:'localhost',origin:'http://localhost'},
-    navigator:{userAgent:'panel-test'},localStorage:{getItem:()=>null},
-    window:{addEventListener(){}},setInterval(){},setTimeout(){},URL,TextEncoder,TextDecoder,
+    navigator:{userAgent:'panel-test'},localStorage:{getItem:name=>name==='cli-proxy-theme'?JSON.stringify({state:{theme:storedTheme}}):null},
+    window:win,MutationObserver:class{constructor(fn){onMutation=fn;}observe(){}disconnect(){}},
+    setInterval(){},setTimeout(){},URL,TextEncoder,TextDecoder,
   });
   const html=fs.readFileSync(__dirname+'/index.html','utf8');
   const script=html.match(/<script>([\s\S]*?)<\/script>/)[1];
   vm.runInContext(script,context);
   vm.runInContext('globalThis.renderTest=renderProbe;globalThis.renderPoolTest=renderPool;globalThis.openExitTest=openExitEditor;globalThis.renderDataTest=render;globalThis.actions=[];globalThis.controlResult=false;probeControl=async payload=>{actions.push(payload);return controlResult;}',context);
-  return {get,render:context.renderTest,renderPool:context.renderPoolTest,openExit:context.openExitTest,renderData:context.renderDataTest,actions:context.actions,setResult:value=>{context.controlResult=value;}};
+  return {get,root,host,changeHost:theme=>{host.setAttribute('data-theme',theme);onMutation();},changeStored:theme=>{storedTheme=theme;for(const fn of windowEvents.storage||[])fn({key:'cli-proxy-theme'});},changeSystem:dark=>{media.matches=dark;mediaEvents.change();},render:context.renderTest,renderPool:context.renderPoolTest,openExit:context.openExitTest,renderData:context.renderDataTest,actions:context.actions,setResult:value=>{context.controlResult=value;}};
 }
 
 function fixture(overrides={}) {
@@ -60,11 +73,11 @@ test('idle participation, pause and one-off probing remain distinct',()=>{
   let row=p.get('probe-values').children[0];
   assert.equal(row.classList.contains('paused-row'),false);
   assert.match(row.children[0].textContent,/自动预备待命/);
-  assert.equal(row.children[6].children[0].textContent,'⏸');
+  assert.equal(row.children[6].children[0].textContent,'暂停');
   p.render(fixture({paused:['gpt-6-astra']}));
   row=p.get('probe-values').children[0];
   assert.equal(row.classList.contains('paused-row'),true);
-  assert.equal(row.children[6].children[0].textContent,'▶');
+  assert.equal(row.children[6].children[0].textContent,'恢复');
   assert.equal(row.children[6].children[1].disabled,true);
   p.render(fixture({halted:true,running:true,active_models:['gpt-6-astra']}));
   assert.equal(p.get('probe-status').textContent,'运行中');
@@ -178,10 +191,10 @@ test('proxy editing retains authentication by omission and uses stable IDs',asyn
   const item={id:'exit-test',proxy:'socks5://192.0.2.1:1080',label:'备用出口',has_auth:true,pool:false,attempts:0,multiplier:1,budget:3,disabled:true};
   p.renderPool({proxies_state:[item]});
   const row=p.get('pool-rows').children[0];
-  assert.match(row.children[2].textContent,/3 × 1 = 3/);
-  await row.children[8].children[0].events.click();
+  assert.match(row.children[0].children[2].textContent,/3 × 1 = 3/);
+  await row.children[0].children[3].children[1].events.click();
   assert.equal(p.actions[0].id,'exit-test');assert.equal(p.actions[0].proxy,undefined);
-  row.children[8].children[2].events.click();
+  row.children[0].children[3].children[0].events.click();
   assert.equal(p.get('exit-password').value,'');assert.equal(p.get('exit-username').value,'');
   assert.match(p.get('exit-auth-note').textContent,/已配置认证/);
   p.get('exit-multiplier').value='2';await p.get('exit-save').events.click();
@@ -252,4 +265,64 @@ test('serial interval confirmation stays stable during polling and reports failu
   p.setResult(true);
   p.get('probe-interval-save').events.click();
   assert.equal(p.get('probe-interval-seconds').value,'45');
+});
+
+
+test('embedded CPA theme follows white, unmarked paper and dark without OS overriding it',()=>{
+  const tokens={'--bg-secondary':'#ffffff','--text-secondary':'#6d6760'};
+  const p=panel({embedded:true,hostTheme:'white',darkSystem:true,hostTokens:tokens});
+  assert.equal(p.root.getAttribute('data-theme'),'white');
+  assert.equal(p.root.style['--bg'],'#ffffff');
+  tokens['--bg-secondary']='#faf9f5';p.changeHost('');
+  assert.equal(p.root.getAttribute('data-theme'),'light');
+  assert.equal(p.root.style['--bg'],'#faf9f5');
+  tokens['--bg-secondary']='#151412';p.changeHost('dark');
+  assert.equal(p.root.getAttribute('data-theme'),'dark');
+  assert.equal(p.root.style['--bg'],'#151412');
+  p.changeSystem(false);assert.equal(p.root.getAttribute('data-theme'),'dark');
+  delete tokens['--bg-secondary'];p.changeHost('white');
+  assert.equal(p.root.style['--bg'],undefined);
+});
+
+test('standalone and inaccessible parent use CPA storage with live system fallback',()=>{
+  for(const crossOrigin of [false,true]){
+    const p=panel({crossOrigin,storedTheme:'white',darkSystem:true});
+    assert.equal(p.root.getAttribute('data-theme'),'white');
+    p.changeStored('light');assert.equal(p.root.getAttribute('data-theme'),'light');
+    p.changeStored('dark');assert.equal(p.root.getAttribute('data-theme'),'dark');
+    p.changeSystem(false);assert.equal(p.root.getAttribute('data-theme'),'dark');
+    p.changeStored('auto');assert.equal(p.root.getAttribute('data-theme'),'white');
+    p.changeSystem(true);assert.equal(p.root.getAttribute('data-theme'),'dark');
+  }
+});
+
+test('collapsed settings summary shows effective values without replacing open drafts',()=>{
+  const p=panel();p.render(fixture({prefetch_minutes:3,interval_seconds:2}));
+  p.get('probe-settings').open=true;
+  p.get('prefetch-minutes').value='12';p.get('prefetch-minutes').events.input();
+  p.render(fixture({prefetch_minutes:5,interval_seconds:8}));
+  assert.equal(p.get('probe-settings').open,true);
+  assert.equal(p.get('prefetch-minutes').value,'12');
+  assert.equal(p.get('settings-summary').textContent,'提前预备 5 分钟 · 串行间隔 8 秒');
+  p.render(fixture({settings_error:'设置不可读'}));
+  assert.equal(p.get('settings-summary').textContent,'设置异常 · 展开查看');
+  assert.equal(p.get('prefetch-save').disabled,true);
+});
+
+test('proxy list preserves long details, visible actions and disabled versus cooling counts',async()=>{
+  const p=panel();const error='出口连接失败 '.repeat(40);
+  p.renderPool({pool_total:3,pool_active:1,pool_disabled:1,proxies_state:[
+    {id:'disabled',proxy:'http://192.0.2.1:8080',disabled:true,active:false,last_error:error},
+    {id:'cooling',proxy:'http://192.0.2.2:8080',active:false,rest:true,remaining_seconds:300,until:new Date().toISOString()},
+    {id:'ready',proxy:'direct',active:true}
+  ]});
+  assert.equal(p.get('pool-cooling').textContent,'1');
+  const first=p.get('pool-rows').children[0];
+  assert.match(first.textContent,new RegExp(error));
+  const ops=first.children[0].children[3];
+  assert.deepEqual(ops.children.map(button=>button.textContent),['编辑','启用','重置']);
+  ops.children[0].events.click();assert.equal(p.get('exit-label').focused,true);
+  await ops.children[2].events.click();
+  assert.equal(p.actions[0].action,'reset-exit');assert.equal(p.actions[0].id,'disabled');
+  assert.match(p.get('pool-rows').children[1].textContent,/轮休至.*剩余 5m 00s/);
 });
