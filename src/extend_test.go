@@ -1267,6 +1267,9 @@ func TestOneOffProbeDoesNotReignite(t *testing.T) {
 	}
 	cfg := parseProbeConfig(probeConfigYAML{Enabled: &enabled, Models: []string{"gpt-6-astra", "gpt-5.6-sol"}})
 	cfg.CredFile = "/nonexistent/cred.json"
+	// Fast pacing: the resume task must not wait behind the production
+	// default interval while the 5s deadline runs out.
+	cfg.ProbeInterval = time.Millisecond
 	probeTrack.cfg.Config = cfg
 
 	probeTrack.stop() // halted
@@ -2446,6 +2449,39 @@ func TestRuntimePrefetchNewWindowTriggersScan(t *testing.T) {
 	waitPrefetchIdle(t, e)
 	if e.probesTotal != 1 {
 		t.Fatal("the next scan did not use the new window")
+	}
+}
+
+func TestProbeHistoryExitLabelsBeforeRedaction(t *testing.T) {
+	e := newPrefetchTestEngine(t)
+	first := "socks5://first:test-secret-a@192.0.2.1:1080"
+	second := "socks5://second:test-secret-b@192.0.2.1:1080"
+	e.cfg.Config.Proxies = []string{first, second, "direct"}
+	e.cfg.Config.ProxyLabels = map[string]string{first: "Named A", second: "Named B", "direct": "Local exit"}
+	e.history = []probeRecord{{Proxy: first}, {Proxy: second}, {Proxy: "direct"}, {Proxy: "http://192.0.2.2:8080"}}
+	history := probeSummary()["history"].([]probeRecord)
+	for i, want := range []string{"", "Local exit", "Named B", "Named A"} {
+		if history[i].ProxyLabel != want {
+			t.Fatalf("history[%d] label = %q, want %q", i, history[i].ProxyLabel, want)
+		}
+	}
+	if history[2].Proxy != history[3].Proxy {
+		t.Fatal("fixture must have identical public URLs but distinct labels")
+	}
+	e.cfg.Config.ProxyLabels[first] = "Renamed A"
+	if got := probeSummary()["history"].([]probeRecord)[3].ProxyLabel; got != "Renamed A" {
+		t.Fatalf("renamed label = %q", got)
+	}
+	delete(e.cfg.Config.ProxyLabels, second)
+	if got := probeSummary()["history"].([]probeRecord)[2].ProxyLabel; got != "" {
+		t.Fatal("removed names must fall back to the public URL")
+	}
+	encoded, err := json.Marshal(history)
+	if err != nil || bytes.Contains(encoded, []byte("test-secret")) {
+		t.Fatal("history must serialize without proxy authentication")
+	}
+	if e.history[0].ProxyLabel != "" || e.history[0].Proxy != first {
+		t.Fatal("summary must not mutate stored probe records")
 	}
 }
 

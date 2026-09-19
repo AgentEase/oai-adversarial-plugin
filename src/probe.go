@@ -140,6 +140,7 @@ type probeRecord struct {
 	Time          string `json:"time"`
 	Model         string `json:"model"`
 	Proxy         string `json:"proxy"`
+	ProxyLabel    string `json:"proxy_label,omitempty"`
 	Success       bool   `json:"success"`
 	StatusCode    int    `json:"status_code,omitempty"`
 	DurationMS    int64  `json:"duration_ms"`
@@ -2180,6 +2181,8 @@ func probeSummary() map[string]any {
 	history := make([]probeRecord, len(probeTrack.history))
 	copy(history, probeTrack.history)
 	for i := range history {
+		// Resolve before redaction: different credentials may share an endpoint.
+		history[i].ProxyLabel = cfg.ProxyLabels[history[i].Proxy]
 		history[i].Proxy = publicProxyURL(history[i].Proxy)
 		history[i].Error = redactProxyText(history[i].Error)
 	}

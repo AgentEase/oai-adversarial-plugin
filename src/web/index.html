@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>O/对抗插件 · CPA</title>
+  <title data-i18n="O/对抗插件 · CPA">O/对抗插件 · CPA</title>
   <style>
     :root{color-scheme:light;--bg:#fff;--card:#fff;--subtle:#f6f6f6;--text:#2d2a26;--muted:#6d6760;--line:#e5e5e5;--control-line:#817b73;--accent:#383a34;--accent-ink:#fff;--soft:#eeefec;--warn:#895923;--warn-bg:#f5ecdf;--ok:#35654c;--ok-bg:#eaf2ed;--danger:#9c4439;--danger-bg:#f8eeeb;--scroll:#a29c95}
     :root[data-theme="light"]{--bg:#faf9f5;--card:#f0eee8;--subtle:#e9e6df;--text:#2d2a26;--muted:#6d6760;--line:#dedbd3;--soft:#e5e7df;--accent:#42483b;--accent-ink:#fff}
@@ -26,100 +26,414 @@
     .exit-item{padding:20px 22px;border-top:1px solid var(--line)}.exit-item:first-child{border-top:0}.exit-main{display:grid;grid-template-columns:minmax(180px,1fr) minmax(90px,.38fr) minmax(150px,.6fr) auto;gap:20px;align-items:center}.exit-identity{min-width:0}.exit-name{font-size:14px;font-weight:600;margin:0 0 4px;overflow-wrap:anywhere}.exit-address{font:12px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace;color:var(--muted);overflow-wrap:anywhere}.exit-kind{font-size:11px;color:var(--muted);margin-left:8px}.exit-budget .label{margin-bottom:3px}.exit-meta{display:flex;flex-wrap:wrap;gap:6px 20px;margin-top:14px;padding-top:12px;border-top:1px solid var(--line);font-size:12px;color:var(--muted);overflow-wrap:anywhere}.exit-error{flex-basis:100%;min-width:0;white-space:normal}.exit-ops{display:flex;gap:8px;flex-wrap:wrap}.exit-ops .edit{background:var(--soft);border-color:transparent;color:var(--accent)}.exit-ops .edit:hover{border-color:var(--accent)}
     .empty{text-align:center;white-space:normal;color:var(--muted);padding:48px 24px;font-size:13px}.footer{display:flex;justify-content:space-between;flex-wrap:wrap;gap:12px;padding:14px 22px;border-top:1px solid var(--line);color:var(--muted);font-size:11px}.login{padding:28px;max-width:480px;margin:auto}.login h2{margin-bottom:8px}.login p{font-size:12px;margin-bottom:16px}.hidden{display:none!important}.status{font-size:12px;color:var(--muted);margin-top:12px}
     @media(max-width:1100px){header{align-items:flex-start;flex-direction:column;gap:14px}.chip-grid{justify-content:flex-start;max-width:none}.cards:not(.cards-four){grid-template-columns:repeat(3,minmax(0,1fr));row-gap:20px}.cards:not(.cards-four) .card:nth-child(3){border-right:0}.exit-main{grid-template-columns:minmax(0,1fr) auto}.exit-identity{grid-column:1;grid-row:1}.exit-state{grid-column:1;grid-row:2}.exit-budget{grid-column:1;grid-row:3}.exit-ops{grid-column:2;grid-row:1/4;flex-direction:column}}
-    @media(max-width:720px){main{padding:22px 14px}.cards,.cards:not(.cards-four){grid-template-columns:repeat(2,minmax(0,1fr));row-gap:20px}.card{padding:0 14px}.card:nth-child(even){border-right:0}.cards:not(.cards-four) .card:nth-child(3){border-right:1px solid var(--line)}h1{font-size:24px}.number{font-size:24px}.toolbar,.exit-item{padding:16px}.toolbar>.actions{flex-basis:100%}.settings-body{grid-template-columns:1fr;padding:0 16px 18px;gap:18px}.probe-settings summary{padding:14px 16px}#settings-summary{order:3;flex-basis:100%}.exit-form{grid-template-columns:1fr;padding:16px}.exit-main{gap:12px}.tabs{gap:22px}button,.icon-btn,input,select,a.primary{min-height:44px}.table-wrap{max-width:100%}th,td{padding:12px}.chip-grid{gap:4px}.target{padding:4px 7px}.footer{padding:14px 16px}#probe-values-wrap th:last-child,#probe-values-wrap td:last-child{position:sticky;right:0;background:var(--card);border-left:1px solid var(--line)}.control-cell button{display:block;margin:0 0 6px!important}}
+    @media(max-width:720px){main{padding:22px 14px}.cards,.cards:not(.cards-four){grid-template-columns:repeat(2,minmax(0,1fr));row-gap:20px}.card{padding:0 14px}.card:nth-child(even){border-right:0}.cards:not(.cards-four) .card:nth-child(3){border-right:1px solid var(--line)}h1{font-size:24px}.number{font-size:24px}.toolbar,.exit-item{padding:16px}.toolbar>.actions{flex-basis:100%}.settings-body{grid-template-columns:1fr;padding:0 16px 18px;gap:18px}.probe-settings summary{padding:14px 16px}#settings-summary{order:3;flex-basis:100%}.exit-form{grid-template-columns:1fr;padding:16px}.exit-main{gap:12px}.tabs{gap:6px 18px;flex-wrap:wrap}button,.icon-btn,input,select,a.primary{min-height:44px}.table-wrap{max-width:100%}th,td{padding:12px}.chip-grid{gap:4px}.target{padding:4px 7px}.footer{padding:14px 16px}#probe-values-wrap th:last-child,#probe-values-wrap td:last-child{position:sticky;right:0;background:var(--card);border-left:1px solid var(--line)}.control-cell button{display:block;margin:0 0 6px!important}}
+    .section-icon{width:18px;height:18px;flex:none;color:var(--muted)}.section-heading,.settings-title,.tabs button.tab{display:inline-flex;align-items:center;gap:9px}.section-heading{flex:1;min-width:160px}.section-heading:after{content:"";height:1px;background:var(--line);flex:1;min-width:24px;max-width:120px;margin-left:9px}.tabs .section-icon{width:16px;height:16px}.tabs .active .section-icon{color:var(--accent)}.egress-name{max-width:260px;min-width:140px;white-space:normal;overflow-wrap:anywhere}@media(max-width:1100px){html:not([lang^="zh"]) .cards-four{grid-template-columns:repeat(2,minmax(0,1fr));row-gap:18px}html:not([lang^="zh"]) .cards-four .card:nth-child(2){border-right:0}}
+    @media(max-width:720px){#view-pool .cards-four{grid-template-columns:repeat(3,minmax(0,1fr))}#view-pool .card:nth-child(2){border-right:1px solid var(--line)}#view-pool .card:nth-child(3){border-right:0}#view-pool .card:last-child{grid-column:1/-1;border-top:1px solid var(--line);padding-top:14px}}
     @media(forced-colors:active){button,.badge,.tabs button.tab.active{border:1px solid ButtonText}.tabs button.tab.active:after{background:Highlight}}
   </style>
 </head>
 <body>
 <main>
   <header>
-    <div><div class="eyebrow">CPA / O-ADVERSARIAL-PLUGIN</div><h1>O/对抗插件</h1><p>查看请求处理、管理健康基线与探测出口。</p></div>
-    <div class="chip-grid"><div class="target"><span class="dot"></span><code>America/Los_Angeles</code></div><div class="target hidden" id="override-chip" title="请求侧 X-Codex-Turn-State 覆写状态"><span class="dot" id="override-dot"></span><code id="override-label">覆写：—</code></div><div class="target" title="探测引擎状态"><span class="dot" id="probe-dot"></span><code id="probe-label">探测：—</code></div><button id="reject-toggle" type="button" class="switch-btn" title="业务流量确认异常时按此开关拦截；探测失败仅在没有可用健康基线时参与拦截，预备失败不影响仍有效的业务值">异常请求拦截：—</button></div>
+    <div><div class="eyebrow">CPA / O-ADVERSARIAL-PLUGIN</div><h1><span data-i18n="O/对抗插件">O/对抗插件</span></h1><p><span data-i18n="查看请求处理、管理健康基线与探测出口。">查看请求处理、管理健康基线与探测出口。</span></p></div>
+    <div class="chip-grid"><div class="target"><span class="dot"></span><code>America/Los_Angeles</code></div><div class="target hidden" id="override-chip" title="请求侧 X-Codex-Turn-State 覆写状态" data-i18n-title="请求侧 X-Codex-Turn-State 覆写状态"><span class="dot" id="override-dot"></span><code id="override-label"><span data-i18n="覆写：—">覆写：—</span></code></div><div class="target" title="探测引擎状态" data-i18n-title="探测引擎状态"><span class="dot" id="probe-dot"></span><code id="probe-label"><span data-i18n="探测：—">探测：—</span></code></div><button id="reject-toggle" type="button" class="switch-btn" title="业务流量确认异常时按此开关拦截；探测失败仅在没有可用健康基线时参与拦截，预备失败不影响仍有效的业务值" data-i18n-title="业务流量确认异常时按此开关拦截；探测失败仅在没有可用健康基线时参与拦截，预备失败不影响仍有效的业务值"><span data-i18n="异常请求拦截：—">异常请求拦截：—</span></button></div>
   </header>
-  <nav class="tabs" aria-label="插件功能">
-    <button id="tab-records" type="button" class="tab active" aria-current="page">请求记录</button>
-    <button id="tab-router" type="button" class="tab">探测控制台</button>
-    <button id="tab-pool" type="button" class="tab">代理池</button>
+  <nav class="tabs" aria-label="插件功能" data-i18n-aria-label="插件功能">
+    <button id="tab-records" type="button" class="tab active" aria-current="page"><svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M8 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-3"/><path d="M16 3h5v5M21 3l-9 9M7 12h2M7 16h10"/></svg><span><span data-i18n="请求记录">请求记录</span></span></button>
+    <button id="tab-router" type="button" class="tab"><svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg><span><span data-i18n="探测控制台">探测控制台</span></span></button>
+    <button id="tab-pool" type="button" class="tab"><svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="8" y="3" width="8" height="5" rx="1"/><rect x="2" y="16" width="8" height="5" rx="1"/><rect x="14" y="16" width="8" height="5" rx="1"/><path d="M12 8v4M6 16v-4h12v4"/></svg><span><span data-i18n="代理池">代理池</span></span></button>
   </nav>
   <section id="view-records">
-    <section class="cards" aria-label="处理统计">
-      <div class="card"><div class="label">已处理请求</div><div class="number" id="total">—</div></div>
-      <div class="card"><div class="label">已替换时区</div><div class="number" id="replaced">—</div></div>
-      <div class="card"><div class="label">已补充时区</div><div class="number" id="inserted">—</div></div>
-      <div class="card"><div class="label">上游模型不一致</div><div class="number warn" id="mismatches">—</div></div>
-      <div class="card"><div class="label">Turn-State 已覆写</div><div class="number" id="overridden">—</div></div>
-      <div class="card"><div class="label">含 Turn-State</div><div class="number" id="turnstates">—</div></div>
+    <section class="cards" aria-label="处理统计" data-i18n-aria-label="处理统计">
+      <div class="card"><div class="label"><span data-i18n="已处理请求">已处理请求</span></div><div class="number" id="total">—</div></div>
+      <div class="card"><div class="label"><span data-i18n="已替换时区">已替换时区</span></div><div class="number" id="replaced">—</div></div>
+      <div class="card"><div class="label"><span data-i18n="已补充时区">已补充时区</span></div><div class="number" id="inserted">—</div></div>
+      <div class="card"><div class="label"><span data-i18n="上游模型不一致">上游模型不一致</span></div><div class="number warn" id="mismatches">—</div></div>
+      <div class="card"><div class="label"><span data-i18n="Turn-State 已覆写">Turn-State 已覆写</span></div><div class="number" id="overridden">—</div></div>
+      <div class="card"><div class="label"><span data-i18n="含 Turn-State">含 Turn-State</span></div><div class="number" id="turnstates">—</div></div>
     </section>
     <section class="panel">
-      <div class="toolbar"><h2>最近请求</h2><div class="actions"><span id="refresh-note">正在连接</span><button id="refresh" type="button" disabled>刷新</button></div></div>
+      <div class="toolbar"><h2 class="section-heading"><svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M8 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-3"/><path d="M16 3h5v5M21 3l-9 9M7 12h2M7 16h10"/></svg><span><span data-i18n="最近请求">最近请求</span></span></h2><div class="actions"><span id="refresh-note"><span data-i18n="正在连接">正在连接</span></span><button id="refresh" type="button" disabled><span data-i18n="刷新">刷新</span></button></div></div>
       <div class="login hidden" id="auth-notice">
-        <h2>请先登录 CPA 管理页</h2><p id="auth-message" role="status"></p>
-        <a class="primary" id="management-login" target="_top">返回 CPA 管理页</a>
+        <h2><span data-i18n="请先登录 CPA 管理页">请先登录 CPA 管理页</span></h2><p id="auth-message" role="status"></p>
+        <a class="primary" id="management-login" target="_top"><span data-i18n="返回 CPA 管理页">返回 CPA 管理页</span></a>
       </div>
-      <div class="table-wrap hidden" id="results" tabindex="0" role="region" aria-label="最近请求，可横向滚动"><table>
-        <thead><tr><th>请求时间（UTC+8）</th><th>模型</th><th>上游响应模型</th><th>原时区</th><th>替换后时区</th><th>处理方式</th><th>X-Codex-Turn-State</th></tr></thead>
+      <div class="table-wrap hidden" id="results" tabindex="0" role="region" aria-label="最近请求，可横向滚动" data-i18n-aria-label="最近请求，可横向滚动"><table>
+        <thead><tr><th><span data-i18n="请求时间（UTC+8）">请求时间（UTC+8）</span></th><th><span data-i18n="模型">模型</span></th><th><span data-i18n="上游响应模型">上游响应模型</span></th><th><span data-i18n="原时区">原时区</span></th><th><span data-i18n="替换后时区">替换后时区</span></th><th><span data-i18n="处理方式">处理方式</span></th><th>X-Codex-Turn-State</th></tr></thead>
         <tbody id="rows"></tbody>
       </table></div>
-      <div class="footer"><span>保留最近 200 条记录 · 本地快照自动恢复</span><span>自动复用 CPA 登录</span></div>
+      <div class="footer"><span><span data-i18n="保留最近 200 条记录 · 本地快照自动恢复">保留最近 200 条记录 · 本地快照自动恢复</span></span><span><span data-i18n="自动复用 CPA 登录">自动复用 CPA 登录</span></span></div>
     </section>
   </section>
   <section id="view-router" class="hidden">
-    <section class="cards cards-four" aria-label="探测统计">
-      <div class="card"><div class="label">探测状态</div><div class="number" id="probe-status">—</div></div>
-      <div class="card"><div class="label">优先探测模型</div><div class="number" id="probe-priority">—</div></div>
-      <div class="card"><div class="label">探测成功 / 总探测</div><div class="number" id="probe-counts">—</div></div>
-      <div class="card"><div class="label">最近探测活动</div><div class="number" id="probe-activity">—</div></div>
+    <section class="cards cards-four" aria-label="探测统计" data-i18n-aria-label="探测统计">
+      <div class="card"><div class="label"><span data-i18n="探测状态">探测状态</span></div><div class="number" id="probe-status">—</div></div>
+      <div class="card"><div class="label"><span data-i18n="优先探测模型">优先探测模型</span></div><div class="number" id="probe-priority">—</div></div>
+      <div class="card"><div class="label"><span data-i18n="探测成功 / 总探测">探测成功 / 总探测</span></div><div class="number" id="probe-counts">—</div></div>
+      <div class="card"><div class="label"><span data-i18n="最近探测活动">最近探测活动</span></div><div class="number" id="probe-activity">—</div></div>
     </section>
     <section class="panel">
-      <div class="toolbar"><h2>模型健康基线</h2><div class="actions"><button id="round-start" type="button" class="primary" title="启用自动预备并开始一轮探测：跳过健康值仍充裕或已备好接班值的模型；所有任务串行执行">开始探测</button><button id="round-stop" type="button" title="取消本轮排队和在途探测，在下一个尝试边界生效；保持自动预备原状态，临近到期时仍可再次探测">停止当前轮</button><button id="all-stop" type="button" title="取消所有探测并停止自动预备；重启后保持停止，直到再次点击开始探测；已获得的健康值保留">停止全部</button><span id="probe-times" class="probe-note">—</span></div></div>
+      <div class="toolbar"><h2 class="section-heading"><svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6l8-3Z"/><path d="m8 12 3 3 5-6"/></svg><span><span data-i18n="模型健康基线">模型健康基线</span></span></h2><div class="actions"><button id="round-start" type="button" class="primary" title="启用自动预备并开始一轮探测：跳过健康值仍充裕或已备好接班值的模型；所有任务串行执行" data-i18n-title="启用自动预备并开始一轮探测：跳过健康值仍充裕或已备好接班值的模型；所有任务串行执行"><span data-i18n="开始探测">开始探测</span></button><button id="round-stop" type="button" title="取消本轮排队和在途探测，在下一个尝试边界生效；保持自动预备原状态，临近到期时仍可再次探测" data-i18n-title="取消本轮排队和在途探测，在下一个尝试边界生效；保持自动预备原状态，临近到期时仍可再次探测"><span data-i18n="停止当前轮">停止当前轮</span></button><button id="all-stop" type="button" title="取消所有探测并停止自动预备；重启后保持停止，直到再次点击开始探测；已获得的健康值保留" data-i18n-title="取消所有探测并停止自动预备；重启后保持停止，直到再次点击开始探测；已获得的健康值保留"><span data-i18n="停止全部">停止全部</span></button><span id="probe-times" class="probe-note">—</span></div></div>
       <details class="probe-settings" id="probe-settings">
-        <summary><span class="settings-title">探测设置</span><span class="sub" id="settings-summary">提前预备 · 串行间隔</span></summary>
+        <summary><span class="settings-title"><svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M4 7h8m4 0h4M4 17h3m4 0h9"/><circle cx="14" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></svg><span><span data-i18n="探测设置">探测设置</span></span></span><span class="sub" id="settings-summary"><span data-i18n="提前预备 · 串行间隔">提前预备 · 串行间隔</span></span></summary>
         <div class="settings-body">
-      <div class="settings-line"><label for="prefetch-minutes">提前预备</label><input id="prefetch-minutes" type="number" min="0" step="1" inputmode="numeric" aria-label="提前预备分钟数"><span>分钟</span><button id="prefetch-save" type="button">确认保存</button><span id="prefetch-feedback" role="status"></span><span class="sub">有效期结束前提前准备下一份健康值。0 关闭自动预备；保存不会恢复已停止或暂停的探测。</span></div>
-      <div class="settings-line"><label for="probe-interval-seconds">串行间隔</label><input id="probe-interval-seconds" type="number" min="1" max="3600" step="1" inputmode="numeric" aria-label="探测串行间隔秒数"><span>秒</span><button id="probe-interval-save" type="button">确认保存</button><span id="probe-interval-feedback" role="status"></span><span class="sub">1–3600 秒，设置重试与跨模型探测的等待时间。下一次等待起生效，重启后保留。</span></div>
+      <div class="settings-line"><label for="prefetch-minutes"><span data-i18n="提前预备">提前预备</span></label><input id="prefetch-minutes" type="number" min="0" step="1" inputmode="numeric" aria-label="提前预备分钟数" data-i18n-aria-label="提前预备分钟数"><span><span data-i18n="分钟">分钟</span></span><button id="prefetch-save" type="button"><span data-i18n="确认保存">确认保存</span></button><span id="prefetch-feedback" role="status"></span><span class="sub"><span data-i18n="有效期结束前提前准备下一份健康值。0 关闭自动预备；保存不会恢复已停止或暂停的探测。">有效期结束前提前准备下一份健康值。0 关闭自动预备；保存不会恢复已停止或暂停的探测。</span></span></div>
+      <div class="settings-line"><label for="probe-interval-seconds"><span data-i18n="串行间隔">串行间隔</span></label><input id="probe-interval-seconds" type="number" min="1" max="3600" step="1" inputmode="numeric" aria-label="探测串行间隔秒数" data-i18n-aria-label="探测串行间隔秒数"><span><span data-i18n="秒">秒</span></span><button id="probe-interval-save" type="button"><span data-i18n="确认保存">确认保存</span></button><span id="probe-interval-feedback" role="status"></span><span class="sub"><span data-i18n="1–3600 秒，设置重试与跨模型探测的等待时间。下一次等待起生效，重启后保留。">1–3600 秒，设置重试与跨模型探测的等待时间。下一次等待起生效，重启后保留。</span></span></div>
         </div>
       </details>
-      <div class="table-wrap" id="probe-values-wrap" tabindex="0" role="region" aria-label="模型健康基线，可横向滚动"><table>
-        <thead><tr><th>模型</th><th>状态长度</th><th>来源</th><th>签发时间（UTC+8）</th><th>到期时间（UTC+8）</th><th>有效期 / 状态</th><th>操作</th></tr></thead>
+      <div class="table-wrap" id="probe-values-wrap" tabindex="0" role="region" aria-label="模型健康基线，可横向滚动" data-i18n-aria-label="模型健康基线，可横向滚动"><table>
+        <thead><tr><th><span data-i18n="模型">模型</span></th><th><span data-i18n="状态长度">状态长度</span></th><th><span data-i18n="来源">来源</span></th><th><span data-i18n="签发时间（UTC+8）">签发时间（UTC+8）</span></th><th><span data-i18n="到期时间（UTC+8）">到期时间（UTC+8）</span></th><th><span data-i18n="有效期 / 状态">有效期 / 状态</span></th><th><span data-i18n="操作">操作</span></th></tr></thead>
         <tbody id="probe-values"></tbody>
       </table></div>
     </section>
     <section class="panel">
-      <div class="toolbar"><h2>探测记录</h2><div class="actions"><span class="probe-note">最近 50 条 · 最新在前</span></div></div>
-      <div class="table-wrap" id="probe-history-wrap" tabindex="0" role="region" aria-label="探测记录，可横向滚动"><table>
-        <thead><tr><th>时间（UTC+8）</th><th>模型</th><th>出口</th><th>结果</th><th>耗时</th><th>说明</th></tr></thead>
+      <div class="toolbar"><h2 class="section-heading"><svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 11a9 9 0 1 1 2.7 7M3 4v7h7"/><path d="M12 7v5l3 2"/></svg><span><span data-i18n="探测记录">探测记录</span></span></h2><div class="actions"><span class="probe-note"><span data-i18n="最近 50 条 · 最新在前">最近 50 条 · 最新在前</span></span></div></div>
+      <div class="table-wrap" id="probe-history-wrap" tabindex="0" role="region" aria-label="探测记录，可横向滚动" data-i18n-aria-label="探测记录，可横向滚动"><table>
+        <thead><tr><th><span data-i18n="时间（UTC+8）">时间（UTC+8）</span></th><th><span data-i18n="模型">模型</span></th><th><span data-i18n="出口">出口</span></th><th><span data-i18n="结果">结果</span></th><th><span data-i18n="耗时">耗时</span></th><th><span data-i18n="说明">说明</span></th></tr></thead>
         <tbody id="probe-history"></tbody>
       </table></div>
     </section>
   </section>
   <section id="view-pool" class="hidden">
-    <section class="cards cards-four" aria-label="代理池统计">
-      <div class="card"><div class="label">出口总数</div><div class="number" id="pool-total">—</div></div>
-      <div class="card"><div class="label">可用出口</div><div class="number ok" id="pool-active">—</div></div>
-      <div class="card"><div class="label">冷却 / 轮休</div><div class="number warn" id="pool-cooling">—</div></div>
-      <div class="card"><div class="label">冷却策略</div><div class="number" id="pool-policy">—</div></div>
+    <section class="cards cards-four" aria-label="代理池统计" data-i18n-aria-label="代理池统计">
+      <div class="card"><div class="label"><span data-i18n="出口总数">出口总数</span></div><div class="number" id="pool-total">—</div></div>
+      <div class="card"><div class="label"><span data-i18n="可用出口">可用出口</span></div><div class="number ok" id="pool-active">—</div></div>
+      <div class="card"><div class="label"><span data-i18n="冷却 / 轮休">冷却 / 轮休</span></div><div class="number warn" id="pool-cooling">—</div></div>
+      <div class="card"><div class="label"><span data-i18n="冷却策略">冷却策略</span></div><div class="number" id="pool-policy">—</div></div>
     </section>
     <section class="panel">
-      <div class="toolbar"><h2>代理出口池</h2><div class="actions"><span class="probe-note" id="pool-note">普通出口成功后轮休，聚合池永不冷却</span><button id="pool-add" type="button">新增代理 / 聚合池</button><button id="pool-reset-all" type="button" title="全部重置：立即清除所有出口的冷却 / 轮休">全部重置</button></div></div>
+      <div class="toolbar"><h2 class="section-heading"><svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="8" y="3" width="8" height="5" rx="1"/><rect x="2" y="16" width="8" height="5" rx="1"/><rect x="14" y="16" width="8" height="5" rx="1"/><path d="M12 8v4M6 16v-4h12v4"/></svg><span><span data-i18n="代理出口池">代理出口池</span></span></h2><div class="actions"><span class="probe-note" id="pool-note"><span data-i18n="普通出口成功后轮休，聚合池永不冷却">普通出口成功后轮休，聚合池永不冷却</span></span><button id="pool-add" type="button"><span data-i18n="新增代理 / 聚合池">新增代理 / 聚合池</span></button><button id="pool-reset-all" type="button" title="全部重置：立即清除所有出口的冷却 / 轮休" data-i18n-title="全部重置：立即清除所有出口的冷却 / 轮休"><span data-i18n="全部重置">全部重置</span></button></div></div>
       <div id="exit-form" class="exit-form hidden">
-        <h2 id="exit-form-title" class="wide">新增代理</h2>
-        <label>名称<input id="exit-label" type="text" maxlength="64" placeholder="可选，例如备用出口"></label>
-        <label>类型<select id="exit-kind"><option value="plain">单代理</option><option value="pool">Pool 聚合代理池</option></select></label>
-        <label class="wide">代理地址<input id="exit-url" type="text" autocomplete="off" spellcheck="false" placeholder="例如 socks5h://proxy.example.com:1080"></label>
-        <label>用户名<input id="exit-username" type="text" autocomplete="off" placeholder="编辑时留空保留原值"></label>
-        <label>密码<input id="exit-password" type="password" autocomplete="new-password" placeholder="编辑时留空保留原值"></label>
-        <label class="check wide"><input id="exit-clear-auth" type="checkbox">清除已有认证（无认证代理）<span id="exit-auth-note" class="sub"></span></label>
-        <label>每轮基础次数<input id="exit-attempts" type="number" min="0" max="1000000" step="1" value="0"><span class="sub">0 继承全局：单代理 3 次，聚合池 100 次，以实际配置为准</span></label>
-        <label>探测次数倍率<input id="exit-multiplier" type="number" min="0.01" max="100" step="0.01" value="1"><span class="sub">每轮预算 = 基础次数 × 倍率，向上取整</span></label>
-        <div class="actions wide"><button id="exit-save" type="button">确认保存</button><button id="exit-cancel" type="button">取消</button><span id="exit-feedback" role="status"></span></div>
-        <p class="sub wide">保存后加入总代理池，后续尝试使用新参数；已发出的请求允许结束。不会自动启动探测，也不会解除原有禁用状态。面板配置优先于配置文件并在重启后保留。</p>
+        <h2 id="exit-form-title" class="wide"><span data-i18n="新增代理">新增代理</span></h2>
+        <label><span data-i18n="名称">名称</span><input id="exit-label" type="text" maxlength="64" placeholder="可选，例如备用出口" data-i18n-placeholder="可选，例如备用出口"></label>
+        <label><span data-i18n="类型">类型</span><select id="exit-kind"><option value="plain"><span data-i18n="单代理">单代理</span></option><option value="pool"><span data-i18n="Pool 聚合代理池">Pool 聚合代理池</span></option></select></label>
+        <label class="wide"><span data-i18n="代理地址">代理地址</span><input id="exit-url" type="text" autocomplete="off" spellcheck="false" placeholder="例如 socks5h://proxy.example.com:1080" data-i18n-placeholder="例如 socks5h://proxy.example.com:1080"></label>
+        <label><span data-i18n="用户名">用户名</span><input id="exit-username" type="text" autocomplete="off" placeholder="编辑时留空保留原值" data-i18n-placeholder="编辑时留空保留原值"></label>
+        <label><span data-i18n="密码">密码</span><input id="exit-password" type="password" autocomplete="new-password" placeholder="编辑时留空保留原值" data-i18n-placeholder="编辑时留空保留原值"></label>
+        <label class="check wide"><input id="exit-clear-auth" type="checkbox"><span data-i18n="清除已有认证（无认证代理）">清除已有认证（无认证代理）</span><span id="exit-auth-note" class="sub"></span></label>
+        <label><span data-i18n="每轮基础次数">每轮基础次数</span><input id="exit-attempts" type="number" min="0" max="1000000" step="1" value="0"><span class="sub"><span data-i18n="0 继承全局：单代理 3 次，聚合池 100 次，以实际配置为准">0 继承全局：单代理 3 次，聚合池 100 次，以实际配置为准</span></span></label>
+        <label><span data-i18n="探测次数倍率">探测次数倍率</span><input id="exit-multiplier" type="number" min="0.01" max="100" step="0.01" value="1"><span class="sub"><span data-i18n="每轮预算 = 基础次数 × 倍率，向上取整">每轮预算 = 基础次数 × 倍率，向上取整</span></span></label>
+        <div class="actions wide"><button id="exit-save" type="button"><span data-i18n="确认保存">确认保存</span></button><button id="exit-cancel" type="button"><span data-i18n="取消">取消</span></button><span id="exit-feedback" role="status"></span></div>
+        <p class="sub wide"><span data-i18n="保存后加入总代理池，后续尝试使用新参数；已发出的请求允许结束。不会自动启动探测，也不会解除原有禁用状态。面板配置优先于配置文件并在重启后保留。">保存后加入总代理池，后续尝试使用新参数；已发出的请求允许结束。不会自动启动探测，也不会解除原有禁用状态。面板配置优先于配置文件并在重启后保留。</span></p>
       </div>
-      <div id="pool-wrap"><div id="pool-rows" role="list" aria-label="代理出口"></div></div>
+      <div id="pool-wrap"><div id="pool-rows" role="list" aria-label="代理出口" data-i18n-aria-label="代理出口"></div></div>
     </section>
   </section>
   <p class="status" id="status" role="status"></p>
 </main>
 <script>
+  // UI message -> [English, Traditional Chinese, Russian]. Simplified Chinese is the key.
+  const messages={
+    "预备就绪（{time}）":["Candidate ready ({time})","預備就緒（{time}）","Замена готова ({time})"],
+    " · 本轮结束后继续自动预备":[" · Auto-prefetch continues after this round", " · 本輪結束後繼續自動預備", " · Автоподготовка продолжится после раунда"],
+    " · 现有基线继续使用":[" · Existing baseline remains in use", " · 現有基線繼續使用", " · Текущий эталон остаётся в работе"],
+    "0 继承全局：单代理 3 次，聚合池 100 次，以实际配置为准":["0 inherits the global setting: usually 3 for single proxies and 100 for pools.", "0 繼承全域：單一代理 3 次，聚合池 100 次，以實際設定為準", "0 — наследовать общую настройку: обычно 3 для прокси и 100 для пула."],
+    "1–3600 秒，设置重试与跨模型探测的等待时间。下一次等待起生效，重启后保留。":["1–3600 seconds between retries and models. Applies from the next wait and persists after restart.", "1–3600 秒，設定重試與跨模型探測的等待時間。下次等待起生效，重新啟動後保留。", "1–3600 секунд между повторами и моделями. Действует со следующего ожидания и сохраняется после перезапуска."],
+    "292 字节：长度符合预期":["292 bytes: expected length", "292 位元組：長度符合預期", "292 байта: ожидаемая длина"],
+    "CPA 登录已失效，请返回管理页重新登录。":["Your CPA session has expired. Sign in again on the management page.", "CPA 登入已失效，請返回管理頁重新登入。", "Сеанс CPA истёк. Войдите снова на странице управления."],
+    "O/对抗插件":["O/Adversarial Plugin", "O/對抗外掛", "O/Adversarial Plugin"],
+    "O/对抗插件 · CPA":["O/Adversarial Plugin · CPA", "O/對抗外掛 · CPA", "O/Adversarial Plugin · CPA"],
+    "Pool 聚合代理池":["Aggregated proxy pool", "聚合代理池", "Агрегированный пул прокси"],
+    "Turn-State 已覆写":["Turn-State overrides", "Turn-State 已覆寫", "Подмены Turn-State"],
+    "{base} × {multiplier} = {count} 次":["Attempts: {base} × {multiplier} = {count}", "{base} × {multiplier} = {count} 次", "Попытки: {base} × {multiplier} = {count}"],
+    "{count} 分钟":["{count} min", "{count} 分鐘", "{count} мин"],
+    "{count} 字节":["{count} bytes", "{count} 位元組", "{count} байт"],
+    "{error}（{rounds} 轮，最后于 {time}（UTC+8）；是否自动补充取决于预备开关、模型暂停与基线状态）":["{error} ({rounds} rounds, last at {time} UTC+8; replenishment depends on prefetch, pause and baseline status)", "{error}（{rounds} 輪，最後於 {time}（UTC+8）；是否自動補充取決於預備開關、模型暫停與基線狀態）", "{error} ({rounds} раундов, последний: {time} UTC+8; пополнение зависит от автоподготовки, паузы и состояния эталона)"],
+    "上次探测 {count} 次失败":["Failures in last probe: {count}", "上次探測 {count} 次失敗", "Ошибки последней проверки: {count}"],
+    "上游 {model}":["Upstream {model}", "上游 {model}", "Ответ модели {model}"],
+    "上游响应模型":["Upstream model", "上游回應模型", "Модель в ответе"],
+    "上游模型不一致":["Model mismatches", "上游模型不一致", "Несовпадения моделей"],
+    "不检测":["Not checked", "不檢測", "Без проверки"],
+    "业务流量确认异常时按此开关拦截；探测失败仅在没有可用健康基线时参与拦截，预备失败不影响仍有效的业务值":["Block confirmed business anomalies. Probe failures affect blocking only when no healthy baseline is available.", "業務流量確認異常時依此開關攔截；探測失敗僅在沒有可用健康基線時參與攔截，不影響仍有效的業務值", "Блокировать подтверждённые аномалии рабочего трафика. Ошибки проверки влияют на блокировку только при отсутствии исправного эталона."],
+    "业务流量观测到降智证据":["Degradation detected in business traffic", "業務流量觀測到降智證據", "В рабочем трафике обнаружено ухудшение"],
+    "业务确认 · 降智":["Business-confirmed degradation", "業務確認 · 降智", "Ухудшение подтверждено трафиком"],
+    "业务观测":["Business traffic", "業務觀測", "Рабочий трафик"],
+    "串行间隔":["Probe interval", "串行間隔", "Интервал проверок"],
+    "每出口尝试 {attempts} 次 · 池预算 {budget} 次":["{attempts} attempts per exit · Pool budget {budget}", "每出口嘗試 {attempts} 次 · 池預算 {budget} 次", "{attempts} попыток на выход · Бюджет пула {budget}"],
+    "代理出口":["Proxy exits", "代理出口", "Прокси-выходы"],
+    "代理出口池":["Proxy exits", "代理出口池", "Прокси-выходы"],
+    "代理地址":["Proxy URL", "代理位址", "Адрес прокси"],
+    "代理池":["Proxy pool", "代理池", "Пул прокси"],
+    "代理池统计":["Proxy pool statistics", "代理池統計", "Статистика пула прокси"],
+    "优先探测模型":["Priority model", "優先探測模型", "Приоритетная модель"],
+    "例如 socks5h://proxy.example.com:1080":["e.g. socks5h://proxy.example.com:1080", "例如 socks5h://proxy.example.com:1080", "Например, socks5h://proxy.example.com:1080"],
+    "保存不会启动探测；{budget}":["Saving does not start probes; {budget}", "儲存不會啟動探測；{budget}", "Сохранение не запускает проверки; {budget}"],
+    "保存后加入总代理池，后续尝试使用新参数；已发出的请求允许结束。不会自动启动探测，也不会解除原有禁用状态。面板配置优先于配置文件并在重启后保留。":["Changes apply to subsequent attempts. In-flight requests may finish. Saving does not start probes or enable disabled exits. Panel settings override file settings and persist after restart.", "儲存後加入總代理池，後續嘗試使用新參數；已送出的請求允許結束。不會自動啟動探測或解除禁用。面板設定優先於設定檔，重新啟動後保留。", "Изменения применяются к следующим попыткам. Текущие запросы могут завершиться. Сохранение не запускает проверки и не включает отключённые выходы. Настройки панели имеют приоритет над файлом и сохраняются после перезапуска."],
+    "保存失败，原出口未更改；请查看页面错误提示":["Save failed. The exit was not changed; see the page error message.", "儲存失敗，原出口未更改；請查看頁面錯誤提示", "Не удалось сохранить. Выход не изменён; см. сообщение об ошибке."],
+    "保存失败，原设置未更改":["Save failed. The previous setting is unchanged.", "儲存失敗，原設定未更改", "Не удалось сохранить. Прежняя настройка не изменена."],
+    "保留原值":["Original retained", "保留原值", "Исходное сохранено"],
+    "保留最近 200 条记录 · 本地快照自动恢复":["Latest 200 records · Restored from local snapshots", "保留最近 200 筆記錄 · 自動還原本機快照", "Последние 200 записей · Восстановление из локального снимка"],
+    "停止使用该出口，保留计数与历史":["Stop using this exit; keep its counters and history", "停止使用此出口，保留計數與歷史", "Отключить выход, сохранив счётчики и историю"],
+    "停止全部":["Stop all", "停止全部", "Остановить всё"],
+    "停止当前轮":["Stop this round", "停止目前輪次", "Остановить раунд"],
+    "允许该出口参与探测":["Allow this exit to participate in probes", "允許此出口參與探測", "Разрешить проверки через этот выход"],
+    "全部停止":["All stopped", "全部停止", "Всё остановлено"],
+    "全部重置":["Reset all", "全部重設", "Сбросить всё"],
+    "全部重置：立即清除所有出口的冷却 / 轮休":["Immediately clear cooldown and rest periods for all exits", "立即清除所有出口的冷卻與輪休", "Сразу сбросить охлаждение и отдых всех выходов"],
+    "关闭":["Off", "關閉", "Выкл."],
+    "冷却 / 轮休":["Cooling / resting", "冷卻 / 輪休", "Охлаждение / отдых"],
+    "冷却中":["Cooling", "冷卻中", "Охлаждение"],
+    "冷却策略":["Cooldown policy", "冷卻策略", "Правила охлаждения"],
+    "冷却至 {time}（UTC+8）":["Cooling until {time} (UTC+8)", "冷卻至 {time}（UTC+8）", "Охлаждение до {time} (UTC+8)"],
+    "出口":["Exit", "出口", "Выход"],
+    "出口已保存，后续尝试使用新设置":["Exit saved. Subsequent attempts use the new settings.", "出口已儲存，後續嘗試使用新設定", "Выход сохранён. Следующие попытки используют новые настройки."],
+    "出口总数":["Total exits", "出口總數", "Всего выходов"],
+    "分钟":["min", "分鐘", "мин"],
+    "到期时间（UTC+8）":["Expires (UTC+8)", "到期時間（UTC+8）", "Истекает (UTC+8)"],
+    "刷新":["Refresh", "重新整理", "Обновить"],
+    "剩余 {time}":["Remaining {time}", "剩餘 {time}", "Осталось {time}"],
+    "单代理":["Single proxy", "單一代理", "Один прокси"],
+    "历史种子":["Historical seed", "歷史種子", "Историческое значение"],
+    "原时区":["Original timezone", "原時區", "Исходный часовой пояс"],
+    "取消":["Cancel", "取消", "Отмена"],
+    "取消所有探测并停止自动预备；重启后保持停止，直到再次点击开始探测；已获得的健康值保留":["Cancel all probes and stop automatic prefetch. Remains stopped after restart until Start probes is selected. Healthy values are retained.", "取消所有探測並停止自動預備；重新啟動後保持停止，直到再次開始探測；保留已有健康值", "Отменить проверки и автоподготовку. После перезапуска всё останется остановленным до запуска вручную. Исправные значения сохраняются."],
+    "取消本轮排队和在途探测，在下一个尝试边界生效；保持自动预备原状态，临近到期时仍可再次探测":["Cancel queued and in-flight tasks at the next attempt boundary. Keep the current automatic prefetch mode.", "取消本輪排隊與進行中的探測，於下次嘗試邊界生效；維持自動預備原狀態", "Отменить очередь и текущие задачи на границе следующей попытки. Сохранить режим автоподготовки."],
+    "可用":["Available", "可用", "Доступен"],
+    "可用出口":["Available exits", "可用出口", "Доступные выходы"],
+    "可选，例如备用出口":["Optional, e.g. Backup exit", "選填，例如備用出口", "Необязательно, например «Резервный выход»"],
+    "名称":["Name", "名稱", "Название"],
+    "含 Turn-State":["With Turn-State", "含 Turn-State", "С Turn-State"],
+    "启用":["Enable", "啟用", "Включить"],
+    "启用自动预备":["Enable prefetch", "啟用自動預備", "Включить автоподготовку"],
+    "启用自动预备并开始一轮探测：跳过健康值仍充裕或已备好接班值的模型；所有任务串行执行":["Enable prefetch and start a round. Skip models with sufficient healthy lifetime or a ready candidate; all tasks run sequentially.", "啟用自動預備並開始一輪探測；跳過健康值仍充足或已備妥候選值的模型；所有任務循序執行", "Включить автоподготовку и начать раунд. Модели с достаточным сроком действия или готовой заменой пропускаются; задачи выполняются последовательно."],
+    "处理方式":["Action", "處理方式", "Действие"],
+    "处理统计":["Request statistics", "處理統計", "Статистика запросов"],
+    "失败":["Failed", "失敗", "Ошибка"],
+    "密码":["Password", "密碼", "Пароль"],
+    "尚无记录。发起一次请求后，这里会显示原时区、上游模型与 X-Codex-Turn-State。":["No records yet. Requests will appear here with their timezone, upstream model and X-Codex-Turn-State.", "尚無記錄。發出請求後，這裡會顯示原時區、上游模型與 X-Codex-Turn-State。", "Записей пока нет. Здесь появятся часовой пояс, модель в ответе и X-Codex-Turn-State запросов."],
+    "尚未保存":["Unsaved changes", "尚未儲存", "Есть несохранённые изменения"],
+    "已一致":["Already matched", "已一致", "Уже совпадает"],
+    "已保存：{count} 分钟；后续扫描生效":["Saved: {count} min; applies on subsequent scans", "已儲存：{count} 分鐘；後續掃描生效", "Сохранено: {count} мин; действует со следующих сканирований"],
+    "已保存：{count} 秒；下一次等待起生效":["Saved: {count} seconds; applies from the next wait", "已儲存：{count} 秒；下次等待起生效", "Сохранено: {count} с; действует со следующего ожидания"],
+    "已到期":["Expired", "已到期", "Срок истёк"],
+    "已处理请求":["Processed requests", "已處理請求", "Обработано запросов"],
+    "已复用 CPA 登录 · 插件 v{version}":["Using CPA session · Plugin v{version}", "已沿用 CPA 登入 · 外掛 v{version}", "Сеанс CPA · Плагин v{version}"],
+    "已提前备好预备状态值（来源：{source}）；当前值到期时，如预备值仍有效则自动接管":["Candidate ready (source: {source}); it takes over when the current value expires, if still valid.", "已備妥預備狀態值（來源：{source}）；目前值到期時，若預備值仍有效則自動接管", "Замена готова (источник: {source}); она вступит в силу по истечении текущего значения, если ещё действительна."],
+    "已暂停":["Paused", "已暫停", "На паузе"],
+    "已替换":["Replaced", "已替換", "Заменено"],
+    "已替换时区":["Timezones replaced", "已替換時區", "Заменено часовых поясов"],
+    "已禁用":["Disabled", "已禁用", "Отключён"],
+    "已禁用 {count} 个":["{count} disabled", "已禁用 {count} 個", "Отключено: {count}"],
+    "已补充时区":["Timezones inserted", "已補充時區", "Добавлено часовых поясов"],
+    "已补入":["Inserted", "已補入", "Добавлено"],
+    "已覆写":["Overridden", "已覆寫", "Подменено"],
+    "已覆写（配置值）":["Overridden (configured)", "已覆寫（設定值）", "Подменено (из настроек)"],
+    "已过期":["Expired", "已過期", "Срок истёк"],
+    "已配置认证；凭据不回显":["Authentication configured; credentials are not displayed", "已設定認證；不顯示憑證", "Аутентификация настроена; учётные данные не отображаются"],
+    "开始探测":["Start probes", "開始探測", "Запустить проверки"],
+    "异常请求拦截：—":["Anomaly blocking: —", "異常請求攔截：—", "Блокировка аномалий: —"],
+    "异常请求拦截：已关闭":["Anomaly blocking: off", "異常請求攔截：已關閉", "Блокировка аномалий: выкл."],
+    "异常请求拦截：已开启":["Anomaly blocking: on", "異常請求攔截：已開啟", "Блокировка аномалий: вкл."],
+    "当前模型均不检测":["None of the configured models are checked", "目前模型均不檢測", "Настроенные модели не проверяются"],
+    "当前生效：{count} 分钟（{source}）":["Effective: {count} min ({source})", "目前生效：{count} 分鐘（{source}）", "Действует: {count} мин ({source})"],
+    "当前生效：{count} 秒（{source}）":["Effective: {count} seconds ({source})", "目前生效：{count} 秒（{source}）", "Действует: {count} с ({source})"],
+    "恢复":["Resume", "繼續", "Возобновить"],
+    "恢复：解除该模型暂停并探测一次；不改变全局自动预备状态":["Resume this model and probe once; leave global prefetch unchanged", "解除此模型暫停並探測一次；不變更全域自動預備狀態", "Возобновить модель и проверить один раз, не меняя общую автоподготовку"],
+    "手动待命":["Manual standby", "手動待命", "Ручной режим ожидания"],
+    "排队中":["Queued", "排隊中", "В очереди"],
+    "探测一次":["Probe once", "探測一次", "Проверить раз"],
+    "探测一次：加入统一串行队列；新值先作为接班值，不改变全局自动预备状态；已暂停模型请先恢复":["Queue a single probe. The new value is a candidate; global prefetch is unchanged. Resume paused models first.", "加入循序佇列探測一次；新值先作為候選值，不變更全域自動預備；已暫停模型請先繼續", "Поставить одну проверку в очередь. Новое значение станет кандидатом; общая автоподготовка не меняется. Сначала снимите модель с паузы."],
+    "探测不可用":["Probes unavailable", "探測不可用", "Проверки недоступны"],
+    "探测中":["Probing", "探測中", "Проверка"],
+    "探测中…":["Probing…", "探測中…", "Проверка…"],
+    "探测串行间隔秒数":["Sequential probe interval in seconds", "探測串行間隔秒數", "Интервал последовательных проверок в секундах"],
+    "探测值":["Probe value", "探測值", "Значение проверки"],
+    "探测失败只记录预备轨状态；有有效健康基线时不因探测失败拦截业务，没有可用基线时才按降智证据与阈值判断":["Probe failures do not block traffic while a healthy baseline is available. Without one, degradation evidence and thresholds apply.", "有有效健康基線時，不因探測失敗攔截業務；沒有可用基線時，才依降智證據與門檻判斷", "Ошибки проверки не блокируют трафик при наличии исправного эталона. Без него применяются признаки ухудшения и пороги."],
+    "探测引擎状态":["Probe engine status", "探測引擎狀態", "Состояние механизма проверок"],
+    "探测成功 / 总探测":["Successful / total probes", "探測成功 / 總探測", "Успешные / все проверки"],
+    "探测控制台":["Probe console", "探測控制台", "Консоль проверок"],
+    "探测次数倍率":["Attempt multiplier", "探測次數倍率", "Множитель попыток"],
+    "探测状态":["Probe status", "探測狀態", "Состояние проверок"],
+    "探测统计":["Probe statistics", "探測統計", "Статистика проверок"],
+    "探测获取":["Probe", "探測取得", "Проверка"],
+    "探测记录":["Probe history", "探測記錄", "История проверок"],
+    "探测记录，可横向滚动":["Probe history, horizontally scrollable", "探測記錄，可水平捲動", "История проверок, прокрутка по горизонтали"],
+    "探测设置":["Probe settings", "探測設定", "Настройки проверок"],
+    "探测：—":["Probes: —", "探測：—", "Проверки: —"],
+    "探测：不检测":["Probes: not checked", "探測：不檢測", "Проверки: не требуются"],
+    "探测：全部停止":["Probes: all stopped", "探測：全部停止", "Проверки: всё остановлено"],
+    "探测：关闭":["Probes: off", "探測：關閉", "Проверки: выключены"],
+    "探测：待命":["Probes: standby", "探測：待命", "Проверки: ожидание"],
+    "探测：正在停止":["Probes: stopping", "探測：正在停止", "Проверки: остановка"],
+    "探测：运行中":["Probes: running", "探測：執行中", "Проверки: выполняются"],
+    "探测：配置错误":["Probes: configuration error", "探測：設定錯誤", "Проверки: ошибка настройки"],
+    "提前预备":["Prefetch window", "提前預備", "Окно автоподготовки"],
+    "提前预备 {minutes} 分钟 · 串行间隔 {seconds} 秒":["Prefetch {minutes} min · Interval {seconds} seconds", "提前預備 {minutes} 分鐘 · 串行間隔 {seconds} 秒", "Подготовка за {minutes} мин · Интервал {seconds} с"],
+    "提前预备 · 串行间隔":["Prefetch window · Probe interval", "提前預備 · 串行間隔", "Окно автоподготовки · Интервал"],
+    "提前预备分钟数":["Prefetch window in minutes", "提前預備分鐘數", "Окно автоподготовки в минутах"],
+    "插件功能":["Plugin navigation", "外掛功能", "Разделы плагина"],
+    "插件注入 {count} 字节（{source}）":["Plugin injected {count} bytes ({source})", "外掛注入 {count} 位元組（{source}）", "Плагин вставил {count} байт ({source})"],
+    "操作":["Actions", "操作", "Действия"],
+    "操作失败（HTTP {status}）":["Action failed (HTTP {status})", "操作失敗（HTTP {status}）", "Ошибка действия (HTTP {status})"],
+    "整轮上限 {count} 次优先于各出口预算":["the round limit of {count} takes precedence over exit budgets", "整輪上限 {count} 次優先於各出口預算", "общий лимит {count} имеет приоритет над бюджетами выходов"],
+    "整轮上限按各出口预算合计":["the round limit is the sum of exit budgets", "整輪上限依各出口預算加總", "лимит раунда равен сумме бюджетов выходов"],
+    "新增代理":["Add proxy", "新增代理", "Добавить прокси"],
+    "新增代理 / 聚合池":["Add proxy / pool", "新增代理 / 聚合池", "Добавить прокси / пул"],
+    "无":["None", "無", "Нет"],
+    "时间（UTC+8）":["Time (UTC+8)", "時間（UTC+8）", "Время (UTC+8)"],
+    "普通出口成功后轮休，聚合池永不冷却":["Single exits rest after success; rotating pools do not cool down", "一般出口成功後輪休，聚合池不進入冷卻", "Обычные выходы отдыхают после успеха; ротационные пулы не охлаждаются"],
+    "普通出口：成功轮休 {rest} · 连续 {count} 次失败冷却 {cooldown} · 轮换池永不冷却":["Single exits: rest {rest} after success · Cool down {cooldown} after {count} failures · Rotating pools never cool down", "一般出口：成功後輪休 {rest} · 連續 {count} 次失敗冷卻 {cooldown} · 輪換池不進入冷卻", "Обычные выходы: отдых {rest} после успеха · Охлаждение {cooldown} после {count} ошибок · Ротационные пулы не охлаждаются"],
+    "暂停":["Pause", "暫停", "Пауза"],
+    "暂停该模型：取消排队与在途探测，并停止该模型的自动预备；已有健康值保留":["Pause this model: cancel queued and in-flight tasks and stop its automatic prefetch; retain healthy values", "暫停此模型：取消排隊與進行中的探測，並停止其自動預備；保留健康值", "Поставить модель на паузу: отменить очередь и текущие задачи, остановить её автоподготовку; сохранить исправные значения"],
+    "暂无出口。添加代理后可在这里管理探测预算和启用状态。":["No exits yet. Add a proxy to manage its budget and availability here.", "尚無出口。新增代理後，可在這裡管理探測預算與啟用狀態。", "Выходов пока нет. Добавьте прокси, чтобы управлять его бюджетом и доступностью."],
+    "暂无基线值。可点击「开始探测」手动获取；业务流量观测到健康状态（模型一致 + 292 字节）时也会自动入库。":["No baseline yet. Start probes to obtain one. Healthy observations from business traffic (matching model and 292 bytes) are also stored.", "尚無基線值。可開始探測以取得；業務流量觀測到健康狀態（模型一致且 292 位元組）時也會自動儲存。", "Эталона пока нет. Запустите проверки. Исправные наблюдения из рабочего трафика (совпадение модели и 292 байта) также сохраняются."],
+    "暂无探测记录。":["No probe history yet.", "尚無探測記錄。", "История проверок пуста."],
+    "替换后时区":["Target timezone", "替換後時區", "Целевой часовой пояс"],
+    "最近 50 条 · 最新在前":["Latest 50 · Newest first", "最近 50 筆 · 最新在前", "Последние 50 · Новые сверху"],
+    "最近探测活动":["Latest activity", "最近探測活動", "Последнее действие"],
+    "最近请求":["Recent requests", "最近請求", "Последние запросы"],
+    "最近请求，可横向滚动":["Recent requests, horizontally scrollable", "最近請求，可水平捲動", "Последние запросы, прокрутка по горизонтали"],
+    "最近错误：{error}":["Last error: {error}", "最近錯誤：{error}", "Последняя ошибка: {error}"],
+    "有效期 / 状态":["Lifetime / status", "有效期 / 狀態", "Срок / состояние"],
+    "有效期结束前提前准备下一份健康值。0 关闭自动预备；保存不会恢复已停止或暂停的探测。":["Prepare the next healthy value before expiry. Set 0 to disable prefetch. Saving does not resume stopped or paused probes.", "在有效期結束前準備下一份健康值。0 關閉自動預備；儲存不會繼續已停止或暫停的探測。", "Подготовить следующее исправное значение до истечения срока. 0 отключает автоподготовку. Сохранение не возобновляет остановленные проверки."],
+    "未发往上游":["Not sent upstream", "未送往上游", "Не отправлен серверу"],
+    "未启用":["Not enabled", "未啟用", "Не включено"],
+    "未找到已保存的 CPA 登录状态。请在管理页登录并启用“记住密码”，本页会自动连接。":["No saved CPA session found. Sign in on the management page with Remember password enabled; this page will connect automatically.", "找不到已儲存的 CPA 登入狀態。請在管理頁登入並啟用「記住密碼」，此頁會自動連線。", "Сохранённый сеанс CPA не найден. Войдите на странице управления с опцией «Запомнить пароль»; подключение произойдёт автоматически."],
+    "未观测":["Not observed", "未觀測", "Не наблюдалось"],
+    "未配置认证":["No authentication configured", "未設定認證", "Аутентификация не настроена"],
+    "本次连接实际使用的出口源地址（socks5 服务端 BND.ADDR 回报）":["Actual source address reported by the SOCKS5 server in BND.ADDR", "SOCKS5 伺服器透過 BND.ADDR 回報的實際出口來源位址", "Фактический исходящий адрес из BND.ADDR сервера SOCKS5"],
+    "来源":["Source", "來源", "Источник"],
+    "来自响应":["Response", "來自回應", "Ответ"],
+    "来自流":["Stream", "來自串流", "Поток"],
+    "来自请求":["Request", "來自請求", "Запрос"],
+    "查看请求处理、管理健康基线与探测出口。":["Inspect requests, manage healthy baselines and probe exits.", "檢視請求處理、管理健康基線與探測出口。", "Просмотр запросов, управление исправными эталонами и выходами проверок."],
+    "模型":["Model", "模型", "Модель"],
+    "模型不一致":["Model mismatch", "模型不一致", "Несовпадение модели"],
+    "模型健康基线":["Healthy baselines", "模型健康基線", "Исправные эталоны"],
+    "模型健康基线，可横向滚动":["Healthy baselines, horizontally scrollable", "模型健康基線，可水平捲動", "Исправные эталоны, прокрутка по горизонтали"],
+    "正在停止":["Stopping", "正在停止", "Остановка"],
+    "正在停止…":["Stopping…", "正在停止…", "Остановка…"],
+    "正在连接":["Connecting", "正在連線", "Подключение"],
+    "每 5 秒刷新":["Refreshes every 5 seconds", "每 5 秒重新整理", "Обновление каждые 5 секунд"],
+    "每轮基础次数":["Base attempts per round", "每輪基本次數", "Базовые попытки за раунд"],
+    "每轮探测预算":["Attempts per round", "每輪探測預算", "Попытки за раунд"],
+    "每轮预算 = 基础次数 × 倍率，向上取整":["Round budget = base attempts × multiplier, rounded up", "每輪預算 = 基本次數 × 倍率，無條件進位", "Бюджет раунда = базовые попытки × множитель, округление вверх"],
+    "清除冷却、轮休与连续失败计数；不解除禁用":["Clear cooldown, rest and consecutive failures; keep disabled exits disabled", "清除冷卻、輪休與連續失敗計數；不解除禁用", "Сбросить охлаждение, отдых и серии ошибок; не включать отключённые выходы"],
+    "清除已有认证（无认证代理）":["Clear saved authentication (unauthenticated proxy)", "清除既有認證（無認證代理）", "Удалить сохранённую аутентификацию"],
+    "状态长度":["State length", "狀態長度", "Длина состояния"],
+    "用户名":["Username", "使用者名稱", "Имя пользователя"],
+    "直连":["Direct", "直連", "Напрямую"],
+    "确认保存":["Save", "確認儲存", "Сохранить"],
+    "禁用":["Disable", "禁用", "Отключить"],
+    "秒":["seconds", "秒", "с"],
+    "等待 CPA 登录":["Waiting for CPA sign-in", "等待 CPA 登入", "Ожидание входа в CPA"],
+    "等待重试":["Waiting to retry", "等待重試", "Ожидание повтора"],
+    "签发时间（UTC+8）":["Issued (UTC+8)", "簽發時間（UTC+8）", "Выдан (UTC+8)"],
+    "类型":["Type", "類型", "Тип"],
+    "结果":["Result", "結果", "Результат"],
+    "编辑":["Edit", "編輯", "Изменить"],
+    "编辑出口":["Edit exit", "編輯出口", "Изменить выход"],
+    "编辑时留空保留原值":["Leave blank to keep the current value", "編輯時留空以保留原值", "Оставьте пустым, чтобы сохранить значение"],
+    "耗时":["Duration", "耗時", "Длительность"],
+    "聚合池":["Pool", "聚合池", "Пул"],
+    "自动复用 CPA 登录":["Uses your CPA session", "自動沿用 CPA 登入", "Используется сеанс CPA"],
+    "自动预备不可用":["Automatic prefetch unavailable", "自動預備不可用", "Автоподготовка недоступна"],
+    "自动预备已停止":["Automatic prefetch stopped", "自動預備已停止", "Автоподготовка остановлена"],
+    "自动预备已停止 · 点击开始探测恢复":["Automatic prefetch stopped · Select Start probes to resume", "自動預備已停止 · 開始探測即可繼續", "Автоподготовка остановлена · Запустите проверки для возобновления"],
+    "自动预备已关闭（窗口为 0）":["Automatic prefetch off (window is 0)", "自動預備已關閉（視窗為 0）", "Автоподготовка выключена (окно 0)"],
+    "自动预备已开启":["Automatic prefetch on", "自動預備已開啟", "Автоподготовка включена"],
+    "自动预备待命":["Prefetch standby", "自動預備待命", "Ожидание автоподготовки"],
+    "获取成功":["Succeeded", "取得成功", "Успешно"],
+    "覆写：—":["Override: —", "覆寫：—", "Подмена: —"],
+    "覆写：关闭":["Override: off", "覆寫：關閉", "Подмена: выкл."],
+    "覆写：配置错误":["Override: configuration error", "覆寫：設定錯誤", "Подмена: ошибка настройки"],
+    "设置异常 · 展开查看":["Settings error · Expand for details", "設定異常 · 展開查看", "Ошибка настройки · Разверните"],
+    "该基线的真实有效期已结束（按 token 内嵌签发时间戳 + 有效期时长推算）；到期后不再对外提供本值，直到获得新的健康值":["This baseline has expired based on its token timestamp and configured lifetime. It will no longer be served until a new healthy value is obtained.", "此基線依 token 時間戳記與有效期計算已到期；取得新的健康值前，不再提供此值", "Срок эталона истёк по метке времени токена и настроенному сроку. Он больше не используется до получения нового исправного значения."],
+    "该模型不进行降智探测、state 长度判断、模型一致性拦截或健康基线回灌":["This model skips degradation probes, length checks, model mismatch blocking and baseline injection", "此模型不進行降智探測、長度判斷、模型一致性攔截或健康基線回灌", "Модель пропускает проверки ухудшения и длины, блокировку несовпадений и подстановку эталона"],
+    "该模型正在进行探测":["This model is being probed", "此模型正在進行探測", "Эта модель проверяется"],
+    "说明":["Details", "說明", "Подробности"],
+    "请先登录 CPA 管理页":["Sign in to CPA management first", "請先登入 CPA 管理頁", "Сначала войдите в управление CPA"],
+    "请填写地址、非负整数次数和 0.01–100 的倍率":["Enter a URL, a nonnegative integer attempt count and a multiplier from 0.01 to 100", "請填寫位址、非負整數次數與 0.01–100 的倍率", "Введите адрес, неотрицательное целое число попыток и множитель от 0.01 до 100"],
+    "请求侧 X-Codex-Turn-State 覆写状态":["Request X-Codex-Turn-State override status", "請求端 X-Codex-Turn-State 覆寫狀態", "Состояние подмены X-Codex-Turn-State в запросах"],
+    "请求因模型疑似风控降智被插件拦截（HTTP 403）":["Blocked by the plugin due to suspected model degradation (HTTP 403)", "因疑似模型降智而被外掛攔截（HTTP 403）", "Плагин заблокировал запрос из-за подозрения на ухудшение модели (HTTP 403)"],
+    "请求时间（UTC+8）":["Request time (UTC+8)", "請求時間（UTC+8）", "Время запроса (UTC+8)"],
+    "请求记录":["Requests", "請求記錄", "Запросы"],
+    "请输入 0–{max} 的整数分钟":["Enter whole minutes from 0 to {max}", "請輸入 0–{max} 的整數分鐘", "Введите целое число минут от 0 до {max}"],
+    "请输入 1–3600 的整数秒":["Enter whole seconds from 1 to 3600", "請輸入 1–3600 的整數秒", "Введите целое число секунд от 1 до 3600"],
+    "读取失败（HTTP {status}）。":["Read failed (HTTP {status}).", "讀取失敗（HTTP {status}）。", "Ошибка чтения (HTTP {status})."],
+    "轮休中":["Resting", "輪休中", "Отдых"],
+    "轮休至 {time}（UTC+8）":["Resting until {time} (UTC+8)", "輪休至 {time}（UTC+8）", "Отдых до {time} (UTC+8)"],
+    "运行中":["Running", "執行中", "Выполняется"],
+    "返回 CPA 管理页":["Return to CPA management", "返回 CPA 管理頁", "Вернуться в управление CPA"],
+    "连续失败 {count} 次":["Consecutive failures: {count}", "連續失敗 {count} 次", "Ошибок подряд: {count}"],
+    "配置值":["Configured value", "設定值", "Значение из настроек"],
+    "配置错误":["Configuration error", "設定錯誤", "Ошибка настройки"],
+    "配置默认":["configuration default", "設定預設值", "из файла настроек"],
+    "重置":["Reset", "重設", "Сбросить"],
+    "队列 {count} 项":["Queue: {count}", "佇列 {count} 項", "В очереди: {count}"],
+    "队列等待中":["Waiting in queue", "佇列等待中", "Ожидание в очереди"],
+    "降智已拦截":["Degradation blocked", "降智已攔截", "Ухудшение заблокировано"],
+    "非 292 字节：长度存疑（可能为风控状态）":["Not 292 bytes: unexpected length, possibly an upstream risk-control state", "非 292 位元組：長度存疑，可能為上游風控狀態", "Не 292 байта: неожиданная длина, возможное ограничение сервера"],
+    "面板设置":["panel setting", "面板設定", "из панели"],
+    "预备就绪":["Candidate ready", "預備就緒", "Замена готова"],
+    "预备探测 · 本轮 {count} 次失败":["Prefetch · {count} failures this round", "預備探測 · 本輪 {count} 次失敗", "Подготовка · {count} ошибок в раунде"],
+    "（单次业务观测即标记；健康观测或探测成功自动清除）":[" (one business observation marks it; healthy observations or successful probes clear it)", "（單次業務觀測即標記；健康觀測或探測成功自動清除）", " (достаточно одного наблюдения; исправный ответ или успешная проверка снимают отметку)"],
+    "（已截断）":[" (truncated)", "（已截斷）", " (обрезано)"],
+    "（已排入执行队列，等待轮次）":[" (queued, waiting for its turn)", "（已排入執行佇列，等待輪次）", " (в очереди, ожидает своей очереди)"],
+    "（当前探测轮结果未出）":[" (current round has not finished)", "（目前探測輪次尚未結束）", " (текущий раунд ещё не завершён)"],
+    "；上次整轮 {count} 次失败（悬停看详情）":["; {count} failures in the previous round (hover for details)", "；上次整輪 {count} 次失敗（停留查看詳情）", "; {count} ошибок в прошлом раунде (подробности при наведении)"]
+  };
+  let locale='zh-CN';
+  const languageIndex={en:0,'zh-TW':1,ru:2};
+  function t(message,params={}){
+    const translated=messages[message]?.[languageIndex[locale]]??message;
+    return String(translated??'').replace(/\{(\w+)\}/g,(match,key)=>Object.hasOwn(params,key)?String(params[key]):match);
+  }
+  const messageBindings=new Map();
+  function setMessage(id,format){messageBindings.set(id,format);el(id).textContent=format();}
+  function normalizedLocale(value){
+    const lang=String(value||'').toLowerCase();
+    if(/^zh-(tw|hk|mo|hant)/.test(lang))return 'zh-TW';
+    if(lang.startsWith('zh'))return 'zh-CN';
+    if(lang.startsWith('ru'))return 'ru';
+    if(lang.startsWith('en'))return 'en';
+    return '';
+  }
+  function preferredLocale(){
+    // CPA persists its language independently from the host's <html lang>.
+    try{
+      const saved=storedValue('cli-proxy-language');
+      const language=normalizedLocale(saved?.state?.language??saved?.language??saved);
+      if(language)return language;
+    }catch{}
+    try{
+      if(window.parent!==window){
+        const language=normalizedLocale(window.parent.document.documentElement.getAttribute('lang'));
+        if(language)return language;
+      }
+    }catch{}
+    const browserLanguage=navigator.languages?.[0]||navigator.language;
+    return normalizedLocale(browserLanguage)||(browserLanguage?'en':'zh-CN');
+  }
+  function setupLanguageSync(){
+    const bindings=Array.from(document.querySelectorAll('[data-i18n], [data-i18n-title], [data-i18n-placeholder], [data-i18n-aria-label]'));
+    function sync(){
+      const next=preferredLocale();
+      if(next===locale&&document.documentElement.getAttribute('lang')===locale)return;
+      locale=next;document.documentElement.setAttribute('lang',locale);updateFormatters();
+      for(const node of bindings){
+        const key=node.getAttribute('data-i18n');
+        if(key!==null)node.textContent=t(key);
+        for(const attr of ['title','placeholder','aria-label']){
+          const key=node.getAttribute('data-i18n-'+attr);
+          if(key!==null)node.setAttribute(attr,t(key));
+        }
+      }
+      // Rendering does not touch open details, proxy drafts or dirty settings.
+      if(lastData)render(lastData);
+      for(const [id,format] of messageBindings)el(id).textContent=format();
+    }
+    // Always translate once, even if the initial document language is Chinese.
+    document.documentElement.setAttribute('lang','');sync();
+    window.addEventListener('storage',event=>{if(event.key===null||event.key==='cli-proxy-language')sync();});
+    window.addEventListener('languagechange',sync);
+    window.addEventListener('pageshow',sync);
+    window.addEventListener('focus',sync);
+    try{
+      if(window.parent!==window){const observer=new MutationObserver(sync);observer.observe(window.parent.document.documentElement,{attributes:true,attributeFilter:['lang']});}
+    }catch{}
+  }
+
   // CPA applies white/dark on <html>; its unmarked light theme is warm paper.
   // Iframe documents do not inherit CSS variables, so copy only visual tokens.
   function setupThemeSync(){
@@ -164,13 +478,26 @@
   const el = id => document.getElementById(id);
   const prefix = location.pathname.split('/v0/resource/plugins/')[0];
   const endpoint = prefix + '/v0/management/timezone-override/requests';
-  const clock = new Intl.DateTimeFormat('zh-CN',{timeZone:'Asia/Shanghai',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false});
-  // Token-derived validity is displayed in UTC+8 (Asia/Shanghai) per request.
-  const shanghai = new Intl.DateTimeFormat('zh-CN',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false});
+  let clock,shanghai;
+  function updateFormatters(){
+    clock=new Intl.DateTimeFormat(locale,{timeZone:'Asia/Shanghai',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false});
+    // Display remains UTC+8; language changes never alter the request timezone.
+    shanghai=new Intl.DateTimeFormat(locale,{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false});
+  }
+  updateFormatters();
   function fmtBeijing(value){if(!value)return '—';const date=new Date(value);if(isNaN(date.getTime()))return String(value);return shanghai.format(date).replace(/\//g,'-');}
-  function fmtDuration(seconds){const total=Math.max(0,Math.floor(Number(seconds)||0));const days=Math.floor(total/86400),hours=Math.floor(total%86400/3600),minutes=Math.floor(total%3600/60),secs=total%60;const pad=n=>n<10?'0'+n:''+n;if(days>0)return days+'d '+pad(hours)+'h';if(hours>0)return hours+'h '+pad(minutes)+'m';return minutes+'m '+pad(secs)+'s';}
+  function fmtDuration(seconds){
+    const total=Math.max(0,Math.floor(Number(seconds)||0)),days=Math.floor(total/86400),hours=Math.floor(total%86400/3600),minutes=Math.floor(total%3600/60),secs=total%60;
+    const pad=n=>n<10?'0'+n:''+n;
+    const [d,h,m,sec]=locale==='ru'?['д','ч','м','с']:['d','h','m','s'];
+    if(days>0)return days+d+' '+pad(hours)+h;
+    if(hours>0)return hours+h+' '+pad(minutes)+m;
+    return minutes+m+' '+pad(secs)+sec;
+  }
   const labels = {inserted:'已补入',replaced:'已替换',unchanged:'已一致','applied-config':'已覆写（配置值）'};
   const sources = {request:'来自请求',response:'来自响应',stream:'来自流',probe:'探测获取',business:'业务观测',seed:'历史种子'};
+  function sourceLabel(source){return t(sources[source]||source||'');}
+  let lastData=null;
   let loading = false, rejectedKey = '';
   let prefetchDirty=false,prefetchSaving=false,prefetchLimit=54,editingExitID='',exitSaving=false,controlRevision=0;
   let intervalDirty=false,intervalSaving=false;
@@ -199,16 +526,17 @@
     }catch{return '';}
   }
   function requireLogin(message='未找到已保存的 CPA 登录状态。请在管理页登录并启用“记住密码”，本页会自动连接。'){
-    el('auth-message').textContent=message;el('auth-notice').classList.remove('hidden');el('results').classList.add('hidden');
+    lastData=null;
+    setMessage('auth-message',()=>t(message));el('auth-notice').classList.remove('hidden');el('results').classList.add('hidden');
     el('rows').replaceChildren();for(const key of ['total','replaced','inserted','mismatches','turnstates','overridden'])el(key).textContent='—';
     el('override-chip').classList.add('hidden');
-    el('probe-label').textContent='探测：—';el('probe-dot').style.background='var(--muted)';
-    el('refresh').disabled=true;el('refresh-note').textContent='等待 CPA 登录';el('status').textContent='';
+    el('probe-label').textContent=t('探测：—');el('probe-dot').style.background='var(--muted)';
+    el('refresh').disabled=true;setMessage('refresh-note',()=>t('等待 CPA 登录'));setMessage('status',()=>'');
   }
   function cell(row, text, cls=''){const td=document.createElement('td');td.className=cls;td.textContent=text;row.append(td);return td;}
   function proxyLabel(spec){
     if(!spec)return '—';
-    if(spec==='direct')return '直连';
+    if(spec==='direct')return t('直连');
     try{const u=new URL(spec);return u.protocol.replace(':','')+'://'+u.host;}catch(e){return String(spec).slice(0,32)+'…';}
   }
   async function probeControl(payload){
@@ -217,18 +545,18 @@
     try{
       const response=await fetch(prefix+'/v0/management/timezone-override/probe-control',{method:'POST',headers:{'Authorization':'Bearer '+key,'Content-Type':'application/json'},body:JSON.stringify(payload)});
       if(response.status===401||response.status===403){rejectedKey=key;requireLogin('CPA 登录已失效，请返回管理页重新登录。');return false;}
-      if(!response.ok){const data=await response.json().catch(()=>null);throw new Error((data&&data.error)||('操作失败（HTTP '+response.status+'）'));}
+      if(!response.ok){const data=await response.json().catch(()=>null);throw new Error((data&&data.error)||(t('操作失败（HTTP {status}）',{status:response.status})));}
       controlRevision++;
       return true;
-    }catch(error){el('status').textContent=error.message;return false;}
+    }catch(error){setMessage('status',()=>error.message);return false;}
   }
   function remainingText(expiresAt){
     if(!expiresAt)return '—';
     const ms=new Date(expiresAt).getTime()-Date.now();
     if(isNaN(ms))return '—';
-    if(ms<=0)return '已过期';
+    if(ms<=0)return t('已过期');
     const total=Math.floor(ms/1000);const m=Math.floor(total/60);const s=total%60;
-    return m+'m '+(s<10?'0':'')+s+'s';
+    return locale==='ru'?m+'м '+(s<10?'0':'')+s+'с':m+'m '+(s<10?'0':'')+s+'s';
   }
   function ttlRatio(generatedAt,expiresAt){
     if(!generatedAt||!expiresAt)return 0;
@@ -238,23 +566,24 @@
     return Math.max(0,Math.min(1,ratio));
   }
   function render(data){
-    el('total').textContent=Number(data.total).toLocaleString('zh-CN');
-    el('replaced').textContent=Number(data.replaced).toLocaleString('zh-CN');
-    el('inserted').textContent=Number(data.inserted).toLocaleString('zh-CN');
-    el('mismatches').textContent=Number(data.mismatches||0).toLocaleString('zh-CN');
-    el('overridden').textContent=Number(data.overridden||0).toLocaleString('zh-CN');
-    el('turnstates').textContent=Number(data.records.filter(r=>r.turn_state_length>0).length).toLocaleString('zh-CN');
+    lastData=data;
+    el('total').textContent=Number(data.total).toLocaleString(locale);
+    el('replaced').textContent=Number(data.replaced).toLocaleString(locale);
+    el('inserted').textContent=Number(data.inserted).toLocaleString(locale);
+    el('mismatches').textContent=Number(data.mismatches||0).toLocaleString(locale);
+    el('overridden').textContent=Number(data.overridden||0).toLocaleString(locale);
+    el('turnstates').textContent=Number(data.records.filter(r=>r.turn_state_length>0).length).toLocaleString(locale);
     const override=data.turn_state_override||{};
     const overrideChip=el('override-chip');
     if(override.error){
       // Configuration errors must stay visible; the steady rewrite state stays hidden.
       overrideChip.classList.remove('hidden');
-      el('override-label').textContent='覆写：配置错误';el('override-dot').style.background='var(--danger)';
+      el('override-label').textContent=t('覆写：配置错误');el('override-dot').style.background='var(--danger)';
     }else if(override.enabled){
       overrideChip.classList.add('hidden');
     }else{
       overrideChip.classList.remove('hidden');
-      el('override-label').textContent='覆写：关闭';el('override-dot').style.background='var(--muted)';
+      el('override-label').textContent=t('覆写：关闭');el('override-dot').style.background='var(--muted)';
     }
     const fragment=document.createDocumentFragment();
     for(const record of data.records){
@@ -264,59 +593,59 @@
       const upstream=cell(tr,'');
       if(record.detection_exempt){
         if(record.upstream_model){const code=document.createElement('code');code.textContent=record.upstream_model;upstream.append(code);}
-        const badge=document.createElement('span');badge.className='badge state-off';badge.textContent='不检测';upstream.append(badge);
+        const badge=document.createElement('span');badge.className='badge state-off';badge.textContent=t('不检测');upstream.append(badge);
       }else if(record.model_checked&&record.upstream_model){
         const code=document.createElement('code');code.textContent=record.upstream_model;upstream.append(code);
-        if(record.model_mismatch){const badge=document.createElement('span');badge.className='badge mismatch';badge.textContent='模型不一致';upstream.append(badge);}
+        if(record.model_mismatch){const badge=document.createElement('span');badge.className='badge mismatch';badge.textContent=t('模型不一致');upstream.append(badge);}
       }else{upstream.textContent='—';upstream.classList.add('none');}
       const original=record.original||[];
-      cell(tr,original.length?original.join('、'):'无',original.length?'':'none');
+      cell(tr,original.length?original.join('、'):t('无'),original.length?'':'none');
       const target=cell(tr,'');const code=document.createElement('code');code.textContent=record.target;target.append(code);
       const action=cell(tr,'');
-      if(record.degraded_rejected){const badge=document.createElement('span');badge.className='badge probe-fail';badge.textContent='降智已拦截';badge.title='请求因模型疑似风控降智被插件拦截（HTTP 403）';action.append(badge);}
-      else{const badge=document.createElement('span');badge.className='badge '+record.action;badge.textContent=labels[record.action]||record.action;action.append(badge);}
+      if(record.degraded_rejected){const badge=document.createElement('span');badge.className='badge probe-fail';badge.textContent=t('降智已拦截');badge.title=t('请求因模型疑似风控降智被插件拦截（HTTP 403）');action.append(badge);}
+      else{const badge=document.createElement('span');badge.className='badge '+record.action;badge.textContent=t(labels[record.action]||record.action);action.append(badge);}
       const turnstate=cell(tr,'','turnstate');
-      if(record.degraded_rejected){turnstate.textContent='未发往上游';turnstate.classList.add('none');}
+      if(record.degraded_rejected){turnstate.textContent=t('未发往上游');turnstate.classList.add('none');}
       else if(record.turn_state_length>0){
-        turnstate.textContent=record.turn_state_length.toLocaleString('zh-CN')+' 字节';
-        const src=document.createElement('span');src.className='src';src.textContent=sources[record.turn_state_source]||record.turn_state_source||'';turnstate.append(src);
-        if(record.turn_state_override==='applied'){const b=document.createElement('span');b.className='badge override';b.textContent='已覆写';turnstate.append(b);}
-        else if(record.turn_state_override==='applied-config'){const b=document.createElement('span');b.className='badge override';b.textContent='已覆写（配置值）';turnstate.append(b);}
-        else if(record.turn_state_override==='skipped-existing'){const b=document.createElement('span');b.className='badge skipped';b.textContent='保留原值';turnstate.append(b);}
-        const detail=(record.turn_state_value||record.turn_state_preview||'')+(record.turn_state_truncated?'（已截断）':'');
-        turnstate.title=detail+(record.turn_state_source?('　（'+ (sources[record.turn_state_source]||record.turn_state_source) +'）'):'');
+        turnstate.textContent=t('{count} 字节',{count:record.turn_state_length.toLocaleString(locale)});
+        const src=document.createElement('span');src.className='src';src.textContent=sourceLabel(record.turn_state_source);turnstate.append(src);
+        if(record.turn_state_override==='applied'){const b=document.createElement('span');b.className='badge override';b.textContent=t('已覆写');turnstate.append(b);}
+        else if(record.turn_state_override==='applied-config'){const b=document.createElement('span');b.className='badge override';b.textContent=t('已覆写（配置值）');turnstate.append(b);}
+        else if(record.turn_state_override==='skipped-existing'){const b=document.createElement('span');b.className='badge skipped';b.textContent=t('保留原值');turnstate.append(b);}
+        const detail=(record.turn_state_value||record.turn_state_preview||'')+(record.turn_state_truncated?t('（已截断）'):'');
+        turnstate.title=detail+(record.turn_state_source?('　（'+ (sourceLabel(record.turn_state_source)) +'）'):'');
       }else if(record.turn_state_override==='applied'||record.turn_state_override==='applied-config'){
         const injected=Number(record.turn_state_injected_length||0);
-        if(injected>0){turnstate.textContent=injected.toLocaleString('zh-CN')+' 字节';}
+        if(injected>0){turnstate.textContent=t('{count} 字节',{count:injected.toLocaleString(locale)});}
         const b=document.createElement('span');b.className='badge override';
-        b.textContent=record.turn_state_override==='applied-config'?'已覆写（配置值）':'已覆写';
+        b.textContent=record.turn_state_override==='applied-config'?t('已覆写（配置值）'):t('已覆写');
         turnstate.append(b);
-        if(injected>0){turnstate.title='插件注入 '+injected+' 字节（'+(record.turn_state_override==='applied-config'?'配置值':'探测值')+'）';}
-      }else{turnstate.textContent='未观测';turnstate.classList.add('none');}
+        if(injected>0){turnstate.title=t('插件注入 {count} 字节（{source}）',{count:injected,source:(record.turn_state_override==='applied-config'?t('配置值'):t('探测值'))});}
+      }else{turnstate.textContent=t('未观测');turnstate.classList.add('none');}
       if(record.trace_id) tr.title='Trace ID: '+record.trace_id;
       fragment.append(tr);
     }
-    if(!data.records.length){const tr=document.createElement('tr');const td=cell(tr,'尚无记录。发起一次请求后，这里会显示原时区、上游模型与 X-Codex-Turn-State。','empty');td.colSpan=7;fragment.append(tr);}
+    if(!data.records.length){const tr=document.createElement('tr');const td=cell(tr,t('尚无记录。发起一次请求后，这里会显示原时区、上游模型与 X-Codex-Turn-State。'),'empty');td.colSpan=7;fragment.append(tr);}
     el('rows').replaceChildren(fragment);el('auth-notice').classList.add('hidden');el('results').classList.remove('hidden');
     renderProbe(override.probe);
     renderPool(override.probe);
-    el('refresh-note').textContent='每 5 秒刷新';el('status').textContent='已复用 CPA 登录 · 插件 v'+data.version;
+    setMessage('refresh-note',()=>t('每 5 秒刷新'));setMessage('status',()=>t('已复用 CPA 登录 · 插件 v{version}',{version:data.version}));
   }
   function renderPool(probe){
     probe=probe||{};
     const items=probe.proxies_state||[];
     const total=Number(probe.pool_total||items.length||0);
     const active=Number(probe.pool_active!==undefined?probe.pool_active:items.filter(i=>i.active!==false).length);
-    el('pool-total').textContent=total.toLocaleString('zh-CN');
-    el('pool-active').textContent=active.toLocaleString('zh-CN');
-    el('pool-cooling').textContent=items.filter(item=>item.active===false&&!item.disabled).length.toLocaleString('zh-CN');
+    el('pool-total').textContent=total.toLocaleString(locale);
+    el('pool-active').textContent=active.toLocaleString(locale);
+    el('pool-cooling').textContent=items.filter(item=>item.active===false&&!item.disabled).length.toLocaleString(locale);
     const threshold=probe.exit_fail_threshold||3;
     const poolThreshold=probe.exit_pool_fail_threshold||10;
     const minutes=probe.exit_cooldown_minutes!==undefined?probe.exit_cooldown_minutes:180;
     const successMin=probe.exit_success_cooldown_minutes!==undefined?probe.exit_success_cooldown_minutes:30;
     const minActive=probe.exit_min_active||1;
     const disabledCount=Number(probe.pool_disabled||0);
-    el('pool-policy').textContent='普通出口：成功轮休 '+(successMin>0?successMin+' 分钟':'关闭')+' · 连续 '+threshold+' 次失败冷却 '+(minutes>0?minutes+' 分钟':'关闭')+' · 轮换池永不冷却'+(disabledCount>0?(' · 已禁用 '+disabledCount+' 个'):'');
+    el('pool-policy').textContent=t('普通出口：成功轮休 {rest} · 连续 {count} 次失败冷却 {cooldown} · 轮换池永不冷却',{rest:successMin>0?t('{count} 分钟',{count:successMin}):t('关闭'),count:threshold,cooldown:minutes>0?t('{count} 分钟',{count:minutes}):t('关闭')})+(disabledCount>0?' · '+t('已禁用 {count} 个',{count:disabledCount}):'');
     const frag=document.createDocumentFragment();
     for(const item of items){
       const row=document.createElement('article');row.className='exit-item';row.setAttribute('role','listitem');
@@ -330,39 +659,39 @@
       const badge=document.createElement('span');
       const cooling=item.active===false,resting=item.rest===true,disabled=item.disabled===true;
       badge.className='badge '+(disabled?'state-off':cooling?(resting?'state-rest':'state-warn'):'state-ok');
-      badge.textContent=disabled?'已禁用':cooling?(resting?'轮休中':'冷却中'):'可用';
-      const kind=document.createElement('span');kind.className='exit-kind';kind.textContent=spec==='direct'?'直连':item.pool?'聚合池':'单代理';
+      badge.textContent=disabled?t('已禁用'):cooling?(resting?t('轮休中'):t('冷却中')):t('可用');
+      const kind=document.createElement('span');kind.className='exit-kind';kind.textContent=spec==='direct'?t('直连'):item.pool?t('聚合池'):t('单代理');
       state.append(badge,kind);
       const budget=document.createElement('div');budget.className='exit-budget';
-      const budgetLabel=document.createElement('div');budgetLabel.className='label';budgetLabel.textContent='每轮探测预算';
+      const budgetLabel=document.createElement('div');budgetLabel.className='label';budgetLabel.textContent=t('每轮探测预算');
       const base=item.attempts||(item.pool?(probe.pool_attempts??100):(probe.attempts_per_proxy??3));
       const multiplier=item.multiplier??1;
-      const budgetValue=document.createElement('div');budgetValue.className='budget';budgetValue.textContent=base+' × '+multiplier+' = '+(item.budget??Math.ceil(base*multiplier))+' 次';
+      const budgetValue=document.createElement('div');budgetValue.className='budget';budgetValue.textContent=t('{base} × {multiplier} = {count} 次',{base,multiplier,count:item.budget??Math.ceil(base*multiplier)});
       budget.append(budgetLabel,budgetValue);
       const ops=document.createElement('div');ops.className='exit-ops';
-      const edit=document.createElement('button');edit.type='button';edit.className='edit';edit.textContent='编辑';edit.disabled=!item.id||exitSaving;
+      const edit=document.createElement('button');edit.type='button';edit.className='edit';edit.textContent=t('编辑');edit.disabled=!item.id||exitSaving;
       edit.addEventListener('click',()=>openExitEditor(item));
       const identity=item.id?{id:item.id}:{proxy:spec};
-      const toggle=document.createElement('button');toggle.type='button';toggle.textContent=disabled?'启用':'禁用';
-      toggle.title=disabled?'允许该出口参与探测':'停止使用该出口，保留计数与历史';
+      const toggle=document.createElement('button');toggle.type='button';toggle.textContent=disabled?t('启用'):t('禁用');
+      toggle.title=disabled?t('允许该出口参与探测'):t('停止使用该出口，保留计数与历史');
       toggle.addEventListener('click',async()=>{toggle.disabled=true;if(await probeControl({action:'exit-enabled',...identity,enabled:disabled})){setTimeout(refresh,600);}else toggle.disabled=false;});
-      const reset=document.createElement('button');reset.type='button';reset.textContent='重置';reset.title='清除冷却、轮休与连续失败计数；不解除禁用';
+      const reset=document.createElement('button');reset.type='button';reset.textContent=t('重置');reset.title=t('清除冷却、轮休与连续失败计数；不解除禁用');
       reset.addEventListener('click',async()=>{reset.disabled=true;if(await probeControl({action:'reset-exit',...identity})){setTimeout(refresh,600);}else reset.disabled=false;});
       ops.append(edit,toggle,reset);
       main.append(identityBox,state,budget,ops);
       const meta=document.createElement('div');meta.className='exit-meta';
-      const failures=document.createElement('span');failures.textContent='连续失败 '+(item.failures||0)+' 次';meta.append(failures);
+      const failures=document.createElement('span');failures.textContent=t('连续失败 {count} 次',{count:item.failures||0});meta.append(failures);
       if(item.until){
-        const until=document.createElement('span');until.textContent=(resting?'轮休至 ':'冷却至 ')+fmtBeijing(item.until)+'（UTC+8）';meta.append(until);
+        const until=document.createElement('span');until.textContent=t(resting?'轮休至 {time}（UTC+8）':'冷却至 {time}（UTC+8）',{time:fmtBeijing(item.until)});meta.append(until);
         const remaining=Number(item.remaining_seconds);
-        if(cooling&&Number.isFinite(remaining)){const left=document.createElement('span');left.textContent='剩余 '+fmtDuration(remaining);meta.append(left);}
+        if(cooling&&Number.isFinite(remaining)){const left=document.createElement('span');left.textContent=t('剩余 {time}',{time:fmtDuration(remaining)});meta.append(left);}
       }
-      if(item.last_error){const error=document.createElement('div');error.className='exit-error';error.textContent='最近错误：'+item.last_error;meta.append(error);}
+      if(item.last_error){const error=document.createElement('div');error.className='exit-error';error.textContent=t('最近错误：{error}',{error:item.last_error});meta.append(error);}
       row.append(main,meta);frag.append(row);
     }
-    if(!items.length){const empty=document.createElement('div');empty.className='empty';empty.textContent='暂无出口。添加代理后可在这里管理探测预算和启用状态。';frag.append(empty);}
+    if(!items.length){const empty=document.createElement('div');empty.className='empty';empty.textContent=t('暂无出口。添加代理后可在这里管理探测预算和启用状态。');frag.append(empty);}
     el('pool-rows').replaceChildren(frag);
-    el('pool-note').textContent=probe.settings_error||('保存不会启动探测；'+(probe.max_attempts_explicit?'整轮上限 '+probe.max_attempts_per_round+' 次优先于各出口预算':'整轮上限按各出口预算合计'));
+    el('pool-note').textContent=probe.settings_error||(t('保存不会启动探测；{budget}',{budget:probe.max_attempts_explicit?t('整轮上限 {count} 次优先于各出口预算',{count:probe.max_attempts_per_round}):t('整轮上限按各出口预算合计')}));
     el('pool-add').disabled=exitSaving||!!probe.settings_error;
   }
   function renderProbe(probe){
@@ -376,52 +705,52 @@
     const prefetchMinutes=probe.prefetch_minutes??3;
     prefetchLimit=Math.max(0,Number(probe.ttl_minutes??55)-1);
     el('prefetch-minutes').max=String(prefetchLimit);
-    if(!prefetchDirty&&!prefetchSaving){el('prefetch-minutes').value=String(prefetchMinutes);el('prefetch-feedback').textContent=probe.settings_error||('当前生效：'+prefetchMinutes+' 分钟'+(probe.prefetch_override?'（面板设置）':'（配置默认）'));}
+    if(!prefetchDirty&&!prefetchSaving){el('prefetch-minutes').value=String(prefetchMinutes);setMessage('prefetch-feedback',()=>probe.settings_error||(t('当前生效：{count} 分钟（{source}）',{count:prefetchMinutes,source:(probe.prefetch_override?t('面板设置'):t('配置默认'))})));}
     el('prefetch-save').disabled=prefetchSaving||!!probe.settings_error;
     const intervalSeconds=probe.interval_seconds??5;
-    if(!intervalDirty&&!intervalSaving){el('probe-interval-seconds').value=String(intervalSeconds);el('probe-interval-feedback').textContent=probe.settings_error||('当前生效：'+intervalSeconds+' 秒'+(probe.interval_override?'（面板设置）':'（配置默认）'));}
+    if(!intervalDirty&&!intervalSaving){el('probe-interval-seconds').value=String(intervalSeconds);setMessage('probe-interval-feedback',()=>probe.settings_error||(t('当前生效：{count} 秒（{source}）',{count:intervalSeconds,source:(probe.interval_override?t('面板设置'):t('配置默认'))})));}
     el('probe-interval-save').disabled=intervalSaving||!!probe.settings_error;
-    el('settings-summary').textContent=probe.settings_error?'设置异常 · 展开查看':('提前预备 '+prefetchMinutes+' 分钟 · 串行间隔 '+intervalSeconds+' 秒');
+    el('settings-summary').textContent=probe.settings_error?t('设置异常 · 展开查看'):(t('提前预备 {minutes} 分钟 · 串行间隔 {seconds} 秒',{minutes:prefetchMinutes,seconds:intervalSeconds}));
     el('settings-summary').classList.toggle('settings-error',!!probe.settings_error);
     const autoPrefetch=probe.prefetch_enabled??(ready&&!probe.halted&&prefetchMinutes>0);
     if(probe.stopping){
-      el('probe-label').textContent='探测：正在停止';
+      el('probe-label').textContent=t('探测：正在停止');
       el('probe-dot').style.background='var(--warn)';
-      el('probe-status').textContent='正在停止';
+      el('probe-status').textContent=t('正在停止');
       el('probe-status').className='number warn';
     }else if(probe.running){
-      el('probe-label').textContent='探测：运行中';
+      el('probe-label').textContent=t('探测：运行中');
       el('probe-dot').style.background='var(--ok)';
-      el('probe-status').textContent='运行中';
+      el('probe-status').textContent=t('运行中');
       el('probe-status').className='number ok';
     }else if(!ready){
-      el('probe-label').textContent=probe.error?'探测：配置错误':noDetection?'探测：不检测':'探测：关闭';
+      el('probe-label').textContent=probe.error?t('探测：配置错误'):noDetection?t('探测：不检测'):t('探测：关闭');
       el('probe-dot').style.background=probe.error?'var(--danger)':'var(--muted)';
-      el('probe-status').textContent=probe.error?'配置错误':noDetection?'不检测':'未启用';
+      el('probe-status').textContent=probe.error?t('配置错误'):noDetection?t('不检测'):t('未启用');
       el('probe-status').className='number';
     }else if(probe.halted){
-      el('probe-label').textContent='探测：全部停止';
+      el('probe-label').textContent=t('探测：全部停止');
       el('probe-dot').style.background='var(--warn)';
-      el('probe-status').textContent='全部停止';
+      el('probe-status').textContent=t('全部停止');
       el('probe-status').className='number warn';
     }else{
-      el('probe-label').textContent='探测：待命';
+      el('probe-label').textContent=t('探测：待命');
       el('probe-dot').style.background='var(--muted)';
-      el('probe-status').textContent=autoPrefetch?'自动预备待命':'手动待命';
+      el('probe-status').textContent=autoPrefetch?t('自动预备待命'):t('手动待命');
       el('probe-status').className='number';
     }
     const roundStart=el('round-start');
     roundStart.disabled=!ready||probe.stopping||(probe.running&&!probe.halted);
-    roundStart.textContent=probe.running&&probe.halted?'启用自动预备':probe.running?'探测中…':'开始探测';
+    roundStart.textContent=probe.running&&probe.halted?t('启用自动预备'):probe.running?t('探测中…'):t('开始探测');
     el('round-stop').disabled=!probe.running||probe.stopping;
     el('all-stop').disabled=probe.halted&&!probe.running;
     el('probe-priority').textContent=detectionModels.length?detectionModels[0]:'—';
-    el('probe-counts').textContent=Number(probe.probes_ok||0).toLocaleString('zh-CN')+' / '+Number(probe.probes_total||0).toLocaleString('zh-CN');
+    el('probe-counts').textContent=Number(probe.probes_ok||0).toLocaleString(locale)+' / '+Number(probe.probes_total||0).toLocaleString(locale);
     el('probe-activity').textContent=probe.last_activity||probe.last_error||'—';
-    const queueNote=probe.queue_length?(' · 队列 '+probe.queue_length+' 项'):'';
-    const prefetchNote=noDetection?'当前模型均不检测':autoPrefetch?'自动预备已开启 · 到期前 '+prefetchMinutes+'m 排队补充':!ready?'自动预备不可用':probe.halted?'自动预备已停止 · 点击开始探测恢复':'自动预备已关闭（窗口为 0）';
-    el('probe-times').textContent=prefetchNote+' · 串行间隔 '+(probe.interval_seconds??5)+'s · 每出口尝试 '+(probe.attempts_per_proxy??3)+' 次 · 池预算 '+(probe.pool_attempts??100)+' 次'+queueNote;
-    if(probe.stopping&&autoPrefetch)el('probe-times').textContent+=' · 本轮结束后继续自动预备';
+    const queueNote=probe.queue_length?(' · '+t('队列 {count} 项',{count:probe.queue_length})):'';
+    const prefetchNote=noDetection?t('当前模型均不检测'):autoPrefetch?t('自动预备已开启'):!ready?t('自动预备不可用'):probe.halted?t('自动预备已停止 · 点击开始探测恢复'):t('自动预备已关闭（窗口为 0）');
+    el('probe-times').textContent=prefetchNote+' · '+t('每出口尝试 {attempts} 次 · 池预算 {budget} 次',{attempts:probe.attempts_per_proxy??3,budget:probe.pool_attempts??100})+queueNote;
+    if(probe.stopping&&autoPrefetch)el('probe-times').textContent+=t(' · 本轮结束后继续自动预备');
     const failureByModel={};
     for(const failure of (probe.failures||[])){failureByModel[failure.model]=failure;}
     const pausedSet=new Set(probe.paused||[]);
@@ -431,8 +760,8 @@
     for(const mark of (probe.business||[])){businessByModel[mark.model]=mark;}
     const rejectBtn=el('reject-toggle');
     rejectBtn.disabled=false;
-    if(probe.reject_degraded){rejectBtn.classList.add('on');rejectBtn.textContent='异常请求拦截：已开启';}
-    else{rejectBtn.classList.remove('on');rejectBtn.textContent='异常请求拦截：已关闭';}
+    if(probe.reject_degraded){rejectBtn.classList.add('on');rejectBtn.textContent=t('异常请求拦截：已开启');}
+    else{rejectBtn.classList.remove('on');rejectBtn.textContent=t('异常请求拦截：已关闭');}
     const vfrag=document.createDocumentFragment();
     for(const entry of values){
       const tr=document.createElement('tr');
@@ -440,8 +769,8 @@
       if(entry.detection_enabled===false){
         for(let i=0;i<4;i++)cell(tr,'—','none');
         const status=cell(tr,'','ttl-cell');
-        const badge=document.createElement('span');badge.className='badge state-off';badge.textContent='不检测';
-        badge.title='该模型不进行降智探测、state 长度判断、模型一致性拦截或健康基线回灌';status.append(badge);
+        const badge=document.createElement('span');badge.className='badge state-off';badge.textContent=t('不检测');
+        badge.title=t('该模型不进行降智探测、state 长度判断、模型一致性拦截或健康基线回灌');status.append(badge);
         cell(tr,'—','none');vfrag.append(tr);continue;
       }
       const lenCell=cell(tr,'');
@@ -449,10 +778,10 @@
         const badge=document.createElement('span');
         badge.className='badge '+(entry.value_length===292?'state-ok':'state-warn');
         badge.textContent=entry.value_length+' B';
-        badge.title=entry.value_length===292?'292 字节：长度符合预期':'非 292 字节：长度存疑（可能为风控状态）';
+        badge.title=entry.value_length===292?t('292 字节：长度符合预期'):t('非 292 字节：长度存疑（可能为风控状态）');
         lenCell.append(badge);
       }else{lenCell.textContent='—';lenCell.classList.add('none');}
-      cell(tr,sources[entry.source]||entry.source||'—',entry.source?'':'none');
+      cell(tr,sourceLabel(entry.source)||'—',entry.source?'':'none');
       cell(tr,fmtBeijing(entry.issued_at),'time');
       cell(tr,fmtBeijing(entry.expires_at),'time');
       const ttl=cell(tr,'','ttl-cell');
@@ -463,7 +792,7 @@
       const isPaused=pausedSet.has(entry.model);
       if(isPaused&&!isActive) tr.classList.add('paused-row');
       const rowStatus=document.createElement('div');rowStatus.className='sub';
-      rowStatus.textContent=isActive?(probe.stopping||isPaused?'正在停止':liveQueue.has(entry.model)?'排队中':'探测中'):isPaused?'已暂停':!ready?'探测不可用':probe.halted?'自动预备已停止':autoPrefetch?'自动预备待命':'手动待命';
+      rowStatus.textContent=isActive?(probe.stopping||isPaused?t('正在停止'):liveQueue.has(entry.model)?t('排队中'):t('探测中')):isPaused?t('已暂停'):!ready?t('探测不可用'):probe.halted?t('自动预备已停止'):autoPrefetch?t('自动预备待命'):t('手动待命');
       model.append(rowStatus);
       const failure=failureByModel[entry.model];
       const suspicion=suspectByModel[entry.model];
@@ -478,31 +807,31 @@
         const badge=document.createElement('span');
         badge.className='badge state-ok';
         const queued=liveQueue.has(entry.model);
-        badge.textContent=probe.stopping||isPaused?'正在停止…':queued?'队列等待中':'探测中…';
-        const hist=failure?('；上次整轮 '+failure.attempts+' 次失败（悬停看详情）'):'';
-        badge.title='该模型正在进行探测'+(queued?'（已排入执行队列，等待轮次）':'（当前探测轮结果未出）')+hist;
+        badge.textContent=probe.stopping||isPaused?t('正在停止…'):queued?t('队列等待中'):t('探测中…');
+        const hist=failure?(t('；上次整轮 {count} 次失败（悬停看详情）',{count:failure.attempts})):'';
+        badge.title=t('该模型正在进行探测')+(queued?t('（已排入执行队列，等待轮次）'):t('（当前探测轮结果未出）'))+hist;
         ttl.append(badge);
       }else if(failure&&!businessMark){
         const badge=document.createElement('span');
         badge.className='badge '+(baselineUsable?'state-warn':'state-fail');
-        badge.textContent='上次探测 '+failure.attempts+' 次失败'+(baselineUsable?' · 现有基线继续使用':'');
-        badge.title=(failure.last_error||'')+'（'+failure.rounds+' 轮，最后于 '+fmtBeijing(failure.failed_at)+'（UTC+8）；是否自动补充取决于预备开关、模型暂停与基线状态）';
+        badge.textContent=t('上次探测 {count} 次失败',{count:failure.attempts})+(baselineUsable?t(' · 现有基线继续使用'):'');
+        badge.title=t('{error}（{rounds} 轮，最后于 {time}（UTC+8）；是否自动补充取决于预备开关、模型暂停与基线状态）',{error:failure.last_error||'',rounds:failure.rounds,time:fmtBeijing(failure.failed_at)});
         ttl.append(badge);
       }else if(businessMark){
         const badge=document.createElement('span');
         badge.className='badge state-fail';
-        badge.textContent='业务确认 · 降智';
-        badge.title=(businessMark.reason||'业务流量观测到降智证据')+'（单次业务观测即标记；健康观测或探测成功自动清除）';
+        badge.textContent=t('业务确认 · 降智');
+        badge.title=(businessMark.reason||t('业务流量观测到降智证据'))+t('（单次业务观测即标记；健康观测或探测成功自动清除）');
         ttl.append(badge);
       }else if(suspicion){
         const badge=document.createElement('span');
         badge.className='badge state-warn';
-        badge.textContent='预备探测 · 本轮 '+suspicion.failures+' 次失败'+(baselineUsable?' · 现有基线继续使用':'');
-        badge.title='探测失败只记录预备轨状态；有有效健康基线时不因探测失败拦截业务，没有可用基线时才按降智证据与阈值判断';
+        badge.textContent=t('预备探测 · 本轮 {count} 次失败',{count:suspicion.failures})+(baselineUsable?t(' · 现有基线继续使用'):'');
+        badge.title=t('探测失败只记录预备轨状态；有有效健康基线时不因探测失败拦截业务，没有可用基线时才按降智证据与阈值判断');
         ttl.append(badge);
       }
       if(!expired&&hasRemaining){
-        const remainingLabel=document.createElement('div');remainingLabel.textContent='剩余 '+fmtDuration(remaining);ttl.append(remainingLabel);
+        const remainingLabel=document.createElement('div');remainingLabel.textContent=t('剩余 {time}',{time:fmtDuration(remaining)});ttl.append(remainingLabel);
         const bar=document.createElement('div');bar.className='bar';
         const fill=document.createElement('i');
         const start=entry.issued_at?new Date(entry.issued_at).getTime():NaN;
@@ -517,37 +846,37 @@
         const cb=document.createElement('span');
         cb.className='badge state-ok';
         const cr=Number(entry.candidate.remaining_seconds);
-        cb.textContent='预备就绪'+(isNaN(cr)?'':'（'+fmtDuration(cr)+'）');
-        cb.title='已提前备好预备状态值（来源：'+(entry.candidate.source||'探测获取')+'）；当前值到期时，如预备值仍有效则自动接管';
+        cb.textContent=isNaN(cr)?t('预备就绪'):t('预备就绪（{time}）',{time:fmtDuration(cr)});
+        cb.title=t('已提前备好预备状态值（来源：{source}）；当前值到期时，如预备值仍有效则自动接管',{source:sourceLabel(entry.candidate.source||'probe')});
         ttl.append(cb);
       }
       if(expired){
         const badge=document.createElement('span');
         badge.className='badge state-fail';
-        badge.textContent='已到期';
-        badge.title='该基线的真实有效期已结束（按 token 内嵌签发时间戳 + 有效期时长推算）；到期后不再对外提供本值，直到获得新的健康值';
+        badge.textContent=t('已到期');
+        badge.title=t('该基线的真实有效期已结束（按 token 内嵌签发时间戳 + 有效期时长推算）；到期后不再对外提供本值，直到获得新的健康值');
         ttl.append(badge);
       }
       const control=cell(tr,'','control-cell');
       const toggle=document.createElement('button');
       toggle.type='button';
       toggle.className='icon-btn'+(isPaused?' paused':'');
-      toggle.textContent=isPaused?'恢复':'暂停';
-      toggle.title=isPaused?'恢复：解除该模型暂停并探测一次；不改变全局自动预备状态':'暂停该模型：取消排队与在途探测，并停止该模型的自动预备；已有健康值保留';
+      toggle.textContent=isPaused?t('恢复'):t('暂停');
+      toggle.title=isPaused?t('恢复：解除该模型暂停并探测一次；不改变全局自动预备状态'):t('暂停该模型：取消排队与在途探测，并停止该模型的自动预备；已有健康值保留');
       toggle.disabled=!!probe.stopping;
       toggle.addEventListener('click',async()=>{toggle.disabled=true;if(await probeControl({model:entry.model,action:isPaused?'resume':'pause'}))refresh();else toggle.disabled=false;});
       control.append(toggle);
       const probeNow=document.createElement('button');
       probeNow.type='button';
       probeNow.className='icon-btn';
-      probeNow.textContent='探测一次';
-      probeNow.title='探测一次：加入统一串行队列；新值先作为接班值，不改变全局自动预备状态；已暂停模型请先恢复';
+      probeNow.textContent=t('探测一次');
+      probeNow.title=t('探测一次：加入统一串行队列；新值先作为接班值，不改变全局自动预备状态；已暂停模型请先恢复');
       probeNow.disabled=!ready||probe.stopping||isPaused||isActive;
       probeNow.addEventListener('click',async()=>{probeNow.disabled=true;if(await probeControl({model:entry.model,action:'probe-model'})){setTimeout(refresh,1500);}else probeNow.disabled=false;});
       control.append(probeNow);
       vfrag.append(tr);
     }
-    if(!values.length){const tr=document.createElement('tr');const td=cell(tr,'暂无基线值。可点击「开始探测」手动获取；业务流量观测到健康状态（模型一致 + 292 字节）时也会自动入库。','empty');td.colSpan=7;vfrag.append(tr);}
+    if(!values.length){const tr=document.createElement('tr');const td=cell(tr,t('暂无基线值。可点击「开始探测」手动获取；业务流量观测到健康状态（模型一致 + 292 字节）时也会自动入库。'),'empty');td.colSpan=7;vfrag.append(tr);}
     el('probe-values').replaceChildren(vfrag);
     const history=(probe.history||[]).slice(0,50);
     const hfrag=document.createDocumentFragment();
@@ -555,24 +884,25 @@
       const tr=document.createElement('tr');
       cell(tr,record.time?fmtBeijing(record.time):'—','time');
       const model=cell(tr,record.model,'model');
-      const egress=cell(tr,proxyLabel(record.proxy));
-      if(record.egress_addr){const src=document.createElement('span');src.className='src';src.textContent=' · '+record.egress_addr;src.title='本次连接实际使用的出口源地址（socks5 服务端 BND.ADDR 回报）';egress.append(src);}
+      const egress=cell(tr,record.proxy_label||proxyLabel(record.proxy),'egress-name');
+      egress.title=proxyLabel(record.proxy);
+      if(record.egress_addr){const src=document.createElement('span');src.className='src';src.textContent=' · '+record.egress_addr;src.title=t('本次连接实际使用的出口源地址（socks5 服务端 BND.ADDR 回报）');egress.append(src);}
       const result=cell(tr,'');
       const badge=document.createElement('span');badge.className='badge '+(record.success?'probe-ok':'probe-fail');
-      badge.textContent=record.success?'获取成功':'失败';result.append(badge);
+      badge.textContent=record.success?t('获取成功'):t('失败');result.append(badge);
       cell(tr,(record.duration_ms||0)+' ms');
       const detail=cell(tr,'');
       if(record.success){
         const lenBadge=document.createElement('span');
         lenBadge.className='badge '+(record.state_length===292?'state-ok':'state-warn');
         lenBadge.textContent=record.state_length+' B';
-        lenBadge.title=record.state_length===292?'292 字节：长度符合预期':'非 292 字节：长度存疑（可能为风控状态）';
+        lenBadge.title=record.state_length===292?t('292 字节：长度符合预期'):t('非 292 字节：长度存疑（可能为风控状态）');
         detail.append(lenBadge);
-        if(record.observed_model){const obs=document.createElement('span');obs.className='src';obs.textContent='上游 '+record.observed_model;detail.append(obs);}
+        if(record.observed_model){const obs=document.createElement('span');obs.className='src';obs.textContent=t('上游 {model}',{model:record.observed_model});detail.append(obs);}
       }else{detail.textContent=record.error||'—';detail.classList.add('none');}
       hfrag.append(tr);
     }
-    if(!history.length){const tr=document.createElement('tr');const td=cell(tr,'暂无探测记录。','empty');td.colSpan=6;hfrag.append(tr);}
+    if(!history.length){const tr=document.createElement('tr');const td=cell(tr,t('暂无探测记录。'),'empty');td.colSpan=6;hfrag.append(tr);}
     el('probe-history').replaceChildren(hfrag);
   }
   function switchTab(name){
@@ -596,12 +926,12 @@
       const response=await fetch(endpoint,{headers:{Authorization:'Bearer '+managementKey},cache:'no-store'});
       if(readManagementKey()!==managementKey){requireLogin();return;}
       if(response.status===401||response.status===403){rejectedKey=managementKey;requireLogin('CPA 登录已失效，请返回管理页重新登录。');return;}
-      if(!response.ok)throw new Error('读取失败（HTTP '+response.status+'）。');
+      if(!response.ok)throw new Error(t('读取失败（HTTP {status}）。',{status:response.status}));
       const data=await response.json();
       if(readManagementKey()!==managementKey){requireLogin();return;}
       if(revision===controlRevision)render(data);
     }catch(error){
-      el('status').textContent=error.message;el('refresh-note').textContent='等待重试';
+      setMessage('status',()=>error.message);setMessage('refresh-note',()=>t('等待重试'));
     }finally{loading=false;const key=readManagementKey();el('refresh').disabled=!key||key===rejectedKey;}
   }
   el('refresh').addEventListener('click',refresh);
@@ -610,33 +940,33 @@
   el('round-stop').addEventListener('click',async()=>{const button=el('round-stop');button.disabled=true;if(await probeControl({action:'stop-current'}))refresh();else button.disabled=false;});
   el('all-stop').addEventListener('click',async()=>{const button=el('all-stop');button.disabled=true;if(await probeControl({action:'stop-all'}))refresh();else button.disabled=false;});
   el('pool-reset-all').addEventListener('click',async()=>{const button=el('pool-reset-all');button.disabled=true;if(await probeControl({action:'reset-exit'})){setTimeout(refresh,600);}else button.disabled=false;});
-  el('prefetch-minutes').addEventListener('input',()=>{prefetchDirty=true;el('prefetch-feedback').textContent='尚未保存';});
+  el('prefetch-minutes').addEventListener('input',()=>{prefetchDirty=true;setMessage('prefetch-feedback',()=>t('尚未保存'));});
   el('prefetch-save').addEventListener('click',async()=>{
     if(prefetchSaving)return;
     const raw=String(el('prefetch-minutes').value).trim(),minutes=Number(raw);
-    if(!/^\d+$/.test(raw)||!Number.isSafeInteger(minutes)||minutes>prefetchLimit){el('prefetch-feedback').textContent='请输入 0–'+prefetchLimit+' 的整数分钟';return;}
+    if(!/^\d+$/.test(raw)||!Number.isSafeInteger(minutes)||minutes>prefetchLimit){setMessage('prefetch-feedback',()=>t('请输入 0–{max} 的整数分钟',{max:prefetchLimit}));return;}
     prefetchSaving=true;el('prefetch-save').disabled=true;el('prefetch-minutes').disabled=true;
-    if(await probeControl({action:'prefetch-window',minutes})){prefetchDirty=false;el('prefetch-feedback').textContent='已保存：'+minutes+' 分钟；后续扫描生效';}else{el('prefetch-feedback').textContent='保存失败，原设置未更改';}
+    if(await probeControl({action:'prefetch-window',minutes})){prefetchDirty=false;setMessage('prefetch-feedback',()=>t('已保存：{count} 分钟；后续扫描生效',{count:minutes}));}else{setMessage('prefetch-feedback',()=>t('保存失败，原设置未更改'));}
     prefetchSaving=false;el('prefetch-save').disabled=false;el('prefetch-minutes').disabled=false;refresh();
   });
-  el('probe-interval-seconds').addEventListener('input',()=>{intervalDirty=true;el('probe-interval-feedback').textContent='尚未保存';});
+  el('probe-interval-seconds').addEventListener('input',()=>{intervalDirty=true;setMessage('probe-interval-feedback',()=>t('尚未保存'));});
   el('probe-interval-save').addEventListener('click',async()=>{
     if(intervalSaving)return;
     const raw=String(el('probe-interval-seconds').value).trim(),seconds=Number(raw);
-    if(!/^\d+$/.test(raw)||!Number.isSafeInteger(seconds)||seconds<1||seconds>3600){el('probe-interval-feedback').textContent='请输入 1–3600 的整数秒';return;}
+    if(!/^\d+$/.test(raw)||!Number.isSafeInteger(seconds)||seconds<1||seconds>3600){setMessage('probe-interval-feedback',()=>t('请输入 1–3600 的整数秒'));return;}
     intervalSaving=true;el('probe-interval-save').disabled=true;el('probe-interval-seconds').disabled=true;
-    if(await probeControl({action:'probe-interval',seconds})){intervalDirty=false;el('probe-interval-feedback').textContent='已保存：'+seconds+' 秒；下一次等待起生效';}else{el('probe-interval-feedback').textContent='保存失败，原设置未更改';}
+    if(await probeControl({action:'probe-interval',seconds})){intervalDirty=false;setMessage('probe-interval-feedback',()=>t('已保存：{count} 秒；下一次等待起生效',{count:seconds}));}else{setMessage('probe-interval-feedback',()=>t('保存失败，原设置未更改'));}
     intervalSaving=false;el('probe-interval-save').disabled=false;el('probe-interval-seconds').disabled=false;refresh();
   });
   function openExitEditor(item){
     if(exitSaving)return;
     editingExitID=item?.id||'';
-    el('exit-form').classList.remove('hidden');el('exit-form-title').textContent=editingExitID?'编辑出口':'新增代理 / 聚合池';
+    el('exit-form').classList.remove('hidden');setMessage('exit-form-title',()=>editingExitID?t('编辑出口'):t('新增代理 / 聚合池'));
     el('exit-label').value=item?.label||'';el('exit-kind').value=item?.pool?'pool':'plain';el('exit-url').value=item?.proxy||'';
     el('exit-url').disabled=item?.proxy==='direct';el('exit-kind').disabled=item?.proxy==='direct';
     el('exit-attempts').value=String(item?.attempts??0);el('exit-multiplier').value=String(item?.multiplier??1);
     el('exit-username').value='';el('exit-password').value='';el('exit-clear-auth').checked=false;
-    el('exit-auth-note').textContent=item?.has_auth?'已配置认证；凭据不回显':'未配置认证';el('exit-feedback').textContent='';
+    setMessage('exit-auth-note',()=>item?.has_auth?t('已配置认证；凭据不回显'):t('未配置认证'));setMessage('exit-feedback',()=>'');
     for(const name of ['username','password','clear-auth'])el('exit-'+name).disabled=item?.proxy==='direct';
     el('exit-form').scrollIntoView({block:'nearest'});
     el('exit-label').focus({preventScroll:true});
@@ -648,15 +978,16 @@
     if(exitSaving)return;
     const attemptsText=String(el('exit-attempts').value).trim(),multiplierText=String(el('exit-multiplier').value).trim();
     const attempts=Number(attemptsText),multiplier=Number(multiplierText),url=String(el('exit-url').value).trim();
-    if(!url||!/^\d+$/.test(attemptsText)||!Number.isSafeInteger(attempts)||attempts>1000000||!multiplierText||!Number.isFinite(multiplier)||multiplier<0.01||multiplier>100){el('exit-feedback').textContent='请填写地址、非负整数次数和 0.01–100 的倍率';return;}
+    if(!url||!/^\d+$/.test(attemptsText)||!Number.isSafeInteger(attempts)||attempts>1000000||!multiplierText||!Number.isFinite(multiplier)||multiplier<0.01||multiplier>100){setMessage('exit-feedback',()=>t('请填写地址、非负整数次数和 0.01–100 的倍率'));return;}
     const exit={id:editingExitID,url,label:String(el('exit-label').value).trim(),pool:el('exit-kind').value==='pool',attempts,multiplier,clear_auth:!!el('exit-clear-auth').checked};
     if(!exit.clear_auth){if(el('exit-username').value)exit.username=el('exit-username').value;if(el('exit-password').value)exit.password=el('exit-password').value;}
     exitSaving=true;el('exit-save').disabled=true;el('exit-cancel').disabled=true;el('pool-add').disabled=true;
     for(const name of ['label','kind','url','username','password','clear-auth','attempts','multiplier'])el('exit-'+name).disabled=true;
-    if(await probeControl({action:'save-exit',exit})){closeExitEditor();el('status').textContent='出口已保存，后续尝试使用新设置';}else{el('exit-feedback').textContent='保存失败，原出口未更改；请查看页面错误提示';}
+    if(await probeControl({action:'save-exit',exit})){closeExitEditor();setMessage('status',()=>t('出口已保存，后续尝试使用新设置'));}else{setMessage('exit-feedback',()=>t('保存失败，原出口未更改；请查看页面错误提示'));}
     for(const name of ['label','kind','url','username','password','clear-auth','attempts','multiplier'])el('exit-'+name).disabled=url==='direct'&&['kind','url','username','password','clear-auth'].includes(name);
     exitSaving=false;el('exit-save').disabled=false;el('exit-cancel').disabled=false;el('pool-add').disabled=false;refresh();
   });
+  setupLanguageSync();
   window.addEventListener('storage',event=>{if(event.key===null||['cli-proxy-auth','isLoggedIn','managementKey','apiBase','apiUrl'].includes(event.key))refresh();});
   window.addEventListener('focus',refresh);
   setInterval(()=>{if(!document.hidden)refresh();},5000);

@@ -29,26 +29,35 @@ class Element {
 function panel(options={}) {
   const nodes=new Map();
   const get=id=>{if(!nodes.has(id))nodes.set(id,new Element());return nodes.get(id);};
+  const html=fs.readFileSync(__dirname+'/index.html','utf8');
+  const staticNodes=[];
+  for(const match of html.split('<script>')[0].matchAll(/<[^>]+data-i18n(?:-[\w-]+)?="[^"]+"[^>]*>/g)){
+    const attrs=Object.fromEntries(Array.from(match[0].matchAll(/([\w-]+)="([^"]*)"/g),item=>[item[1],item[2]]));
+    const node=attrs.id?get(attrs.id):new Element();
+    for(const [key,value] of Object.entries(attrs))node.setAttribute(key,value);
+    staticNodes.push(node);
+  }
   const root=new Element('html'),host=new Element('html'),windowEvents={},mediaEvents={};
   if(options.hostTheme)host.setAttribute('data-theme',options.hostTheme);
-  let storedTheme=options.storedTheme;
+  if(options.hostLanguage)host.setAttribute('lang',options.hostLanguage);
+  let storedTheme=options.storedTheme,storedLanguage=options.rawLanguage??(options.storedLanguage?JSON.stringify({state:{language:options.storedLanguage}}):null);
   const media={matches:!!options.darkSystem,addEventListener:(name,fn)=>{mediaEvents[name]=fn;}};
-  let onMutation;
+  const observers=[];
+  const notify=attr=>{for(const observer of observers)if(observer.filter.includes(attr))observer.fn();};
   const win={addEventListener:(name,fn)=>{(windowEvents[name]??=[]).push(fn);},matchMedia:()=>media};
   win.parent=options.embedded?{document:{documentElement:host},getComputedStyle:()=>({getPropertyValue:name=>options.hostTokens?.[name]||''})}:win;
   if(options.crossOrigin)Object.defineProperty(win,'parent',{get(){throw new Error('cross origin');}});
   const context=vm.createContext({
-    document:{documentElement:root,getElementById:get,createElement:tag=>new Element(tag),createDocumentFragment:()=>new Element('fragment')},
+    document:{documentElement:root,querySelectorAll:()=>staticNodes,getElementById:get,createElement:tag=>new Element(tag),createDocumentFragment:()=>new Element('fragment')},
     location:{pathname:'/management.html',host:'localhost',origin:'http://localhost'},
-    navigator:{userAgent:'panel-test'},localStorage:{getItem:name=>name==='cli-proxy-theme'?JSON.stringify({state:{theme:storedTheme}}):null},
-    window:win,MutationObserver:class{constructor(fn){onMutation=fn;}observe(){}disconnect(){}},
+    navigator:{userAgent:'panel-test',language:options.browserLanguage},localStorage:{getItem:name=>{if(options.storageUnavailable)throw new Error('storage unavailable');return name==='cli-proxy-theme'?JSON.stringify({state:{theme:storedTheme}}):name==='cli-proxy-language'?storedLanguage:null;}},
+    window:win,MutationObserver:class{constructor(fn){this.fn=fn;}observe(target,config){observers.push({fn:this.fn,filter:config.attributeFilter});}disconnect(){}},
     setInterval(){},setTimeout(){},URL,TextEncoder,TextDecoder,
   });
-  const html=fs.readFileSync(__dirname+'/index.html','utf8');
   const script=html.match(/<script>([\s\S]*?)<\/script>/)[1];
   vm.runInContext(script,context);
-  vm.runInContext('globalThis.renderTest=renderProbe;globalThis.renderPoolTest=renderPool;globalThis.openExitTest=openExitEditor;globalThis.renderDataTest=render;globalThis.actions=[];globalThis.controlResult=false;probeControl=async payload=>{actions.push(payload);return controlResult;}',context);
-  return {get,root,host,changeHost:theme=>{host.setAttribute('data-theme',theme);onMutation();},changeStored:theme=>{storedTheme=theme;for(const fn of windowEvents.storage||[])fn({key:'cli-proxy-theme'});},changeSystem:dark=>{media.matches=dark;mediaEvents.change();},render:context.renderTest,renderPool:context.renderPoolTest,openExit:context.openExitTest,renderData:context.renderDataTest,actions:context.actions,setResult:value=>{context.controlResult=value;}};
+  vm.runInContext('globalThis.translateTest=t;globalThis.messagesTest=messages;globalThis.renderTest=renderProbe;globalThis.renderPoolTest=renderPool;globalThis.openExitTest=openExitEditor;globalThis.renderDataTest=render;globalThis.actions=[];globalThis.controlResult=false;probeControl=async payload=>{actions.push(payload);return controlResult;}',context);
+  return {get,root,host,staticNodes,translate:context.translateTest,messages:context.messagesTest,changeLanguage:language=>{storedLanguage=JSON.stringify({state:{language}});for(const fn of windowEvents.storage||[])fn({key:'cli-proxy-language'});},changeHostLanguage:language=>{host.setAttribute('lang',language);notify('lang');},changeHost:theme=>{host.setAttribute('data-theme',theme);notify('data-theme');},changeStored:theme=>{storedTheme=theme;for(const fn of windowEvents.storage||[])fn({key:'cli-proxy-theme'});},changeSystem:dark=>{media.matches=dark;mediaEvents.change();},render:context.renderTest,renderPool:context.renderPoolTest,openExit:context.openExitTest,renderData:context.renderDataTest,actions:context.actions,setResult:value=>{context.controlResult=value;}};
 }
 
 function fixture(overrides={}) {
@@ -325,4 +334,108 @@ test('proxy list preserves long details, visible actions and disabled versus coo
   await ops.children[2].events.click();
   assert.equal(p.actions[0].action,'reset-exit');assert.equal(p.actions[0].id,'disabled');
   assert.match(p.get('pool-rows').children[1].textContent,/轮休至.*剩余 5m 00s/);
+});
+
+test('all CPA locales translate static text, states and validation while retaining drafts',async()=>{
+  const p=panel({embedded:true,hostLanguage:'zh-CN',storedLanguage:'en'});
+  const data={total:1,replaced:0,inserted:0,records:[],turn_state_override:{enabled:true,probe:fixture({interval_seconds:2})}};
+  p.renderData(data);
+  const heading=p.staticNodes.find(node=>node.getAttribute('data-i18n')==='探测控制台');
+  assert.equal(heading.textContent,'Probe console');
+  p.get('probe-settings').open=true;
+  p.get('prefetch-minutes').value='12';p.get('prefetch-minutes').events.input();
+  p.openExit({id:'named',proxy:'http://192.0.2.1:8080',label:'用户命名',has_auth:true});
+  p.get('exit-label').value='未保存的名称';p.get('exit-password').value='TEST_DRAFT_CANARY';
+  p.changeLanguage('ru');
+  assert.equal(p.root.getAttribute('lang'),'ru');
+  assert.equal(heading.textContent,'Консоль проверок');
+  assert.equal(p.get('probe-status').textContent,'Ожидание автоподготовки');
+  assert.equal(p.get('prefetch-feedback').textContent,'Есть несохранённые изменения');
+  assert.equal(p.get('probe-settings').open,true);
+  assert.equal(p.get('prefetch-minutes').value,'12');
+  assert.equal(p.get('exit-label').value,'未保存的名称');
+  assert.equal(p.get('exit-password').value,'TEST_DRAFT_CANARY');
+  assert.equal(p.get('exit-form-title').textContent,'Изменить выход');
+  p.changeLanguage('zh-TW');
+  assert.equal(heading.textContent,'探測控制台');
+  p.get('probe-interval-seconds').value='0';p.get('probe-interval-seconds').events.input();await p.get('probe-interval-save').events.click();
+  assert.equal(p.get('probe-interval-feedback').textContent,'請輸入 1–3600 的整數秒');
+  p.changeLanguage('en');
+  assert.equal(p.get('probe-interval-feedback').textContent,'Enter whole seconds from 1 to 3600');
+  assert.equal(p.actions.length,0);
+  p.changeLanguage('zh-CN');assert.equal(heading.textContent,'探测控制台');
+});
+
+test('locale fallback accepts CPA storage formats and handles unavailable parent or storage',()=>{
+  for(const rawLanguage of ['en','"en"','{"language":"en"}','{"state":{"language":"en"}}']){
+    assert.equal(panel({rawLanguage,hostLanguage:'zh-CN',embedded:true}).root.getAttribute('lang'),'en');
+  }
+  const host=panel({embedded:true,hostLanguage:'ru',browserLanguage:'en'});
+  assert.equal(host.root.getAttribute('lang'),'ru');
+  host.changeHostLanguage('zh-TW');assert.equal(host.root.getAttribute('lang'),'zh-TW');
+  assert.equal(panel({crossOrigin:true,storedLanguage:'ru'}).root.getAttribute('lang'),'ru');
+  assert.equal(panel({storageUnavailable:true,crossOrigin:true,browserLanguage:'zh-HK'}).root.getAttribute('lang'),'zh-TW');
+  assert.equal(panel({rawLanguage:'not-json',browserLanguage:'de-DE'}).root.getAttribute('lang'),'en');
+});
+
+test('language changes during a pending save preserve its payload and translate completion',async()=>{
+  const p=panel();p.renderData({total:0,replaced:0,inserted:0,records:[],turn_state_override:{probe:fixture()}});
+  let finish;p.setResult(new Promise(resolve=>{finish=resolve;}));
+  p.get('probe-interval-seconds').value='18';p.get('probe-interval-seconds').events.input();
+  const saving=p.get('probe-interval-save').events.click();
+  p.changeLanguage('en');
+  assert.equal(p.get('probe-interval-seconds').value,'18');
+  assert.equal(p.get('probe-interval-save').disabled,true);
+  finish(true);await saving;
+  assert.match(p.get('probe-interval-feedback').textContent,/Saved: 18 seconds/);
+  assert.deepEqual(JSON.parse(JSON.stringify(p.actions)),[{action:'probe-interval',seconds:18}]);
+});
+
+test('translation catalogs cover static UI and retain every interpolation parameter',()=>{
+  const p=panel();
+  for(const node of p.staticNodes){
+    for(const attr of ['data-i18n','data-i18n-title','data-i18n-placeholder','data-i18n-aria-label']){
+      const key=node.getAttribute(attr);if(key!==null)assert.ok(Object.hasOwn(p.messages,key),key);
+    }
+  }
+  for(const [key,translations] of Object.entries(p.messages)){
+    assert.equal(translations.length,3,key);
+    const params=Array.from(key.matchAll(/\{(\w+)\}/g),match=>match[1]).sort();
+    for(const translation of translations){
+      assert.ok(translation,key);
+      assert.deepEqual(Array.from(translation.matchAll(/\{(\w+)\}/g),match=>match[1]).sort(),params,key);
+    }
+  }
+  p.changeLanguage('en');
+  assert.equal(p.translate('最近错误：{error}',{error:'raw {count} <script>'}),'Last error: raw {count} <script>');
+});
+
+test('probe history uses supplied exit names as text and keeps safe address fallback',()=>{
+  const p=panel({storedLanguage:'en'});
+  p.render(fixture({history:[
+    {proxy:'socks5h://192.0.2.1:1080',proxy_label:'自定义出口 <img src=x>',egress_addr:'2001:db8::1',success:true,state_length:292},
+    {proxy:'socks5h://192.0.2.1:1080',proxy_label:'另一个账号',success:false},
+    {proxy:'direct',success:true},
+    {proxy:'http://test-user:test-password@192.0.2.2:8080',success:false}
+  ]}));
+  const rows=p.get('probe-history').children;
+  assert.match(rows[0].children[2].textContent,/自定义出口 <img src=x>/);
+  assert.equal(rows[0].children[2].title,'socks5h://192.0.2.1:1080');
+  assert.match(rows[0].children[2].textContent,/2001:db8::1/);
+  assert.equal(rows[1].children[2].textContent,'另一个账号');
+  assert.equal(rows[2].children[2].textContent,'Direct');
+  assert.equal(rows[3].children[2].textContent,'http://192.0.2.2:8080');
+  assert.doesNotMatch(rows[3].children[2].title,/test-password/);
+});
+
+test('switching language after sign-out does not restore previously rendered requests',async()=>{
+  const p=panel();
+  p.renderData({total:42,replaced:0,inserted:0,records:[],turn_state_override:{probe:fixture()}});
+  // The test has no stored login. Refresh enters the real login-required path.
+  await p.get('refresh').events.click();
+  p.changeLanguage('en');
+  assert.equal(p.get('total').textContent,'—');
+  assert.equal(p.get('auth-notice').classList.contains('hidden'),false);
+  assert.equal(p.get('results').classList.contains('hidden'),true);
+  assert.match(p.get('auth-message').textContent,/No saved CPA session/);
 });
