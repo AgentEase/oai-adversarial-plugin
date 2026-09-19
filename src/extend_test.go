@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -2391,5 +2392,369 @@ func TestUncheckedLegacyAuditSnapshot(t *testing.T) {
 	}
 	if !audit.records[0].ModelMismatch || record.UpstreamModel != "gpt-6-astra" {
 		t.Fatal("historical observations must not be destroyed")
+	}
+}
+
+func TestRuntimePrefetchPersistsWithoutStarting(t *testing.T) {
+	e := newPrefetchTestEngine(t)
+	e.halted = true
+	e.paused["gpt-6-astra"] = true
+	token := synthStateToken(time.Now().Add(-time.Minute))
+	e.storeValue("gpt-6-astra", token, "business", "", e.cfg.Config)
+	response, _ := probeControl([]byte(`{"action":"prefetch-window","minutes":10}`))
+	if response.StatusCode != 200 || e.cfg.Config.Prefetch != 10*time.Minute || !e.halted || !e.paused["gpt-6-astra"] || e.queueActive {
+		t.Fatal("saving prefetch must preserve modes and remain idle")
+	}
+	if e.values["gpt-6-astra"].Value != token {
+		t.Fatal("saving prefetch changed the active token")
+	}
+	base := e.baseCfg.Config
+	e.settings = runtimeSettings{}
+	loadRuntimeSettings()
+	restored, err := applyRuntimeSettings(base, e.settings)
+	if err != nil || restored.Prefetch != 10*time.Minute {
+		t.Fatal("confirmed prefetch did not survive a reload")
+	}
+	base.TTL = 5 * time.Minute
+	restored, err = applyRuntimeSettings(base, e.settings)
+	if err != nil || restored.Prefetch != 4*time.Minute {
+		t.Fatal("a reduced TTL must bound the saved window")
+	}
+	for _, raw := range []string{`{"action":"prefetch-window"}`, `{"action":"prefetch-window","minutes":-1}`, `{"action":"prefetch-window","minutes":55}`, `{"action":"prefetch-window","minutes":1.5}`, `{"action":"prefetch-window","minutes":"10"}`} {
+		response, _ = probeControl([]byte(raw))
+		if response.StatusCode != 400 || e.cfg.Config.Prefetch != 10*time.Minute {
+			t.Fatal("invalid prefetch changed the confirmed setting")
+		}
+	}
+	if err := e.setPrefetchMinutes(0); err != nil || e.cfg.Config.Prefetch != 0 || !e.halted {
+		t.Fatal("zero must disable prefetch without changing the stop mode")
+	}
+}
+
+func TestRuntimePrefetchNewWindowTriggersScan(t *testing.T) {
+	e := newPrefetchTestEngine(t)
+	cfg := e.cfg.Config
+	e.storeValue("gpt-6-astra", synthStateToken(time.Now().Add(-cfg.TTL+6*time.Minute)), "seed", "", cfg)
+	e.prefetchScan()
+	if e.queueActive {
+		t.Fatal("six minutes must be outside the old three-minute window")
+	}
+	if err := e.setPrefetchMinutes(10); err != nil {
+		t.Fatal(err)
+	}
+	e.prefetchScan()
+	waitPrefetchIdle(t, e)
+	if e.probesTotal != 1 {
+		t.Fatal("the next scan did not use the new window")
+	}
+}
+
+func TestRuntimeExitEditingAndRedaction(t *testing.T) {
+	e := newPrefetchTestEngine(t)
+	old := "socks5://proxy-user:proxy-password-canary@192.0.2.1:1080"
+	e.cfg.Config.Proxies = []string{"direct", old}
+	e.cfg.Config.MaxAttemptsPerRound = 0
+	e.halted = true
+	e.disabledExits = map[string]bool{old: true}
+	e.exitPenalties = map[string]exitPenalty{old: {Proxy: old, Failures: 2, Until: time.Now().Add(time.Hour).Format(time.RFC3339Nano)}}
+	id := defaultExitID(old)
+	if err := e.saveExit(exitEdit{ID: id, URL: "socks5://192.0.2.2:1080", Label: "备用出口", Attempts: 10, Multiplier: 0.5}); err != nil {
+		t.Fatal(err)
+	}
+	updated := e.resolveExit(id, "")
+	if !strings.Contains(updated, "proxy-password-canary") || !e.disabledExits[updated] || e.exitPenalties[updated].Failures != 2 {
+		t.Fatal("editing must retain authentication, disablement and penalties")
+	}
+	if err := e.saveExit(exitEdit{URL: "http://192.0.2.3:8080", Label: "聚合池", Pool: true, Attempts: 10, Multiplier: 2.5}); err != nil {
+		t.Fatal(err)
+	}
+	if effectiveMaxAttempts(e.cfg.Config, e.cfg.Config.Proxies) != 33 || !e.halted || e.running {
+		t.Fatal("budgets must multiply without re-arming the engine")
+	}
+	capped := e.cfg.Config
+	capped.MaxAttemptsPerRound = 7
+	if effectiveMaxAttempts(capped, capped.Proxies) != 7 {
+		t.Fatal("explicit round limit must retain precedence")
+	}
+	e.lastActivity = "gpt-6-astra via " + old
+	e.lastError = "connection failed: " + old
+	e.history = []probeRecord{{Proxy: old, Error: old}}
+	e.failures["gpt-6-astra"] = probeFailure{Model: "gpt-6-astra", LastError: old}
+	encoded, _ := json.Marshal(probeSummary())
+	if bytes.Contains(encoded, []byte("proxy-password-canary")) || bytes.Contains(encoded, []byte("proxy-user")) {
+		t.Fatal("management summary leaked proxy authentication")
+	}
+	response, _ := probeControl([]byte(`{"action":"exit-enabled","id":"` + id + `","enabled":true}`))
+	if response.StatusCode != 200 || e.disabledExits[updated] || !e.halted {
+		t.Fatal("opaque ID control failed or changed the global stop mode")
+	}
+	if err := e.saveExit(exitEdit{ID: id, URL: publicProxyURL(updated), ClearAuth: true, Multiplier: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(e.resolveExit(id, ""), "@") {
+		t.Fatal("explicit clear-auth did not remove credentials")
+	}
+	base := e.baseCfg.Config
+	e.settings = runtimeSettings{}
+	loadRuntimeSettings()
+	restored, err := applyRuntimeSettings(base, e.settings)
+	if err != nil || len(restored.Proxies) != 3 || exitID(restored, restored.Proxies[1]) != id {
+		t.Fatal("managed exits did not survive reload with stable IDs")
+	}
+}
+
+func TestRuntimeExitValidationAndAtomicSave(t *testing.T) {
+	e := newPrefetchTestEngine(t)
+	for _, edit := range []exitEdit{
+		{URL: "ftp://192.0.2.1:1080", Multiplier: 1},
+		{URL: "socks5://user:secret@192.0.2.1:99999", Multiplier: 1},
+		{URL: "http://192.0.2.1:8080/?secret=canary", Multiplier: 1},
+		{URL: "http://192.0.2.1:8080", Multiplier: 0},
+		{URL: "http://192.0.2.1:8080", Multiplier: 101},
+		{URL: "http://192.0.2.1:8080", Multiplier: 100, Attempts: maxExitAttempts},
+		{URL: "http://192.0.2.1:8080", Multiplier: 1, Attempts: -1},
+		{URL: "direct", Pool: true, Multiplier: 1},
+		{URL: "direct", Multiplier: 1}, // duplicate
+		{ID: "missing", URL: "http://192.0.2.1:8080", Multiplier: 1},
+	} {
+		if err := e.saveExit(edit); err == nil {
+			t.Fatal("invalid proxy edit unexpectedly succeeded")
+		}
+		if len(e.cfg.Config.Proxies) != 1 || len(e.settings.Exits) != 0 {
+			t.Fatal("rejected edit modified the pool")
+		}
+	}
+	blocker := filepath.Join(t.TempDir(), "blocked")
+	if err := os.WriteFile(blocker, []byte("test"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("LKS_TZ_STATE_FILE", filepath.Join(blocker, "state.json"))
+	if err := e.setPrefetchMinutes(10); err == nil || e.cfg.Config.Prefetch != 3*time.Minute {
+		t.Fatal("failed disk write must not apply an in-memory prefetch change")
+	}
+	if err := e.saveExit(exitEdit{URL: "http://192.0.2.1:8080", Multiplier: 1}); err == nil || len(e.cfg.Config.Proxies) != 1 {
+		t.Fatal("failed disk write must not publish an exit")
+	}
+}
+
+func TestRuntimePoolEditPreservesCountersAndDisabledExit(t *testing.T) {
+	e := newPrefetchTestEngine(t)
+	spec := "http://192.0.2.1:8080"
+	e.cfg.Config.Proxies = []string{spec}
+	e.cfg.Config.ProxyPools[spec] = true
+	e.exitPenalties = map[string]exitPenalty{spec: {Proxy: spec, Failures: 12}}
+	e.disabledExits = map[string]bool{spec: true}
+	if err := e.setPrefetchMinutes(10); err != nil || e.exitPenalties[spec].Failures != 12 {
+		t.Fatal("saving a window must not clear pool counters")
+	}
+	e.exitPenalties[spec] = exitPenalty{Proxy: spec, Failures: 12, Until: time.Now().Add(time.Hour).Format(time.RFC3339Nano)}
+	if got := e.availableProxies([]string{spec}, time.Now()); len(got) != 0 {
+		t.Fatal("emergency release must never resurrect a disabled exit")
+	}
+}
+
+func TestRuntimeExitHotReloadDuringAttempt(t *testing.T) {
+	for _, add := range []bool{false, true} {
+		name := "edit"
+		if add {
+			name = "add"
+		}
+		t.Run(name, func(t *testing.T) {
+			e := newPrefetchTestEngine(t)
+			entered, release := make(chan struct{}), make(chan struct{})
+			var enterOnce, releaseOnce sync.Once
+			var oldCalls, newCalls atomic.Int32
+			oldProxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				oldCalls.Add(1)
+				enterOnce.Do(func() { close(entered) })
+				<-release
+				w.WriteHeader(http.StatusTooManyRequests)
+			}))
+			newProxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				newCalls.Add(1)
+				w.WriteHeader(http.StatusTooManyRequests)
+			}))
+			t.Cleanup(oldProxy.Close)
+			t.Cleanup(newProxy.Close)
+			t.Cleanup(func() { releaseOnce.Do(func() { close(release) }) })
+			e.cfg.Config.Proxies = []string{oldProxy.URL}
+			e.cfg.Config.AttemptsPerHop = 1
+			e.cfg.Config.MaxAttemptsPerRound = 0
+			e.cfg.Config.UpstreamURL = "http://mock-upstream.invalid/responses"
+			if err := os.WriteFile(e.cfg.Config.CredFile, []byte(`{"access_token":"mock-only"}`), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			e.probeModelAsync("gpt-6-astra")
+			select {
+			case <-entered:
+			case <-time.After(3 * time.Second):
+				t.Fatal("mock proxy did not receive the first attempt")
+			}
+			edit := exitEdit{URL: newProxy.URL, Attempts: 2, Multiplier: 1}
+			if !add {
+				edit.ID = defaultExitID(oldProxy.URL)
+			}
+			if err := e.saveExit(edit); err != nil {
+				t.Fatal(err)
+			}
+			releaseOnce.Do(func() { close(release) })
+			waitPrefetchIdle(t, e)
+			expectedNew := int32(1) // one of the edited exit's two attempts was spent
+			if add {
+				expectedNew = 2
+			}
+			if oldCalls.Load() != 1 || newCalls.Load() != expectedNew {
+				t.Fatalf("hot reload repeated old requests or reset the budget: old=%d new=%d", oldCalls.Load(), newCalls.Load())
+			}
+		})
+	}
+}
+
+func TestRuntimeCorruptSettingsAreNotOverwritten(t *testing.T) {
+	e := newPrefetchTestEngine(t)
+	raw := []byte(`{"version":999,"secret":"private-canary"}`)
+	if err := os.WriteFile(runtimeSettingsPath(), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loadRuntimeSettings()
+	if e.settingsError == "" || e.setPrefetchMinutes(10) == nil {
+		t.Fatal("invalid settings must be reported and preserved")
+	}
+	after, err := os.ReadFile(runtimeSettingsPath())
+	if err != nil || !bytes.Equal(raw, after) || strings.Contains(e.settingsError, "private-canary") {
+		t.Fatal("corrupt settings were overwritten or exposed")
+	}
+}
+
+func TestRuntimeRestartAndReconfigureKeepTickets(t *testing.T) {
+	for _, halted := range []bool{false, true} {
+		name := "prefetch-enabled"
+		if halted {
+			name = "halted"
+		}
+		t.Run(name, func(t *testing.T) {
+			e := newPrefetchTestEngine(t)
+			e.halted = halted
+			e.paused["gpt-5.6-sol"] = true
+			e.disabledExits = map[string]bool{"direct": true}
+			active := synthStateToken(time.Now().Add(-20 * time.Minute))
+			candidate := synthStateToken(time.Now().Add(-8 * time.Minute))
+			e.storeValue("gpt-6-astra", active, "seed", "", e.cfg.Config)
+			e.storeValue("gpt-6-astra", candidate, "probe", "direct", e.cfg.Config)
+			if err := e.setPrefetchMinutes(10); err != nil {
+				t.Fatal(err)
+			}
+			if err := e.saveExit(exitEdit{ID: defaultExitID("direct"), URL: "direct", Label: "直连", Multiplier: 2}); err != nil {
+				t.Fatal(err)
+			}
+			e.shutdown()
+			savePersistedState()
+			restarted := &probeEngine{}
+			probeTrack = restarted
+			t.Cleanup(func() { restarted.stopPrefetchWatcher(); probeTrack = e })
+			loadPersistedState()
+			loadRuntimeSettings()
+			enabled, configuredWindow := true, 3
+			if err := configureProbeTrack(probeConfigYAML{Enabled: &enabled, PrefetchMinutes: &configuredWindow}); err != nil {
+				t.Fatal(err)
+			}
+			for i := 0; i < 2; i++ {
+				if restarted.values["gpt-6-astra"].Value != active || restarted.candidates["gpt-6-astra"].Value != candidate ||
+					restarted.halted != halted || !restarted.paused["gpt-5.6-sol"] || !restarted.disabledExits["direct"] {
+					t.Fatal("restart or reconfigure lost tickets or user mode")
+				}
+				if restarted.cfg.Config.Prefetch != 10*time.Minute || exitBudget(restarted.cfg.Config, "direct") != 6 {
+					t.Fatal("restart or reconfigure lost confirmed runtime settings")
+				}
+				restarted.prefetchScan()
+				if restarted.probesTotal != 0 || restarted.queueActive {
+					t.Fatal("restored healthy tickets must not trigger startup probing")
+				}
+				// A subsequent in-process configuration reload has the same rule.
+				if err := configureProbeTrack(probeConfigYAML{Enabled: &enabled, PrefetchMinutes: &configuredWindow}); err != nil {
+					t.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+func TestRuntimeIntervalPersistsWithoutStarting(t *testing.T) {
+	e := newPrefetchTestEngine(t)
+	e.halted = true
+	e.paused["gpt-6-astra"] = true
+	if err := e.setProbeIntervalSeconds(25); err != nil || e.cfg.Config.ProbeInterval != 25*time.Second {
+		t.Fatal("saving the interval must apply the new value")
+	}
+	if !e.halted || !e.paused["gpt-6-astra"] || e.queueActive || e.probesTotal != 0 {
+		t.Fatal("saving the interval must preserve modes and remain idle")
+	}
+	base := e.baseCfg.Config
+	e.settings = runtimeSettings{}
+	loadRuntimeSettings()
+	restored, err := applyRuntimeSettings(base, e.settings)
+	if err != nil || restored.ProbeInterval != 25*time.Second || e.settings.IntervalSeconds == nil || *e.settings.IntervalSeconds != 25 {
+		t.Fatal("confirmed interval did not survive a reload")
+	}
+	for _, raw := range []string{
+		`{"action":"probe-interval"}`,
+		`{"action":"probe-interval","seconds":0}`,
+		`{"action":"probe-interval","seconds":3601}`,
+		`{"action":"probe-interval","seconds":1.5}`,
+		`{"action":"probe-interval","seconds":"25"}`,
+	} {
+		response, _ := probeControl([]byte(raw))
+		if response.StatusCode != 400 || e.cfg.Config.ProbeInterval != 25*time.Second {
+			t.Fatalf("invalid interval %s changed the confirmed setting", raw)
+		}
+	}
+	for _, seconds := range []int{1, 3600} {
+		response, _ := probeControl([]byte(`{"action":"probe-interval","seconds":` + strconv.Itoa(seconds) + `}`))
+		if response.StatusCode != 200 || e.cfg.Config.ProbeInterval != time.Duration(seconds)*time.Second {
+			t.Fatalf("boundary interval %d must be accepted", seconds)
+		}
+	}
+	if !e.halted || e.queueActive || e.probesTotal != 0 {
+		t.Fatal("boundary saves must not re-arm the stopped engine")
+	}
+}
+
+func TestRuntimeIntervalAppliesToNextWait(t *testing.T) {
+	e := newPrefetchTestEngine(t)
+	base := e.cfg
+	e.baseCfg = &base
+	e.cfg.Config.ProbeInterval = 3 * time.Second
+	done := make(chan time.Duration, 1)
+	go func() {
+		start := time.Now()
+		e.waitProbeInterval(3*time.Second, nil, nil)
+		done <- time.Since(start)
+	}()
+	time.Sleep(150 * time.Millisecond)
+	if err := e.setProbeIntervalSeconds(1); err != nil {
+		t.Fatal(err)
+	}
+	elapsed := <-done
+	if elapsed < 2800*time.Millisecond || elapsed > 6*time.Second {
+		t.Fatalf("an in-flight wait must keep its original duration, got %v", elapsed)
+	}
+	go func() {
+		start := time.Now()
+		// A stale argument must not win: the snapshot takes the saved value.
+		e.waitProbeInterval(3*time.Second, nil, nil)
+		done <- time.Since(start)
+	}()
+	elapsed = <-done
+	if elapsed < 800*time.Millisecond || elapsed > 2400*time.Millisecond {
+		t.Fatalf("the next wait must use the saved interval, got %v", elapsed)
+	}
+	stopped := make(chan struct{})
+	close(stopped)
+	start := time.Now()
+	if e.waitProbeInterval(time.Second, stopped, nil) {
+		t.Fatal("a closed stop channel must report cancellation")
+	}
+	if time.Since(start) > 900*time.Millisecond {
+		t.Fatal("a closed stop channel must end the wait immediately")
 	}
 }

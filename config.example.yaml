@@ -132,6 +132,16 @@ plugins:
           # or successor remains available. Actual business evidence is
           # evaluated independently by the rejection switch below.
           prefetch-minutes: 3
+          # The dashboard can persist overrides in runtime-settings.json
+          # beside state.json. Confirmed dashboard values take precedence.
+          # 0 disables future automatic prefetch; it does not cancel queued
+          # work or change the full-stop/paused modes. Keep below ttl-minutes.
+          # The serial queue interval (seconds, 1..3600) can likewise be
+          # saved from the dashboard; a change applies from the next wait
+          # and the worker is never re-armed by saving.
+          # Proxy entries can also be added/edited on the pool page. Each
+          # entry may override its base attempt count and multiply it by
+          # 0.01..100 (rounded up); an explicit round cap still wins.
           # Degraded-model rejection is ON by default and restored from the
           # state snapshot across reloads; toggle it from the dashboard
           # header (global switch, independent of the probe track).

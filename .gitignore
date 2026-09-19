@@ -19,6 +19,9 @@ go.work.sum
 **/config.yaml
 **/state.json
 **/state.json.*
+**/runtime-settings.json
+**/runtime-settings.json.*
+**/.runtime-settings-*
 **/seeds.json
 **/auths/
 .env

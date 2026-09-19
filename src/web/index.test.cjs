@@ -34,8 +34,8 @@ function panel() {
   const html=fs.readFileSync(__dirname+'/index.html','utf8');
   const script=html.match(/<script>([\s\S]*?)<\/script>/)[1];
   vm.runInContext(script,context);
-  vm.runInContext('globalThis.renderTest=renderProbe;globalThis.renderDataTest=render;globalThis.actions=[];probeControl=async payload=>{actions.push(payload);return false;}',context);
-  return {get,render:context.renderTest,renderData:context.renderDataTest,actions:context.actions};
+  vm.runInContext('globalThis.renderTest=renderProbe;globalThis.renderPoolTest=renderPool;globalThis.openExitTest=openExitEditor;globalThis.renderDataTest=render;globalThis.actions=[];globalThis.controlResult=false;probeControl=async payload=>{actions.push(payload);return controlResult;}',context);
+  return {get,render:context.renderTest,renderPool:context.renderPoolTest,openExit:context.openExitTest,renderData:context.renderDataTest,actions:context.actions,setResult:value=>{context.controlResult=value;}};
 }
 
 function fixture(overrides={}) {
@@ -139,4 +139,117 @@ test('unchecked request records retain raw observations without mismatch badges'
   assert.doesNotMatch(row.textContent,/模型不一致|降智已拦截/);
   assert.equal(row.children[6].className,'turnstate');
   assert.match(row.children[6].textContent,/312 字节/);
+});
+
+test('prefetch draft survives refresh and requires explicit valid confirmation',async()=>{
+  const p=panel();p.render(fixture({ttl_minutes:55}));
+  assert.equal(p.get('prefetch-minutes').value,'3');
+  p.get('prefetch-minutes').value='10';p.get('prefetch-minutes').events.input();
+  p.render(fixture({prefetch_minutes:5}));
+  assert.equal(p.get('prefetch-minutes').value,'10');
+  assert.equal(p.actions.length,0);
+  for(const invalid of ['','-1','1.5','55','1e2']){
+    p.get('prefetch-minutes').value=invalid;await p.get('prefetch-save').events.click();
+    assert.equal(p.actions.length,0);
+  }
+  p.get('prefetch-minutes').value='10';await p.get('prefetch-save').events.click();
+  assert.deepEqual(JSON.parse(JSON.stringify(p.actions)),[{action:'prefetch-window',minutes:10}]);
+  assert.match(p.get('prefetch-feedback').textContent,/保存失败/);
+  assert.equal(p.get('prefetch-minutes').value,'10');
+});
+
+test('prefetch confirmation remains stable during polling and permits zero',async()=>{
+  const p=panel();p.render(fixture({halted:true}));
+  let finish;const pending=new Promise(resolve=>{finish=resolve;});p.setResult(pending);
+  p.get('prefetch-minutes').value='0';p.get('prefetch-minutes').events.input();
+  const saving=p.get('prefetch-save').events.click();
+  p.render(fixture({halted:true,prefetch_minutes:3}));
+  assert.equal(p.get('prefetch-minutes').value,'0');
+  assert.equal(p.get('prefetch-save').disabled,true);
+  finish(true);await saving;
+  assert.match(p.get('prefetch-feedback').textContent,/已保存：0/);
+  assert.equal(p.get('prefetch-save').disabled,false);
+  assert.equal(p.actions[0].action,'prefetch-window');
+  assert.equal(p.actions.length,1);
+});
+
+test('proxy editing retains authentication by omission and uses stable IDs',async()=>{
+  const p=panel();
+  const item={id:'exit-test',proxy:'socks5://192.0.2.1:1080',label:'备用出口',has_auth:true,pool:false,attempts:0,multiplier:1,budget:3,disabled:true};
+  p.renderPool({proxies_state:[item]});
+  const row=p.get('pool-rows').children[0];
+  assert.match(row.children[2].textContent,/3 × 1 = 3/);
+  await row.children[8].children[0].events.click();
+  assert.equal(p.actions[0].id,'exit-test');assert.equal(p.actions[0].proxy,undefined);
+  row.children[8].children[2].events.click();
+  assert.equal(p.get('exit-password').value,'');assert.equal(p.get('exit-username').value,'');
+  assert.match(p.get('exit-auth-note').textContent,/已配置认证/);
+  p.get('exit-multiplier').value='2';await p.get('exit-save').events.click();
+  const sent=p.actions[1];
+  assert.equal(sent.action,'save-exit');assert.equal(sent.exit.id,'exit-test');
+  assert.equal(sent.exit.multiplier,2);assert.equal(sent.exit.password,undefined);assert.equal(sent.exit.username,undefined);
+  assert.match(p.get('exit-feedback').textContent,/保存失败/);
+  assert.equal(p.get('exit-form').classList.contains('hidden'),false);
+});
+
+test('new pool is confirmed once and sensitive drafts are cleared after success',async()=>{
+  const p=panel();p.get('pool-add').events.click();
+  p.get('exit-label').value='聚合出口';p.get('exit-url').value='http://192.0.2.1:8080';
+  p.get('exit-kind').value='pool';p.get('exit-attempts').value='100';p.get('exit-multiplier').value='2';
+  p.get('exit-username').value='test-user';p.get('exit-password').value='TEST_PASSWORD_CANARY';
+  assert.equal(p.actions.length,0);
+  p.setResult(true);await p.get('exit-save').events.click();
+  assert.equal(p.actions.length,1);assert.equal(p.actions[0].exit.pool,true);
+  assert.equal(p.actions[0].exit.attempts,100);assert.equal(p.actions[0].exit.multiplier,2);
+  assert.equal(p.get('exit-form').classList.contains('hidden'),true);
+  assert.equal(p.get('exit-url').value,'');assert.equal(p.get('exit-password').value,'');
+});
+
+test('proxy form validates budgets and never sends retained credentials when clearing auth',async()=>{
+  const p=panel();p.openExit({id:'exit-test',proxy:'http://192.0.2.1:8080',has_auth:true});
+  for(const invalid of ['','0','-1','101','NaN']){
+    p.get('exit-multiplier').value=invalid;await p.get('exit-save').events.click();
+    assert.equal(p.actions.length,0);
+  }
+  p.get('exit-multiplier').value='0.5';p.get('exit-clear-auth').checked=true;
+  p.get('exit-username').value='test-user';p.get('exit-password').value='TEST_PASSWORD_CANARY';
+  await p.get('exit-save').events.click();
+  assert.equal(p.actions[0].exit.clear_auth,true);assert.equal(p.actions[0].exit.password,undefined);
+});
+
+test('serial interval draft survives refresh validates bounds and saves once',async()=>{
+  const p=panel();p.render(fixture({interval_seconds:2}));
+  assert.equal(p.get('probe-interval-seconds').value,'2');
+  assert.match(p.get('probe-interval-feedback').textContent,/当前生效：2 秒（配置默认）/);
+  p.get('probe-interval-seconds').value='30';p.get('probe-interval-seconds').events.input();
+  p.render(fixture({interval_seconds:5}));
+  assert.equal(p.get('probe-interval-seconds').value,'30');
+  assert.equal(p.actions.length,0);
+  for(const invalid of ['','-1','0','3601','1.5','1e2']){
+    p.get('probe-interval-seconds').value=invalid;await p.get('probe-interval-save').events.click();
+    assert.equal(p.actions.length,0);
+  }
+  assert.match(p.get('probe-interval-feedback').textContent,/请输入 1–3600 的整数秒/);
+  p.setResult(true);
+  p.get('probe-interval-seconds').value='3600';await p.get('probe-interval-save').events.click();
+  assert.deepEqual(JSON.parse(JSON.stringify(p.actions)),[{action:'probe-interval',seconds:3600}]);
+  assert.match(p.get('probe-interval-feedback').textContent,/已保存：3600 秒；下一次等待起生效/);
+});
+
+test('serial interval confirmation stays stable during polling and reports failure',async()=>{
+  const p=panel();p.render(fixture());
+  let finish;const pending=new Promise(resolve=>{finish=resolve;});p.setResult(pending);
+  p.get('probe-interval-seconds').value='45';p.get('probe-interval-seconds').events.input();
+  const saving=p.get('probe-interval-save').events.click();
+  p.render(fixture({interval_seconds:2,interval_override:false}));
+  assert.equal(p.get('probe-interval-seconds').value,'45');
+  assert.equal(p.get('probe-interval-save').disabled,true);
+  finish(false);await saving;
+  assert.match(p.get('probe-interval-feedback').textContent,/保存失败，原设置未更改/);
+  assert.equal(p.get('probe-interval-save').disabled,false);
+  assert.equal(p.actions[0].action,'probe-interval');
+  assert.equal(p.actions.length,1);
+  p.setResult(true);
+  p.get('probe-interval-save').events.click();
+  assert.equal(p.get('probe-interval-seconds').value,'45');
 });

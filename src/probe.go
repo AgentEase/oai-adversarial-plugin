@@ -85,6 +85,9 @@ type probeConfig struct {
 	SecretsFile         string
 	ProxyPools          map[string]bool
 	ProxyLabels         map[string]string
+	ProxyIDs            map[string]string
+	ProxyAttempts       map[string]int
+	ProxyMultipliers    map[string]float64
 }
 
 // probeConfigYAML mirrors the YAML keys accepted under turn-state-override.probe.
@@ -200,6 +203,10 @@ type exitPenalty struct {
 type probeEngine struct {
 	mu             sync.Mutex
 	cfg            probeConfigState
+	baseCfg        *probeConfigState
+	settings       runtimeSettings
+	settingsError  string
+	configRevision uint64
 	values         map[string]stateEntry
 	failures       map[string]probeFailure
 	suspects       map[string]probeSuspicion
@@ -398,6 +405,7 @@ func loadProxiesFile(path string) ([]string, map[string]bool, map[string]string,
 }
 
 func configureProbeTrack(block probeConfigYAML) error {
+	ensurePersistence()
 	cfg := parseProbeConfig(block)
 	var cfgErr string
 	if cfg.Enabled {
@@ -414,7 +422,15 @@ func configureProbeTrack(block probeConfigYAML) error {
 	}
 	probeTrack.mu.Lock()
 	probeTrack.cancelCurrentLocked()
+	base := probeConfigState{Config: cfg, Error: cfgErr}
+	probeTrack.baseCfg = &base
+	if effective, err := applyRuntimeSettings(cfg, probeTrack.settings); err == nil {
+		cfg = effective
+	} else {
+		cfgErr = err.Error()
+	}
 	probeTrack.cfg = probeConfigState{Config: cfg, Error: cfgErr}
+	probeTrack.configRevision++
 	// Policy migration: plain exits whose accumulated failures are below the
 	// (possibly raised) threshold are released at once. Rotating pools are
 	// released unconditionally - v1.5.17 never benches them any more, so any
@@ -660,11 +676,27 @@ func (e *probeEngine) queueLoop() {
 		}
 		// The queue interval: the pacing between two tasks (and, inside a
 		// task, between retries). Interrupted by the global brake.
-		select {
-		case <-time.After(cfg.ProbeInterval):
-		case <-brake:
-			// The stop cleared the queue; the next loop iteration exits.
-		}
+		e.waitProbeInterval(cfg.ProbeInterval, brake, nil)
+	}
+}
+
+// Snapshot the latest interval when a wait starts. A saved change does not
+// reset an existing timer, interrupt a request, or re-arm the stopped worker.
+func (e *probeEngine) waitProbeInterval(interval time.Duration, stop, brake <-chan struct{}) bool {
+	e.mu.Lock()
+	if e.baseCfg != nil {
+		interval = e.cfg.Config.ProbeInterval
+	}
+	e.mu.Unlock()
+	timer := time.NewTimer(interval)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return true
+	case <-stop:
+		return false
+	case <-brake:
+		return false
 	}
 }
 
@@ -1127,18 +1159,9 @@ func effectiveMaxAttempts(cfg probeConfig, proxies []string) int {
 	if cfg.MaxAttemptsPerRound > 0 {
 		return cfg.MaxAttemptsPerRound
 	}
-	perHop := cfg.AttemptsPerHop
-	if perHop <= 0 {
-		perHop = probeDefaultsAttemptsPerHop
-	}
-	poolBudget := poolAttemptsFor(cfg)
 	total := 0
 	for _, spec := range proxies {
-		if cfg.ProxyPools[spec] {
-			total += poolBudget
-		} else {
-			total += perHop
-		}
+		total += exitBudget(cfg, spec)
 	}
 	if total > 0 {
 		return total
@@ -1307,7 +1330,7 @@ func (e *probeEngine) availableProxies(proxies []string, now time.Time) []string
 	}
 	holds := make([]hold, 0, len(proxies))
 	for _, spec := range proxies {
-		if inUsable(spec) {
+		if e.disabledExits[spec] || inUsable(spec) {
 			continue
 		}
 		if penalty, ok := e.exitPenalties[spec]; ok {
@@ -1363,6 +1386,15 @@ func (e *probeEngine) noteExitOutcome(spec string, healthy bool, errorText strin
 	now := time.Now().UTC()
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	if e.baseCfg != nil {
+		present := false
+		for _, current := range e.cfg.Config.Proxies {
+			present = present || current == spec
+		}
+		if !present {
+			return // An edited endpoint's in-flight result remains history only.
+		}
+	}
 	if e.exitPenalties == nil {
 		e.exitPenalties = map[string]exitPenalty{}
 	}
@@ -1431,6 +1463,9 @@ func (e *probeEngine) probeModel(model string, cfg probeConfig, stop <-chan stru
 		return
 	}
 	e.mu.Lock()
+	if e.baseCfg != nil {
+		cfg = e.cfg.Config
+	}
 	if e.probing == nil {
 		e.probing = map[string]bool{}
 	}
@@ -1448,6 +1483,7 @@ func (e *probeEngine) probeModel(model string, cfg probeConfig, stop <-chan stru
 	}
 	e.probing[model] = true
 	e.lastAttempt[model] = time.Now().UTC()
+	revision := e.configRevision
 	e.mu.Unlock()
 	defer func() {
 		e.mu.Lock()
@@ -1460,22 +1496,16 @@ func (e *probeEngine) probeModel(model string, cfg probeConfig, stop <-chan stru
 	}()
 	maxAttempts := effectiveMaxAttempts(cfg, proxies)
 	budgets := make(map[string]int, len(proxies))
+	spent := make(map[string]int, len(proxies))
 	for _, spec := range proxies {
-		if cfg.ProxyPools[spec] {
-			budgets[spec] = poolAttemptsFor(cfg)
-		} else {
-			budgets[spec] = cfg.AttemptsPerHop
-			if budgets[spec] <= 0 {
-				budgets[spec] = probeDefaultsAttemptsPerHop
-			}
-		}
+		budgets[spec] = exitBudget(cfg, spec)
 	}
 	attempts := 0
 	lastError := ""
 	lastLength := 0
 	cursor := 0
 	brake := e.abortSignal()
-	for attempts < maxAttempts {
+	for {
 		select {
 		case <-stop:
 			return
@@ -1492,9 +1522,22 @@ func (e *probeEngine) probeModel(model string, cfg probeConfig, stop <-chan stru
 		// outcome (v1.5.20).
 		e.mu.Lock()
 		pausedMidRound := e.paused[model]
+		if revision != e.configRevision {
+			cfg = e.cfg.Config
+			revision = e.configRevision
+			proxies = append([]string(nil), cfg.Proxies...)
+			maxAttempts = effectiveMaxAttempts(cfg, proxies)
+			budgets = make(map[string]int, len(proxies))
+			for _, spec := range proxies {
+				budgets[spec] = max(0, exitBudget(cfg, spec)-spent[exitID(cfg, spec)])
+			}
+		}
 		e.mu.Unlock()
 		if pausedMidRound {
 			return
+		}
+		if attempts >= maxAttempts {
+			break
 		}
 		rotation := e.availableProxies(proxies, time.Now().UTC())
 		if len(rotation) == 0 {
@@ -1506,8 +1549,16 @@ func (e *probeEngine) probeModel(model string, cfg probeConfig, stop <-chan stru
 			break
 		}
 		cursor = next
+		e.mu.Lock()
+		if revision != e.configRevision {
+			e.mu.Unlock()
+			continue
+		}
+		// Reserve this attempt before an edit can publish a new configuration.
 		budgets[proxySpec]--
+		spent[exitID(cfg, proxySpec)]++
 		attempts++
+		e.mu.Unlock()
 		record, value := e.probeOnce(model, proxySpec, cfg)
 		e.appendRecord(record)
 		if value != "" {
@@ -1538,11 +1589,7 @@ func (e *probeEngine) probeModel(model string, cfg probeConfig, stop <-chan stru
 		}
 		e.noteExitOutcome(proxySpec, false, record.Error)
 		e.noteProbeFailure(model, record, cfg)
-		select {
-		case <-time.After(cfg.ProbeInterval):
-		case <-stop:
-			return
-		case <-brake:
+		if !e.waitProbeInterval(cfg.ProbeInterval, stop, brake) {
 			return
 		}
 	}
@@ -1701,7 +1748,7 @@ func (e *probeEngine) probeOnce(model, proxySpec string, cfg probeConfig) (probe
 	e.probesTotal++
 	e.probesOK++
 	e.lastError = ""
-	e.lastActivity = fmt.Sprintf("%s via %s", model, proxySpec)
+	e.lastActivity = fmt.Sprintf("%s via %s", model, publicProxyURL(proxySpec))
 	e.mu.Unlock()
 	return record, state
 }
@@ -2051,10 +2098,10 @@ func buildProbeTransport(spec string) (*http.Transport, *socksBind, error) {
 
 // probeSummary describes the probe engine state for the management API.
 func probeSummary() map[string]any {
-	cfgState := currentProbeConfig()
+	probeTrack.mu.Lock()
+	cfgState := probeTrack.cfg
 	cfg := cfgState.Config
 	now := time.Now().UTC()
-	probeTrack.mu.Lock()
 	// Each value carries the real validity window derived from the token's own
 	// embedded timestamp (issue time) plus the configured validity duration:
 	// issued_at / expires_at / remaining_seconds / expired are computed fresh
@@ -2079,7 +2126,7 @@ func probeSummary() map[string]any {
 			"detection_enabled": true,
 			"value_length": entry.ValueLength,
 			"source":       entry.Source,
-			"proxy":        entry.Proxy,
+			"proxy":        publicProxyURL(entry.Proxy),
 			"captured_at":  entry.CapturedAt,
 			"valid":        entry.Valid,
 		}
@@ -2132,6 +2179,10 @@ func probeSummary() map[string]any {
 	}
 	history := make([]probeRecord, len(probeTrack.history))
 	copy(history, probeTrack.history)
+	for i := range history {
+		history[i].Proxy = publicProxyURL(history[i].Proxy)
+		history[i].Error = redactProxyText(history[i].Error)
+	}
 	// newest first
 	for i, j := 0, len(history)-1; i < j; i, j = i+1, j-1 {
 		history[i], history[j] = history[j], history[i]
@@ -2139,6 +2190,7 @@ func probeSummary() map[string]any {
 	failures := make([]probeFailure, 0, len(cfg.Models))
 	for _, model := range cfg.Models {
 		if failure, ok := probeTrack.failures[model]; ok && degradationDetectionEnabled(model, "") {
+			failure.LastError = redactProxyText(failure.LastError)
 			failures = append(failures, failure)
 		}
 	}
@@ -2155,6 +2207,7 @@ func probeSummary() map[string]any {
 	}
 	for _, model := range cfg.Models {
 		if suspicion, ok := probeTrack.suspects[model]; ok && degradationDetectionEnabled(model, "") && suspicion.Failures >= threshold {
+			suspicion.LastError = redactProxyText(suspicion.LastError)
 			suspects = append(suspects, suspicion)
 		}
 	}
@@ -2171,7 +2224,14 @@ func probeSummary() map[string]any {
 	activeCount := 0
 	disabledCount := 0
 	for _, spec := range cfg.Proxies {
-		item := map[string]any{"proxy": spec, "active": true, "disabled": probeTrack.disabledExits[spec]}
+		multiplier := cfg.ProxyMultipliers[spec]
+		if multiplier <= 0 {
+			multiplier = 1
+		}
+		parsed, _ := url.Parse(spec)
+		item := map[string]any{"id": exitID(cfg, spec), "proxy": publicProxyURL(spec), "active": true,
+			"disabled": probeTrack.disabledExits[spec], "attempts": cfg.ProxyAttempts[spec],
+			"multiplier": multiplier, "budget": exitBudget(cfg, spec), "has_auth": parsed != nil && parsed.User != nil}
 		if cfg.ProxyPools[spec] {
 			item["pool"] = true
 		}
@@ -2187,7 +2247,7 @@ func probeSummary() map[string]any {
 				item["rest"] = true
 			}
 			if penalty.LastError != "" {
-				item["last_error"] = penalty.LastError
+				item["last_error"] = redactProxyText(penalty.LastError)
 			}
 			if penalty.FirstAt != "" {
 				item["first_at"] = penalty.FirstAt
@@ -2215,7 +2275,7 @@ func probeSummary() map[string]any {
 		"error":        cfgState.Error,
 		"models":       append([]string(nil), cfg.Models...),
 		"detection_models": detectionModels,
-		"proxies":      append([]string(nil), cfg.Proxies...),
+		"proxies":      publicProxyList(cfg.Proxies),
 		"proxies_state": pool,
 		"pool_total":   len(cfg.Proxies),
 		"pool_active":  activeCount,
@@ -2226,14 +2286,18 @@ func probeSummary() map[string]any {
 		"exit_success_cooldown_minutes": int(cfg.ExitSuccessCooldown / time.Minute),
 		"exit_min_active":       cfg.ExitMinActive,
 		"prefetch_minutes":      int(cfg.Prefetch / time.Minute),
+		"prefetch_override":     probeTrack.settings.PrefetchMinutes != nil,
+		"settings_error":        probeTrack.settingsError,
 		"proxy_index":  probeTrack.proxyIndex,
 		"ttl_minutes":      int(cfg.TTL / time.Minute),
 		"window_minutes":   int(cfg.Window / time.Minute),
 		"scan_seconds": int(cfg.ScanInterval / time.Second),
 		"interval_seconds": int(cfg.ProbeInterval / time.Second),
+		"interval_override": probeTrack.settings.IntervalSeconds != nil,
 		"attempts_per_proxy": cfg.AttemptsPerHop,
 		"pool_attempts": poolAttemptsFor(cfg),
 		"max_attempts_per_round": effectiveMaxAttempts(cfg, cfg.Proxies),
+		"max_attempts_explicit": cfg.MaxAttemptsPerRound > 0,
 		"cooldown_minutes": int(cfg.Cooldown / time.Minute),
 		"business":        businessMarks,
 		"suspect_threshold": cfg.SuspectThreshold,
@@ -2253,8 +2317,8 @@ func probeSummary() map[string]any {
 		"seeded":       probeTrack.seeded,
 		"probes_total": probeTrack.probesTotal,
 		"probes_ok":    probeTrack.probesOK,
-		"last_error":   probeTrack.lastError,
-		"last_activity": probeTrack.lastActivity,
+		"last_error":   redactProxyText(probeTrack.lastError),
+		"last_activity": redactProxyText(probeTrack.lastActivity),
 		"values":       values,
 		"failures":     failures,
 		"history":      history,

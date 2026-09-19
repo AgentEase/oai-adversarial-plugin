@@ -12,7 +12,7 @@ import (
 
 const (
 	pluginID                   = "timezone-override"
-	pluginVersion              = "1.5.30"
+	pluginVersion              = "1.5.32"
 	historyLimit               = 200
 	schemaVersion              = 6
 	streamChunkHeaderInitIndex = -1
@@ -408,8 +408,12 @@ func probeControl(body []byte) (managementResponse, error) {
 	var req struct {
 		Model   string `json:"model"`
 		Proxy   string `json:"proxy"`
+		ID      string `json:"id"`
 		Action  string `json:"action"`
 		Enabled *bool  `json:"enabled"`
+		Minutes *int   `json:"minutes"`
+		Seconds *int   `json:"seconds"`
+		Exit    *exitEdit `json:"exit"`
 	}
 	if len(body) > 0 {
 		if err := json.Unmarshal(body, &req); err != nil {
@@ -417,6 +421,27 @@ func probeControl(body []byte) (managementResponse, error) {
 		}
 	}
 	switch action := strings.ToLower(strings.TrimSpace(req.Action)); action {
+	case "prefetch-window":
+		if req.Minutes == nil {
+			return jsonErrorResponse(http.StatusBadRequest, "缺少 minutes 字段"), nil
+		}
+		if err := probeTrack.setPrefetchMinutes(*req.Minutes); err != nil {
+			return settingsErrorResponse(err)
+		}
+	case "probe-interval":
+		if req.Seconds == nil {
+			return jsonErrorResponse(http.StatusBadRequest, "缺少 seconds 字段"), nil
+		}
+		if err := probeTrack.setProbeIntervalSeconds(*req.Seconds); err != nil {
+			return settingsErrorResponse(err)
+		}
+	case "save-exit":
+		if req.Exit == nil {
+			return jsonErrorResponse(http.StatusBadRequest, "缺少 exit 字段"), nil
+		}
+		if err := probeTrack.saveExit(*req.Exit); err != nil {
+			return settingsErrorResponse(err)
+		}
 	case "pause", "resume":
 		model := strings.TrimSpace(req.Model)
 		if model == "" {
@@ -449,14 +474,21 @@ func probeControl(body []byte) (managementResponse, error) {
 	case "reset-exit":
 		// Clear the cool-down / scheduled rest of one egress (or every
 		// egress when proxy is empty), returning them to rotation at once.
-		probeTrack.resetExit(req.Proxy)
+		proxy := ""
+		if req.ID != "" || req.Proxy != "" {
+			proxy = probeTrack.resolveExit(req.ID, req.Proxy)
+			if proxy == "" {
+				return jsonErrorResponse(http.StatusBadRequest, "未知出口，请刷新列表"), nil
+			}
+		}
+		probeTrack.resetExit(proxy)
 	case "exit-enabled":
-		proxy := strings.TrimSpace(req.Proxy)
+		proxy := probeTrack.resolveExit(req.ID, strings.TrimSpace(req.Proxy))
 		if proxy == "" || req.Enabled == nil {
 			return jsonErrorResponse(http.StatusBadRequest, "缺少 proxy 或 enabled 字段"), nil
 		}
 		if !probeTrack.setExitEnabled(proxy, *req.Enabled) {
-			return jsonErrorResponse(http.StatusBadRequest, "未知出口："+proxy), nil
+			return jsonErrorResponse(http.StatusBadRequest, "未知出口，请刷新列表"), nil
 		}
 	case "start-round":
 		if !probeTrack.start() {
