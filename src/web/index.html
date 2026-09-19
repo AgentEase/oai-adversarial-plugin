@@ -21,6 +21,8 @@
     :is(button,a,input,select,summary,[tabindex]):focus-visible{outline:2px solid var(--accent);outline-offset:3px}.switch-btn.on{background:var(--ok-bg);border-color:var(--ok);color:var(--ok)}.icon-btn{font-size:12px;padding:5px 9px;min-height:32px}.icon-btn.paused{color:var(--accent)}.control-cell{white-space:nowrap}.control-cell button+button{margin-left:6px}
     .table-wrap{overflow:auto;scrollbar-gutter:stable}table{width:100%;border-collapse:collapse;text-align:left;white-space:nowrap}th{font-size:11px;color:var(--muted);font-weight:550;background:var(--subtle);padding:12px 18px}td{padding:16px 18px;border-top:1px solid var(--line);vertical-align:top;font-size:12px}td.model{max-width:210px;white-space:normal;overflow-wrap:anywhere;font-weight:550}tbody tr:hover{background:var(--subtle)}.time{font-size:12px;font-variant-numeric:tabular-nums}.sub,.probe-note{font-size:12px;color:var(--muted)}.none{color:var(--muted)}.src{font-size:11px;color:var(--muted);margin-left:6px}#probe-history td:last-child,#probe-success-history td:last-child{min-width:200px;max-width:440px;white-space:normal;overflow-wrap:anywhere}
     .badge{display:inline-block;padding:3px 8px;border-radius:5px;font-size:11px;font-weight:550;line-height:1.6;background:var(--soft);color:var(--accent)}.badge.inserted,.badge.probe-ok,.badge.state-ok{background:var(--ok-bg);color:var(--ok)}.badge.mismatch,.badge.override,.badge.state-warn{background:var(--warn-bg);color:var(--warn)}.badge.mismatch,.badge.override,.badge.skipped{margin-left:6px}.badge.probe-fail,.badge.state-fail{background:var(--danger-bg);color:var(--danger)}.badge.unchanged,.badge.skipped,.badge.state-off{background:var(--subtle);color:var(--muted)}.badge.state-rest{background:var(--soft);color:var(--accent)}.ttl-cell>.badge{margin:0 4px 5px 0}.paused-row td.model{color:var(--muted)}.ttl-cell,.turnstate,.budget{font-variant-numeric:tabular-nums}.ttl-cell .bar{height:4px;border-radius:2px;background:var(--line);margin:8px 0;max-width:150px}.ttl-cell .bar i{display:block;height:100%;border-radius:inherit;background:var(--ok)}
+    .probe-records td.model{min-width:130px}
+    .egress-ip{min-width:180px;max-width:300px;white-space:normal;overflow-wrap:anywhere}.egress-ip code{font-variant-numeric:tabular-nums}.egress-ip .sub{margin-top:3px;font-size:11px}
     .probe-records>summary{cursor:pointer;list-style:none}.probe-records>summary::-webkit-details-marker{display:none}.probe-records>summary:after{content:"";width:7px;height:7px;flex-shrink:0;border:solid var(--muted);border-width:0 1.5px 1.5px 0;transform:rotate(45deg);margin-left:4px}.probe-records[open]>summary:after{transform:rotate(225deg)}.probe-records:not([open])>summary{border-bottom:0}.probe-records>summary:hover{background:var(--subtle)}.probe-records>summary .probe-note{margin-left:auto;font-size:12px;font-weight:400}
     .probe-settings{border-bottom:1px solid var(--line)}.probe-settings summary{display:flex;align-items:center;flex-wrap:wrap;gap:12px;padding:14px 22px;cursor:pointer;list-style:none;font-size:12px}.probe-settings summary::-webkit-details-marker{display:none}.probe-settings summary:after{content:"";width:7px;height:7px;border:solid var(--muted);border-width:0 1.5px 1.5px 0;transform:rotate(45deg);margin-left:auto;margin-right:4px}.probe-settings[open] summary:after{transform:rotate(225deg)}.probe-settings summary:hover{background:var(--subtle)}.settings-title{font-weight:600}.settings-body{display:grid;grid-template-columns:1fr 1fr;padding:0 22px 18px;gap:24px}.settings-line{display:flex;align-items:center;flex-wrap:wrap;gap:8px;font-size:12px;padding:14px 0 0;border-top:1px solid var(--line)}.settings-line label{flex-basis:100%;font-weight:550}.settings-line input{width:84px}.settings-line .sub,.settings-line [role=status]{flex-basis:100%}.settings-error{color:var(--danger)}
     input,select{border:1px solid var(--control-line);border-radius:6px;background:var(--bg);color:var(--text);padding:8px 10px;font:inherit;min-height:36px}input[type=checkbox]{accent-color:var(--accent);min-height:auto}input::placeholder{color:var(--muted)}.exit-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px 24px;padding:22px;border-bottom:1px solid var(--line);background:var(--subtle)}.exit-form label{display:flex;flex-direction:column;gap:6px;font-size:12px}.exit-form input,.exit-form select{width:100%;min-width:0}.exit-form .wide{grid-column:1/-1}.exit-form .check{flex-direction:row;flex-wrap:wrap;align-items:center}.exit-form .check input{width:auto}
@@ -90,14 +92,14 @@
     <details class="panel probe-records" id="probe-history-panel">
       <summary class="toolbar"><h2 class="section-heading"><svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 11a9 9 0 1 1 2.7 7M3 4v7h7"/><path d="M12 7v5l3 2"/></svg><span><span data-i18n="探测记录">探测记录</span></span></h2><span class="probe-note"><span data-i18n="最近 50 条 · 最新在前">最近 50 条 · 最新在前</span></span></summary>
       <div class="table-wrap" id="probe-history-wrap" tabindex="0" role="region" aria-label="探测记录，可横向滚动" data-i18n-aria-label="探测记录，可横向滚动"><table>
-        <thead><tr><th><span data-i18n="时间（UTC+8）">时间（UTC+8）</span></th><th><span data-i18n="模型">模型</span></th><th><span data-i18n="出口">出口</span></th><th><span data-i18n="结果">结果</span></th><th><span data-i18n="耗时">耗时</span></th><th><span data-i18n="说明">说明</span></th></tr></thead>
+        <thead><tr><th><span data-i18n="时间（UTC+8）">时间（UTC+8）</span></th><th><span data-i18n="模型">模型</span></th><th><span data-i18n="出口">出口</span></th><th><span data-i18n="出口 IP / 地址">出口 IP / 地址</span></th><th><span data-i18n="结果">结果</span></th><th><span data-i18n="耗时">耗时</span></th><th><span data-i18n="说明">说明</span></th></tr></thead>
         <tbody id="probe-history"></tbody>
       </table></div>
     </details>
     <details class="panel probe-records" id="probe-success-history-panel">
       <summary class="toolbar"><h2 class="section-heading"><svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/></svg><span><span data-i18n="成功记录">成功记录</span></span></h2><span class="probe-note"><span data-i18n="独立保留最近 50 条 · 最新在前">独立保留最近 50 条 · 最新在前</span></span></summary>
       <div class="table-wrap" id="probe-success-history-wrap" tabindex="0" role="region" aria-label="成功记录，可横向滚动" data-i18n-aria-label="成功记录，可横向滚动"><table>
-        <thead><tr><th><span data-i18n="时间（UTC+8）">时间（UTC+8）</span></th><th><span data-i18n="模型">模型</span></th><th><span data-i18n="出口">出口</span></th><th><span data-i18n="结果">结果</span></th><th><span data-i18n="耗时">耗时</span></th><th><span data-i18n="说明">说明</span></th></tr></thead>
+        <thead><tr><th><span data-i18n="时间（UTC+8）">时间（UTC+8）</span></th><th><span data-i18n="模型">模型</span></th><th><span data-i18n="出口">出口</span></th><th><span data-i18n="出口 IP / 地址">出口 IP / 地址</span></th><th><span data-i18n="结果">结果</span></th><th><span data-i18n="耗时">耗时</span></th><th><span data-i18n="说明">说明</span></th></tr></thead>
         <tbody id="probe-success-history"></tbody>
       </table></div>
     </details>
@@ -254,6 +256,12 @@
     "探测状态":["Probe status", "探測狀態", "Состояние проверок"],
     "探测统计":["Probe statistics", "探測統計", "Статистика проверок"],
     "探测获取":["Probe", "探測取得", "Проверка"],
+    "出口 IP / 地址":["Egress IP / address", "出口 IP / 位址", "IP / адрес выхода"],
+    "代理回报 · 未核验":["Proxy-reported · Unverified", "代理回報 · 未核驗", "По данным прокси · Не проверен"],
+    "未获取":["Unavailable", "未取得", "Нет данных"],
+    "本次 SOCKS5 连接的代理回报地址（BND.ADDR），不保证等于上游看到的公网 IP。":["Proxy-reported address (BND.ADDR) for this SOCKS5 connection; it may differ from the public IP seen by the upstream.", "本次 SOCKS5 連線的代理回報位址（BND.ADDR），不保證等於上游看到的公網 IP。", "Адрес BND.ADDR этого SOCKS5-соединения по данным прокси; он может отличаться от публичного IP, видимого серверу."],
+    "本次连接未获得可用的代理回报地址，无法判断出口是否轮换。":["No usable proxy-reported address for this connection; exit rotation cannot be determined.", "本次連線未取得可用的代理回報位址，無法判斷出口是否輪換。", "Прокси не сообщил пригодный адрес этого соединения; смену выхода определить нельзя."],
+    "此连接未提供出口 IP；代理入口地址不能代表实际公网出口。":["This connection did not provide an egress IP; the proxy endpoint is not the actual public exit.", "此連線未提供出口 IP；代理入口位址不能代表實際公網出口。", "IP выхода для этого соединения недоступен; адрес входа в прокси не является фактическим публичным выходом."],
     "成功记录":["Successful probes", "成功記錄", "Успешные проверки"],
     "成功记录，可横向滚动":["Successful probes, horizontally scrollable", "成功記錄，可水平捲動", "Успешные проверки, прокрутка по горизонтали"],
     "独立保留最近 50 条 · 最新在前":["Latest 50 saved separately · Newest first", "獨立保留最近 50 筆 · 最新在前", "Последние 50 отдельно · Сначала новые"],
@@ -303,7 +311,6 @@
     "未找到已保存的 CPA 登录状态。请在管理页登录并启用“记住密码”，本页会自动连接。":["No saved CPA session found. Sign in on the management page with Remember password enabled; this page will connect automatically.", "找不到已儲存的 CPA 登入狀態。請在管理頁登入並啟用「記住密碼」，此頁會自動連線。", "Сохранённый сеанс CPA не найден. Войдите на странице управления с опцией «Запомнить пароль»; подключение произойдёт автоматически."],
     "未观测":["Not observed", "未觀測", "Не наблюдалось"],
     "未配置认证":["No authentication configured", "未設定認證", "Аутентификация не настроена"],
-    "本次连接实际使用的出口源地址（socks5 服务端 BND.ADDR 回报）":["Actual source address reported by the SOCKS5 server in BND.ADDR", "SOCKS5 伺服器透過 BND.ADDR 回報的實際出口來源位址", "Фактический исходящий адрес из BND.ADDR сервера SOCKS5"],
     "来源":["Source", "來源", "Источник"],
     "来自响应":["Response", "來自回應", "Ответ"],
     "来自流":["Stream", "來自串流", "Поток"],
@@ -902,7 +909,16 @@
       const model=cell(tr,record.model,'model');
       const egress=cell(tr,record.proxy_label||proxyLabel(record.proxy),'egress-name');
       egress.title=proxyLabel(record.proxy);
-      if(record.egress_addr){const src=document.createElement('span');src.className='src';src.textContent=' · '+record.egress_addr;src.title=t('本次连接实际使用的出口源地址（socks5 服务端 BND.ADDR 回报）');egress.append(src);}
+      const address=cell(tr,'','egress-ip');
+      const reported=record.egress_addr&&record.egress_addr!=='0.0.0.0'&&record.egress_addr!=='::';
+      if(reported){
+        const ip=document.createElement('code');ip.textContent=record.egress_addr;address.append(ip);
+        const source=document.createElement('div');source.className='sub';source.textContent=t('代理回报 · 未核验');address.append(source);
+        address.title=t('本次 SOCKS5 连接的代理回报地址（BND.ADDR），不保证等于上游看到的公网 IP。');
+      }else{
+        address.textContent=t('未获取');address.classList.add('none');
+        address.title=/^socks5h?:/i.test(record.proxy||'')?t('本次连接未获得可用的代理回报地址，无法判断出口是否轮换。'):t('此连接未提供出口 IP；代理入口地址不能代表实际公网出口。');
+      }
       const result=cell(tr,'');
       const badge=document.createElement('span');badge.className='badge '+(record.success?'probe-ok':'probe-fail');
       badge.textContent=record.success?t('获取成功'):t('失败');result.append(badge);
@@ -918,7 +934,7 @@
       }else{detail.textContent=record.error||'—';detail.classList.add('none');}
       hfrag.append(tr);
     }
-    if(!history.length){const tr=document.createElement('tr');const td=cell(tr,t(emptyMessage),'empty');td.colSpan=6;hfrag.append(tr);}
+    if(!history.length){const tr=document.createElement('tr');const td=cell(tr,t(emptyMessage),'empty');td.colSpan=7;hfrag.append(tr);}
     el(target).replaceChildren(hfrag);
   }
   function switchTab(name){

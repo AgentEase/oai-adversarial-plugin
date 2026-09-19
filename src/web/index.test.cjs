@@ -421,7 +421,8 @@ test('probe history uses supplied exit names as text and keeps safe address fall
   const rows=p.get('probe-history').children;
   assert.match(rows[0].children[2].textContent,/自定义出口 <img src=x>/);
   assert.equal(rows[0].children[2].title,'socks5h://192.0.2.1:1080');
-  assert.match(rows[0].children[2].textContent,/2001:db8::1/);
+  assert.match(rows[0].children[3].textContent,/2001:db8::1/);
+  assert.match(rows[0].children[3].textContent,/Proxy-reported · Unverified/);
   assert.equal(rows[1].children[2].textContent,'另一个账号');
   assert.equal(rows[2].children[2].textContent,'Direct');
   assert.equal(rows[3].children[2].textContent,'http://192.0.2.2:8080');
@@ -474,4 +475,39 @@ test('history panels preserve independent open states through refresh and all lo
   p.renderData(data);
   assert.equal(p.get('probe-history-panel').open,false);
   assert.equal(p.get('probe-success-history-panel').open,true);
+});
+
+
+test('both histories show connection-reported IPs and explicitly disclose unavailable exits',()=>{
+  const p=panel();
+  const records=[
+    {proxy:'socks5h://192.0.2.1:1080',proxy_label:'聚合池',egress_addr:'2001:db8::10',success:true},
+    {proxy:'socks5h://192.0.2.1:1080',proxy_label:'聚合池',egress_addr:'2001:db8::11',success:true},
+    {proxy:'socks5h://192.0.2.1:1080',egress_addr:'0.0.0.0',success:true},
+    {proxy:'socks5://192.0.2.1:1080',egress_addr:'::',success:true},
+    {proxy:'http://192.0.2.2:8080',success:true},
+    {proxy:'direct',success:true},
+    {proxy:'socks5h://192.0.2.1:1080',egress_addr:'<img src=x>',success:true}
+  ];
+  const data={records:[],turn_state_override:{probe:fixture({history:records,success_history:records})}};
+  p.renderData(data);
+  for(const id of ['probe-history','probe-success-history']){
+    const rows=p.get(id).children;
+    assert.equal(rows[0].children.length,7);
+    assert.equal(rows[0].children[2].textContent,'聚合池');
+    assert.match(rows[0].children[3].textContent,/2001:db8::10.*未核验/);
+    assert.match(rows[1].children[3].textContent,/2001:db8::11/);
+    assert.match(rows[0].children[3].title,/不保证等于上游/);
+    for(const row of rows.slice(2,6))assert.equal(row.children[3].textContent,'未获取');
+    assert.match(rows[2].children[3].title,/无法判断/);
+    assert.match(rows[4].children[3].title,/入口地址不能代表/);
+    assert.equal(rows[6].children[3].children[0].textContent,'<img src=x>');
+  }
+  for(const [locale,word] of [['en','Unavailable'],['zh-TW','未取得'],['ru','Нет данных']]){
+    p.changeLanguage(locale);
+    assert.equal(p.get('probe-history').children[4].children[3].textContent,word);
+  }
+  p.render(fixture());
+  assert.equal(p.get('probe-history').children[0].children[0].colSpan,7);
+  assert.equal(p.get('probe-success-history').children[0].children[0].colSpan,7);
 });

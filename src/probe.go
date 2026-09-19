@@ -1675,8 +1675,8 @@ func (e *probeEngine) probeOnce(model, proxySpec string, cfg probeConfig) (probe
 	resp, err := client.Do(req)
 	record.DurationMS = time.Since(started).Milliseconds()
 	if binder != nil {
-		// The socks5 handshake captured the server-bound address (the real
-		// rotating source IP this attempt went out through).
+		// The SOCKS5 handshake reports the bound address for this connection.
+		// It is not proof of the public IP seen by the upstream (e.g. NAT).
 		record.EgressAddr = binder.load()
 	}
 	if err != nil {
@@ -2072,9 +2072,9 @@ func parseTurnStateTimestamp(value string) (time.Time, bool) {
 
 // buildProbeTransport builds an HTTP transport bound to the given egress:
 // "direct", "socks5://...", or "http(s)://...". For socks5 / socks5h it also
-// returns a bind recorder that captures the server-reported egress address
-// (the CONNECT reply's BND.ADDR) so the audit trail can show which rotating
-// source address actually carried the attempt; other egresses return nil.
+// returns a recorder for the server-reported bound address (BND.ADDR).
+// This is not an independently verified public egress IP; other proxies
+// return nil because HTTP CONNECT has no standard exit-IP field.
 func buildProbeTransport(spec string) (*http.Transport, *socksBind, error) {
 	transport := &http.Transport{
 		TLSClientConfig:   &tls.Config{},

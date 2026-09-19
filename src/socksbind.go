@@ -15,11 +15,10 @@ import (
 // socksBind performs a minimal SOCKS5 handshake (RFC 1928 / RFC 1929) against
 // one fixed proxy endpoint and captures the server-bound address from the
 // CONNECT reply's BND.ADDR / BND.PORT fields. BND.ADDR is defined as the
-// address the server used to reach the destination - for the local IPv6 /64
-// dynamic proxy that is the real rotating source address that carried this
-// very connection. The standard golang.org/x/net/proxy client discards those
-// fields, so the probe track uses this minimal dialer for socks5 / socks5h
-// egresses and shows the real egress address in its audit trail.
+// address bound by the server, which may be private, behind NAT or otherwise
+// different from the public IP seen by the upstream. The standard
+// golang.org/x/net/proxy client discards those fields, so the probe track
+// records them here as proxy-reported evidence, not verified public identity.
 //
 // The dialer supports the two negotiation paths the project proxies use:
 // no-authentication and username/password authentication. The destination is
