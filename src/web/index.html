@@ -21,11 +21,14 @@
     :is(button,a,input,select,summary,[tabindex]):focus-visible{outline:2px solid var(--accent);outline-offset:3px}.switch-btn.on{background:var(--ok-bg);border-color:var(--ok);color:var(--ok)}.icon-btn{font-size:12px;padding:5px 9px;min-height:32px}.icon-btn.paused{color:var(--accent)}.control-cell{white-space:nowrap}.control-cell button+button{margin-left:6px}
     .table-wrap{overflow:auto;scrollbar-gutter:stable}table{width:100%;border-collapse:collapse;text-align:left;white-space:nowrap}th{font-size:11px;color:var(--muted);font-weight:550;background:var(--subtle);padding:12px 18px}td{padding:16px 18px;border-top:1px solid var(--line);vertical-align:top;font-size:12px}td.model{max-width:210px;white-space:normal;overflow-wrap:anywhere;font-weight:550}tbody tr:hover{background:var(--subtle)}.time{font-size:12px;font-variant-numeric:tabular-nums}.sub,.probe-note{font-size:12px;color:var(--muted)}.none{color:var(--muted)}.src{font-size:11px;color:var(--muted);margin-left:6px}#probe-history td:last-child,#probe-success-history td:last-child{min-width:200px;max-width:440px;white-space:normal;overflow-wrap:anywhere}
     .badge{display:inline-block;padding:3px 8px;border-radius:5px;font-size:11px;font-weight:550;line-height:1.6;background:var(--soft);color:var(--accent)}.badge.inserted,.badge.probe-ok,.badge.state-ok{background:var(--ok-bg);color:var(--ok)}.badge.mismatch,.badge.override,.badge.state-warn{background:var(--warn-bg);color:var(--warn)}.badge.mismatch,.badge.override,.badge.skipped{margin-left:6px}.badge.probe-fail,.badge.state-fail{background:var(--danger-bg);color:var(--danger)}.badge.unchanged,.badge.skipped,.badge.state-off{background:var(--subtle);color:var(--muted)}.badge.state-rest{background:var(--soft);color:var(--accent)}.ttl-cell>.badge{margin:0 4px 5px 0}.paused-row td.model{color:var(--muted)}.ttl-cell,.turnstate,.budget{font-variant-numeric:tabular-nums}.ttl-cell .bar{height:4px;border-radius:2px;background:var(--line);margin:8px 0;max-width:150px}.ttl-cell .bar i{display:block;height:100%;border-radius:inherit;background:var(--ok)}
+    .candidate-time{margin-top:16px;color:var(--muted);font-size:11px}
     .probe-records td.model{min-width:130px}
+    .ip-toggle{margin-left:6px;padding:3px 8px;border-color:transparent;background:var(--soft);color:var(--accent)}
     .egress-ip{min-width:180px;max-width:300px;white-space:normal;overflow-wrap:anywhere}.egress-ip code{font-variant-numeric:tabular-nums}.egress-ip .sub{margin-top:3px;font-size:11px}
     .probe-records>summary{cursor:pointer;list-style:none}.probe-records>summary::-webkit-details-marker{display:none}.probe-records>summary:after{content:"";width:7px;height:7px;flex-shrink:0;border:solid var(--muted);border-width:0 1.5px 1.5px 0;transform:rotate(45deg);margin-left:4px}.probe-records[open]>summary:after{transform:rotate(225deg)}.probe-records:not([open])>summary{border-bottom:0}.probe-records>summary:hover{background:var(--subtle)}.probe-records>summary .probe-note{margin-left:auto;font-size:12px;font-weight:400}
     .probe-settings{border-bottom:1px solid var(--line)}.probe-settings summary{display:flex;align-items:center;flex-wrap:wrap;gap:12px;padding:14px 22px;cursor:pointer;list-style:none;font-size:12px}.probe-settings summary::-webkit-details-marker{display:none}.probe-settings summary:after{content:"";width:7px;height:7px;border:solid var(--muted);border-width:0 1.5px 1.5px 0;transform:rotate(45deg);margin-left:auto;margin-right:4px}.probe-settings[open] summary:after{transform:rotate(225deg)}.probe-settings summary:hover{background:var(--subtle)}.settings-title{font-weight:600}.settings-body{display:grid;grid-template-columns:1fr 1fr;padding:0 22px 18px;gap:24px}.settings-line{display:flex;align-items:center;flex-wrap:wrap;gap:8px;font-size:12px;padding:14px 0 0;border-top:1px solid var(--line)}.settings-line label{flex-basis:100%;font-weight:550}.settings-line input{width:84px}.settings-line .sub,.settings-line [role=status]{flex-basis:100%}.settings-error{color:var(--danger)}
     input,select{border:1px solid var(--control-line);border-radius:6px;background:var(--bg);color:var(--text);padding:8px 10px;font:inherit;min-height:36px}input[type=checkbox]{accent-color:var(--accent);min-height:auto}input::placeholder{color:var(--muted)}.exit-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px 24px;padding:22px;border-bottom:1px solid var(--line);background:var(--subtle)}.exit-form label{display:flex;flex-direction:column;gap:6px;font-size:12px}.exit-form input,.exit-form select{width:100%;min-width:0}.exit-form .wide{grid-column:1/-1}.exit-form .check{flex-direction:row;flex-wrap:wrap;align-items:center}.exit-form .check input{width:auto}
+    .exit-check{border-top:1px solid var(--line);margin-top:14px;padding-top:12px}.exit-check-head{display:flex;align-items:center;flex-wrap:wrap;gap:10px}.exit-check-head strong{font-size:12px;font-weight:550;margin-right:auto}.exit-check p{font-size:12px;margin-top:8px}.exit-check ol{padding-left:20px;margin:10px 0 0;font-size:12px}.exit-check li{padding:3px 0;overflow-wrap:anywhere}.exit-check code{margin:0 8px}.egress-help{padding:14px 22px;border-bottom:1px solid var(--line);font-size:12px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}.egress-help span{flex:1;min-width:220px}
     .exit-item{padding:20px 22px;border-top:1px solid var(--line)}.exit-item:first-child{border-top:0}.exit-main{display:grid;grid-template-columns:minmax(180px,1fr) minmax(90px,.38fr) minmax(150px,.6fr) auto;gap:20px;align-items:center}.exit-identity{min-width:0}.exit-name{font-size:14px;font-weight:600;margin:0 0 4px;overflow-wrap:anywhere}.exit-address{font:12px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace;color:var(--muted);overflow-wrap:anywhere}.exit-kind{font-size:11px;color:var(--muted);margin-left:8px}.exit-budget .label{margin-bottom:3px}.exit-meta{display:flex;flex-wrap:wrap;gap:6px 20px;margin-top:14px;padding-top:12px;border-top:1px solid var(--line);font-size:12px;color:var(--muted);overflow-wrap:anywhere}.exit-error{flex-basis:100%;min-width:0;white-space:normal}.exit-ops{display:flex;gap:8px;flex-wrap:wrap}.exit-ops .edit{background:var(--soft);border-color:transparent;color:var(--accent)}.exit-ops .edit:hover{border-color:var(--accent)}
     .empty{text-align:center;white-space:normal;color:var(--muted);padding:48px 24px;font-size:13px}.footer{display:flex;justify-content:space-between;flex-wrap:wrap;gap:12px;padding:14px 22px;border-top:1px solid var(--line);color:var(--muted);font-size:11px}.login{padding:28px;max-width:480px;margin:auto}.login h2{margin-bottom:8px}.login p{font-size:12px;margin-bottom:16px}.hidden{display:none!important}.status{font-size:12px;color:var(--muted);margin-top:12px}
     @media(max-width:1100px){header{align-items:flex-start;flex-direction:column;gap:14px}.chip-grid{justify-content:flex-start;max-width:none}.cards:not(.cards-four){grid-template-columns:repeat(3,minmax(0,1fr));row-gap:20px}.cards:not(.cards-four) .card:nth-child(3){border-right:0}.exit-main{grid-template-columns:minmax(0,1fr) auto}.exit-identity{grid-column:1;grid-row:1}.exit-state{grid-column:1;grid-row:2}.exit-budget{grid-column:1;grid-row:3}.exit-ops{grid-column:2;grid-row:1/4;flex-direction:column}}
@@ -56,16 +59,19 @@
       <div class="card"><div class="label"><span data-i18n="含 Turn-State">含 Turn-State</span></div><div class="number" id="turnstates">—</div></div>
     </section>
     <section class="panel">
-      <div class="toolbar"><h2 class="section-heading"><svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M8 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-3"/><path d="M16 3h5v5M21 3l-9 9M7 12h2M7 16h10"/></svg><span><span data-i18n="最近请求">最近请求</span></span></h2><div class="actions"><span id="refresh-note"><span data-i18n="正在连接">正在连接</span></span><button id="refresh" type="button" disabled><span data-i18n="刷新">刷新</span></button></div></div>
       <div class="login hidden" id="auth-notice">
         <h2><span data-i18n="请先登录 CPA 管理页">请先登录 CPA 管理页</span></h2><p id="auth-message" role="status"></p>
         <a class="primary" id="management-login" target="_top"><span data-i18n="返回 CPA 管理页">返回 CPA 管理页</span></a>
       </div>
+      <details class="probe-records" id="request-history-panel">
+      <summary class="toolbar"><h2 class="section-heading"><svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M8 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-3"/><path d="M16 3h5v5M21 3l-9 9M7 12h2M7 16h10"/></svg><span><span data-i18n="最近请求">最近请求</span></span></h2><span class="probe-note" data-i18n="最近 50 条 · 最新在前">最近 50 条 · 最新在前</span></summary>
+      <div class="toolbar"><span id="refresh-note"><span data-i18n="正在连接">正在连接</span></span><button id="refresh" type="button" disabled><span data-i18n="刷新">刷新</span></button></div>
       <div class="table-wrap hidden" id="results" tabindex="0" role="region" aria-label="最近请求，可横向滚动" data-i18n-aria-label="最近请求，可横向滚动"><table>
         <thead><tr><th><span data-i18n="请求时间（UTC+8）">请求时间（UTC+8）</span></th><th><span data-i18n="模型">模型</span></th><th><span data-i18n="上游响应模型">上游响应模型</span></th><th><span data-i18n="原时区">原时区</span></th><th><span data-i18n="替换后时区">替换后时区</span></th><th><span data-i18n="处理方式">处理方式</span></th><th>X-Codex-Turn-State</th></tr></thead>
         <tbody id="rows"></tbody>
       </table></div>
       <div class="footer"><span><span data-i18n="保留最近 200 条记录 · 本地快照自动恢复">保留最近 200 条记录 · 本地快照自动恢复</span></span><span><span data-i18n="自动复用 CPA 登录">自动复用 CPA 登录</span></span></div>
+      </details>
     </section>
   </section>
   <section id="view-router" class="hidden">
@@ -92,14 +98,14 @@
     <details class="panel probe-records" id="probe-history-panel">
       <summary class="toolbar"><h2 class="section-heading"><svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 11a9 9 0 1 1 2.7 7M3 4v7h7"/><path d="M12 7v5l3 2"/></svg><span><span data-i18n="探测记录">探测记录</span></span></h2><span class="probe-note"><span data-i18n="最近 50 条 · 最新在前">最近 50 条 · 最新在前</span></span></summary>
       <div class="table-wrap" id="probe-history-wrap" tabindex="0" role="region" aria-label="探测记录，可横向滚动" data-i18n-aria-label="探测记录，可横向滚动"><table>
-        <thead><tr><th><span data-i18n="时间（UTC+8）">时间（UTC+8）</span></th><th><span data-i18n="模型">模型</span></th><th><span data-i18n="出口">出口</span></th><th><span data-i18n="出口 IP / 地址">出口 IP / 地址</span></th><th><span data-i18n="结果">结果</span></th><th><span data-i18n="耗时">耗时</span></th><th><span data-i18n="说明">说明</span></th></tr></thead>
+        <thead><tr><th><span data-i18n="时间（UTC+8）">时间（UTC+8）</span></th><th><span data-i18n="模型">模型</span></th><th><span data-i18n="出口">出口</span></th><th><span data-i18n="代理回报地址">代理回报地址</span> <button class="ip-toggle" type="button" id="probe-ip-toggle" aria-pressed="false" aria-label="显示出口 IP" data-i18n="显示" data-i18n-aria-label="显示出口 IP">显示</button></th><th><span data-i18n="结果">结果</span></th><th><span data-i18n="耗时">耗时</span></th><th><span data-i18n="说明">说明</span></th></tr></thead>
         <tbody id="probe-history"></tbody>
       </table></div>
     </details>
     <details class="panel probe-records" id="probe-success-history-panel">
       <summary class="toolbar"><h2 class="section-heading"><svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/></svg><span><span data-i18n="成功记录">成功记录</span></span></h2><span class="probe-note"><span data-i18n="独立保留最近 50 条 · 最新在前">独立保留最近 50 条 · 最新在前</span></span></summary>
       <div class="table-wrap" id="probe-success-history-wrap" tabindex="0" role="region" aria-label="成功记录，可横向滚动" data-i18n-aria-label="成功记录，可横向滚动"><table>
-        <thead><tr><th><span data-i18n="时间（UTC+8）">时间（UTC+8）</span></th><th><span data-i18n="模型">模型</span></th><th><span data-i18n="出口">出口</span></th><th><span data-i18n="出口 IP / 地址">出口 IP / 地址</span></th><th><span data-i18n="结果">结果</span></th><th><span data-i18n="耗时">耗时</span></th><th><span data-i18n="说明">说明</span></th></tr></thead>
+        <thead><tr><th><span data-i18n="时间（UTC+8）">时间（UTC+8）</span></th><th><span data-i18n="模型">模型</span></th><th><span data-i18n="出口">出口</span></th><th><span data-i18n="代理回报地址">代理回报地址</span> <button class="ip-toggle" type="button" id="probe-success-ip-toggle" aria-pressed="false" aria-label="显示出口 IP" data-i18n="显示" data-i18n-aria-label="显示出口 IP">显示</button></th><th><span data-i18n="结果">结果</span></th><th><span data-i18n="耗时">耗时</span></th><th><span data-i18n="说明">说明</span></th></tr></thead>
         <tbody id="probe-success-history"></tbody>
       </table></div>
     </details>
@@ -126,6 +132,7 @@
         <div class="actions wide"><button id="exit-save" type="button"><span data-i18n="确认保存">确认保存</span></button><button id="exit-cancel" type="button"><span data-i18n="取消">取消</span></button><span id="exit-feedback" role="status"></span></div>
         <p class="sub wide"><span data-i18n="保存后加入总代理池，后续尝试使用新参数；已发出的请求允许结束。不会自动启动探测，也不会解除原有禁用状态。面板配置优先于配置文件并在重启后保留。">保存后加入总代理池，后续尝试使用新参数；已发出的请求允许结束。不会自动启动探测，也不会解除原有禁用状态。面板配置优先于配置文件并在重启后保留。</span></p>
       </div>
+      <div class="egress-help"><span data-i18n="公网实测通过所选出口向 ipify 发起 3 次独立请求，仅代表采样连接，不等同于某次模型探测出口。">公网实测通过所选出口向 ipify 发起 3 次独立请求，仅代表采样连接，不等同于某次模型探测出口。</span><button id="pool-ip-toggle" class="ip-toggle" type="button" data-i18n="显示" data-i18n-aria-label="显示出口 IP" aria-label="显示出口 IP" aria-pressed="false">显示</button></div>
       <div id="pool-wrap"><div id="pool-rows" role="list" aria-label="代理出口" data-i18n-aria-label="代理出口"></div></div>
     </section>
   </section>
@@ -256,7 +263,33 @@
     "探测状态":["Probe status", "探測狀態", "Состояние проверок"],
     "探测统计":["Probe statistics", "探測統計", "Статистика проверок"],
     "探测获取":["Probe", "探測取得", "Проверка"],
-    "出口 IP / 地址":["Egress IP / address", "出口 IP / 位址", "IP / адрес выхода"],
+    "显示":["Show", "顯示", "Показать"],
+    "隐藏":["Hide", "隱藏", "Скрыть"],
+    "显示出口 IP":["Show egress IPs", "顯示出口 IP", "Показать IP выходов"],
+    "隐藏出口 IP":["Hide egress IPs", "隱藏出口 IP", "Скрыть IP выходов"],
+    "出口 IP 已隐藏":["Egress IP hidden", "出口 IP 已隱藏", "IP выхода скрыт"],
+    "公网实测通过所选出口向 ipify 发起 3 次独立请求，仅代表采样连接，不等同于某次模型探测出口。":["Public IP sampling sends 3 independent requests through the selected exit to ipify. Results apply only to those connections, not to a model probe.", "公網實測透過所選出口向 ipify 發起 3 次獨立請求，僅代表採樣連線，不等同於某次模型探測出口。", "Три отдельных запроса через выбранный выход к ipify. Результаты относятся только к этим соединениям, а не к проверке модели."],
+    "公网出口实测":["Public egress IP check", "公網出口實測", "Проверка публичного IP"],
+    "采样 3 次":["Take 3 samples", "採樣 3 次", "Сделать 3 замера"],
+    "采样中…":["Sampling…", "採樣中…", "Замер…"],
+    "正在使用此出口查询，最多约 20 秒，不消耗模型配额。":["Checking through this exit; up to about 20 seconds. No model quota is used.", "正在使用此出口查詢，最多約 20 秒，不消耗模型配額。", "Проверка через этот выход, до 20 секунд. Квота модели не расходуется."],
+    "尚未采样；不会随页面刷新自动查询。":["No samples yet. Page refresh does not trigger a check.", "尚未採樣；不會隨頁面重新整理自動查詢。", "Замеров ещё нет. Обновление страницы не запускает проверку."],
+    "本轮观察到 {count} 个不同公网 IP":["Observed {count} distinct public IPs in this check", "本輪觀察到 {count} 個不同公網 IP", "В этом замере обнаружено разных публичных IP: {count}"],
+    "本轮未观察到 IP 变化，不代表始终固定":["No IP change observed in this check; this does not prove a fixed exit", "本輪未觀察到 IP 變化，不代表始終固定", "IP в этом замере не изменился; это не доказывает постоянство выхода"],
+    "有效采样不足，无法判断 IP 是否变化":["Not enough valid samples to determine IP changes", "有效採樣不足，無法判斷 IP 是否變化", "Недостаточно успешных замеров для оценки смены IP"],
+    "来源：ipify，仅对应本轮采样":["Source: ipify, for this check only", "來源：ipify，僅對應本輪採樣", "Источник: ipify, только для этого замера"],
+    "已有公网采样正在进行，请稍后重试":["A public IP check is already running; try again later", "已有公網採樣正在進行，請稍後重試", "Проверка IP уже выполняется; повторите позже"],
+    "出口不存在，请刷新列表":["Exit not found; refresh the list", "出口不存在，請重新整理清單", "Выход не найден; обновите список"],
+    "出口已修改，请重新采样":["Exit changed; take new samples", "出口已修改，請重新採樣", "Выход изменён; повторите замер"],
+    "查询超时":["Check timed out", "查詢逾時", "Время проверки истекло"],
+    "无法连接代理或查询服务":["Cannot connect to the proxy or IP service", "無法連線至代理或查詢服務", "Нет соединения с прокси или сервисом IP"],
+    "代理协议不支持":["Unsupported proxy protocol", "代理協定不支援", "Протокол прокси не поддерживается"],
+    "查询响应读取失败":["Could not read the IP service response", "查詢回應讀取失敗", "Не удалось прочитать ответ сервиса IP"],
+    "查询服务未返回有效数据":["IP service returned invalid data", "查詢服務未回傳有效資料", "Сервис IP вернул некорректные данные"],
+    "未返回可用的公网 IP":["No usable public IP returned", "未回傳可用的公網 IP", "Пригодный публичный IP не получен"],
+    "查询服务返回 HTTP {status}":["IP service returned HTTP {status}", "查詢服務回傳 HTTP {status}", "Сервис IP вернул HTTP {status}"],
+    "公网采样失败，请重试":["Public IP check failed; try again", "公網採樣失敗，請重試", "Проверка публичного IP не удалась; повторите"],
+    "代理回报地址":["Proxy-reported address", "代理回報位址", "Адрес по данным прокси"],
     "代理回报 · 未核验":["Proxy-reported · Unverified", "代理回報 · 未核驗", "По данным прокси · Не проверен"],
     "未获取":["Unavailable", "未取得", "Нет данных"],
     "本次 SOCKS5 连接的代理回报地址（BND.ADDR），不保证等于上游看到的公网 IP。":["Proxy-reported address (BND.ADDR) for this SOCKS5 connection; it may differ from the public IP seen by the upstream.", "本次 SOCKS5 連線的代理回報位址（BND.ADDR），不保證等於上游看到的公網 IP。", "Адрес BND.ADDR этого SOCKS5-соединения по данным прокси; он может отличаться от публичного IP, видимого серверу."],
@@ -337,6 +370,7 @@
     "秒":["seconds", "秒", "с"],
     "等待 CPA 登录":["Waiting for CPA sign-in", "等待 CPA 登入", "Ожидание входа в CPA"],
     "等待重试":["Waiting to retry", "等待重試", "Ожидание повтора"],
+    "预备：{time}":["Candidate: {time}", "預備：{time}", "Резерв: {time}"],
     "签发时间（UTC+8）":["Issued (UTC+8)", "簽發時間（UTC+8）", "Выдан (UTC+8)"],
     "类型":["Type", "類型", "Тип"],
     "结果":["Result", "結果", "Результат"],
@@ -517,6 +551,8 @@
   const sources = {request:'来自请求',response:'来自响应',stream:'来自流',probe:'探测获取',business:'业务观测',seed:'历史种子'};
   function sourceLabel(source){return t(sources[source]||source||'');}
   let lastData=null;
+  let egressVisible=false;
+  const egressChecks=new Map();
   let loading = false, rejectedKey = '';
   let prefetchDirty=false,prefetchSaving=false,prefetchLimit=54,editingExitID='',exitSaving=false,controlRevision=0;
   let intervalDirty=false,intervalSaving=false;
@@ -545,7 +581,7 @@
     }catch{return '';}
   }
   function requireLogin(message='未找到已保存的 CPA 登录状态。请在管理页登录并启用“记住密码”，本页会自动连接。'){
-    lastData=null;
+    lastData=null;egressVisible=false;egressChecks.clear();renderProbeHistories({});renderPool({});
     setMessage('auth-message',()=>t(message));el('auth-notice').classList.remove('hidden');el('results').classList.add('hidden');
     el('rows').replaceChildren();for(const key of ['total','replaced','inserted','mismatches','turnstates','overridden'])el(key).textContent='—';
     el('override-chip').classList.add('hidden');
@@ -558,12 +594,13 @@
     if(spec==='direct')return t('直连');
     try{const u=new URL(spec);return u.protocol.replace(':','')+'://'+u.host;}catch(e){return String(spec).slice(0,32)+'…';}
   }
-  async function probeControl(payload){
+  async function probeControl(payload,readResult=false){
     const key=readManagementKey();
     if(!key){requireLogin();return false;}
     try{
       const response=await fetch(prefix+'/v0/management/timezone-override/probe-control',{method:'POST',headers:{'Authorization':'Bearer '+key,'Content-Type':'application/json'},body:JSON.stringify(payload)});
       if(response.status===401||response.status===403){rejectedKey=key;requireLogin('CPA 登录已失效，请返回管理页重新登录。');return false;}
+      if(readResult){const result=await response.json();if(result?.egress_check)return result;}
       if(!response.ok){const data=await response.json().catch(()=>null);throw new Error((data&&data.error)||(t('操作失败（HTTP {status}）',{status:response.status})));}
       controlRevision++;
       return true;
@@ -605,7 +642,7 @@
       el('override-label').textContent=t('覆写：关闭');el('override-dot').style.background='var(--muted)';
     }
     const fragment=document.createDocumentFragment();
-    for(const record of data.records){
+    for(const record of data.records.slice(0,50)){
       const tr=document.createElement('tr');
       const time=cell(tr,clock.format(new Date(record.time)),'time');time.title=record.time;
       const model=cell(tr,record.model,'model');model.title=record.model;
@@ -650,9 +687,48 @@
     renderPool(override.probe);
     setMessage('refresh-note',()=>t('每 5 秒刷新'));setMessage('status',()=>t('已复用 CPA 登录 · 插件 v{version}',{version:data.version}));
   }
+  function egressError(code,status){
+    const keys={busy:'已有公网采样正在进行，请稍后重试',unknown_exit:'出口不存在，请刷新列表',exit_changed:'出口已修改，请重新采样',timeout:'查询超时',connection_failed:'无法连接代理或查询服务',unsupported_proxy:'代理协议不支持',read_failed:'查询响应读取失败',invalid_response:'查询服务未返回有效数据',non_public_ip:'未返回可用的公网 IP'};
+    return code==='http_status'?t('查询服务返回 HTTP {status}',{status}):t(keys[code]||'公网采样失败，请重试');
+  }
+  function renderEgressCheck(item,probe){
+    const block=document.createElement('div');block.className='exit-check';
+    const head=document.createElement('div');head.className='exit-check-head';
+    const title=document.createElement('strong');title.textContent=t('公网出口实测');head.append(title);
+    const entry=egressChecks.get(item.id);
+    const button=document.createElement('button');button.type='button';button.textContent=t(entry?.pending?'采样中…':'采样 3 次');
+    button.disabled=!item.id||exitSaving||Array.from(egressChecks.values()).some(check=>check.pending);
+    button.addEventListener('click',async()=>{
+      if(Array.from(egressChecks.values()).some(check=>check.pending))return;
+      const current={proxy:item.proxy,pending:true};egressChecks.set(item.id,current);
+      renderPool(lastData?.turn_state_override?.probe||probe);
+      const response=await probeControl({action:'check-egress',id:item.id},true);
+      if(egressChecks.get(item.id)!==current)return;
+      current.pending=false;current.result=response?.egress_check||{error:'failed'};
+      renderPool(lastData?.turn_state_override?.probe||probe);
+    });
+    head.append(button);block.append(head);
+    const note=document.createElement('p');note.setAttribute('role','status');block.append(note);
+    if(entry?.pending){note.textContent=t('正在使用此出口查询，最多约 20 秒，不消耗模型配额。');return block;}
+    if(!entry){note.textContent=t('尚未采样；不会随页面刷新自动查询。');return block;}
+    const result=entry.result;
+    if(result.error){note.textContent=egressError(result.error);return block;}
+    const samples=Array.isArray(result.samples)?result.samples:[];
+    const ips=samples.filter(sample=>sample.ip&&!sample.error).map(sample=>sample.ip),unique=new Set(ips);
+    note.textContent=(unique.size>1?t('本轮观察到 {count} 个不同公网 IP',{count:unique.size}):ips.length>=2?t('本轮未观察到 IP 变化，不代表始终固定'):t('有效采样不足，无法判断 IP 是否变化'))+' · '+t('来源：ipify，仅对应本轮采样');
+    const list=document.createElement('ol');
+    for(const sample of samples){
+      const line=document.createElement('li'),time=document.createElement('span');time.className='sub';time.textContent=fmtBeijing(sample.time)+' (UTC+8)';line.append(time);
+      const value=document.createElement('code');value.textContent=sample.error?egressError(sample.error,sample.status_code):sample.ip?(egressVisible?sample.ip:'***'):t('未获取');line.append(value);list.append(line);
+    }
+    block.append(list);return block;
+  }
   function renderPool(probe){
     probe=probe||{};
     const items=probe.proxies_state||[];
+    for(const [id,entry] of egressChecks){
+      if(!items.some(item=>item.id===id&&item.proxy===entry.proxy))egressChecks.delete(id);
+    }
     const total=Number(probe.pool_total||items.length||0);
     const active=Number(probe.pool_active!==undefined?probe.pool_active:items.filter(i=>i.active!==false).length);
     el('pool-total').textContent=total.toLocaleString(locale);
@@ -706,7 +782,7 @@
         if(cooling&&Number.isFinite(remaining)){const left=document.createElement('span');left.textContent=t('剩余 {time}',{time:fmtDuration(remaining)});meta.append(left);}
       }
       if(item.last_error){const error=document.createElement('div');error.className='exit-error';error.textContent=t('最近错误：{error}',{error:item.last_error});meta.append(error);}
-      row.append(main,meta);frag.append(row);
+      row.append(main,meta,renderEgressCheck(item,probe));frag.append(row);
     }
     if(!items.length){const empty=document.createElement('div');empty.className='empty';empty.textContent=t('暂无出口。添加代理后可在这里管理探测预算和启用状态。');frag.append(empty);}
     el('pool-rows').replaceChildren(frag);
@@ -801,8 +877,14 @@
         lenCell.append(badge);
       }else{lenCell.textContent='—';lenCell.classList.add('none');}
       cell(tr,sourceLabel(entry.source)||'—',entry.source?'':'none');
-      cell(tr,fmtBeijing(entry.issued_at),'time');
-      cell(tr,fmtBeijing(entry.expires_at),'time');
+      for(const field of ['issued_at','expires_at']){
+        const timeCell=cell(tr,fmtBeijing(entry[field]),'time');
+        if(entry.candidate){
+          const candidateTime=document.createElement('div');candidateTime.className='candidate-time';
+          candidateTime.textContent=t('预备：{time}',{time:fmtBeijing(entry.candidate[field])});
+          timeCell.append(candidateTime);
+        }
+      }
       const ttl=cell(tr,'','ttl-cell');
       // Participation, live activity and baseline validity are independent.
       const activeSet=new Set(probe.active_models||[]);
@@ -897,6 +979,15 @@
     }
     if(!values.length){const tr=document.createElement('tr');const td=cell(tr,t('暂无基线值。可点击「开始探测」手动获取；业务流量观测到健康状态（模型一致 + 292 字节）时也会自动入库。'),'empty');td.colSpan=7;vfrag.append(tr);}
     el('probe-values').replaceChildren(vfrag);
+    renderProbeHistories(probe);
+  }
+  function renderProbeHistories(probe){
+    for(const id of ['probe-ip-toggle','probe-success-ip-toggle','pool-ip-toggle']){
+      const button=el(id),label=egressVisible?'隐藏':'显示',accessible=egressVisible?'隐藏出口 IP':'显示出口 IP';
+      button.textContent=t(label);button.setAttribute('data-i18n',label);
+      button.setAttribute('aria-label',t(accessible));button.setAttribute('data-i18n-aria-label',accessible);
+      button.setAttribute('aria-pressed',String(egressVisible));
+    }
     renderProbeHistory('probe-history',(probe.history||[]).slice(0,50),'暂无探测记录。');
     const successes=Array.isArray(probe.success_history)?probe.success_history:(probe.history||[]);
     renderProbeHistory('probe-success-history',successes.filter(record=>record.success===true).slice(0,50),'暂无成功记录。');
@@ -911,7 +1002,9 @@
       egress.title=proxyLabel(record.proxy);
       const address=cell(tr,'','egress-ip');
       const reported=record.egress_addr&&record.egress_addr!=='0.0.0.0'&&record.egress_addr!=='::';
-      if(reported){
+      if(reported&&!egressVisible){
+        address.textContent='***';address.setAttribute('aria-label',t('出口 IP 已隐藏'));
+      }else if(reported){
         const ip=document.createElement('code');ip.textContent=record.egress_addr;address.append(ip);
         const source=document.createElement('div');source.className='sub';source.textContent=t('代理回报 · 未核验');address.append(source);
         address.title=t('本次 SOCKS5 连接的代理回报地址（BND.ADDR），不保证等于上游看到的公网 IP。');
@@ -1015,9 +1108,14 @@
     if(!exit.clear_auth){if(el('exit-username').value)exit.username=el('exit-username').value;if(el('exit-password').value)exit.password=el('exit-password').value;}
     exitSaving=true;el('exit-save').disabled=true;el('exit-cancel').disabled=true;el('pool-add').disabled=true;
     for(const name of ['label','kind','url','username','password','clear-auth','attempts','multiplier'])el('exit-'+name).disabled=true;
-    if(await probeControl({action:'save-exit',exit})){closeExitEditor();setMessage('status',()=>t('出口已保存，后续尝试使用新设置'));}else{setMessage('exit-feedback',()=>t('保存失败，原出口未更改；请查看页面错误提示'));}
+    if(await probeControl({action:'save-exit',exit})){egressChecks.delete(editingExitID);closeExitEditor();setMessage('status',()=>t('出口已保存，后续尝试使用新设置'));}else{setMessage('exit-feedback',()=>t('保存失败，原出口未更改；请查看页面错误提示'));}
     for(const name of ['label','kind','url','username','password','clear-auth','attempts','multiplier'])el('exit-'+name).disabled=url==='direct'&&['kind','url','username','password','clear-auth'].includes(name);
     exitSaving=false;el('exit-save').disabled=false;el('exit-cancel').disabled=false;el('pool-add').disabled=false;refresh();
+  });
+  for(const id of ['probe-ip-toggle','probe-success-ip-toggle','pool-ip-toggle'])el(id).addEventListener('click',()=>{
+    egressVisible=!egressVisible;
+    renderProbeHistories(lastData?.turn_state_override?.probe||{});
+    if(lastData)renderPool(lastData.turn_state_override?.probe);
   });
   setupLanguageSync();
   window.addEventListener('storage',event=>{if(event.key===null||['cli-proxy-auth','isLoggedIn','managementKey','apiBase','apiUrl'].includes(event.key))refresh();});

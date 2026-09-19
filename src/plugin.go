@@ -12,7 +12,7 @@ import (
 
 const (
 	pluginID                   = "timezone-override"
-	pluginVersion              = "1.5.36"
+	pluginVersion              = "1.5.37"
 	historyLimit               = 200
 	schemaVersion              = 6
 	streamChunkHeaderInitIndex = -1
@@ -421,6 +421,11 @@ func probeControl(body []byte) (managementResponse, error) {
 		}
 	}
 	switch action := strings.ToLower(strings.TrimSpace(req.Action)); action {
+	case "check-egress":
+		result, status := probeTrack.checkEgress(strings.TrimSpace(req.ID), egressCheckURL)
+		payload, _ := json.Marshal(map[string]any{"ok": status == http.StatusOK, "egress_check": result})
+		return managementResponse{StatusCode: status, Body: payload,
+			Headers: http.Header{"Content-Type": {"application/json; charset=utf-8"}, "Cache-Control": {"no-store"}}}, nil
 	case "prefetch-window":
 		if req.Minutes == nil {
 			return jsonErrorResponse(http.StatusBadRequest, "缺少 minutes 字段"), nil

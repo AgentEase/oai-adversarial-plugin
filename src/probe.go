@@ -224,6 +224,7 @@ type probeEngine struct {
 	halted         bool
 	stopping       bool
 	shuttingDown   bool
+	egressChecking bool
 	queue          []probeTask
 	queueActive    bool
 	disabledExits  map[string]bool

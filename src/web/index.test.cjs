@@ -412,6 +412,7 @@ test('translation catalogs cover static UI and retain every interpolation parame
 
 test('probe history uses supplied exit names as text and keeps safe address fallback',()=>{
   const p=panel({storedLanguage:'en'});
+  p.get('probe-ip-toggle').events.click();
   p.render(fixture({history:[
     {proxy:'socks5h://192.0.2.1:1080',proxy_label:'自定义出口 <img src=x>',egress_addr:'2001:db8::1',success:true,state_length:292},
     {proxy:'socks5h://192.0.2.1:1080',proxy_label:'另一个账号',success:false},
@@ -458,6 +459,29 @@ test('successful probes use independent history and respect its explicit empty s
   assert.match(p.get('probe-success-history').children[49].textContent,/success-49/);
 });
 
+test('recent requests display the newest 50 without truncating source data or statistics',()=>{
+  const p=panel();
+  const records=Array.from({length:65},(_,i)=>({time:new Date(1700000000000-i*1000).toISOString(),model:'request-'+i,original:[],turn_state_length:292}));
+  const data={total:1000,records,turn_state_override:{probe:fixture()}};
+  p.renderData(data);
+  const details=p.get('request-history-panel');
+  for(const open of [true,false]){
+    details.open=open;
+    for(const language of ['zh-CN','en','zh-TW','ru']){
+      p.changeLanguage(language);p.renderData(data);
+      assert.equal(details.open,open);
+      const rows=p.get('rows').children;
+      assert.equal(rows.length,50);
+      assert.equal(rows[0].children[1].textContent,'request-0');
+      assert.equal(rows[49].children[1].textContent,'request-49');
+      assert.equal(p.get('turnstates').textContent,'65');
+      assert.equal(records.length,65);
+    }
+  }
+  p.renderData({...data,records:[]});
+  assert.equal(p.get('rows').children[0].children[0].colSpan,7);
+});
+
 test('history panels preserve independent open states through refresh and all locales',()=>{
   const p=panel();
   const data={total:0,records:[],turn_state_override:{probe:fixture()}};
@@ -480,6 +504,7 @@ test('history panels preserve independent open states through refresh and all lo
 
 test('both histories show connection-reported IPs and explicitly disclose unavailable exits',()=>{
   const p=panel();
+  p.get('probe-ip-toggle').events.click();
   const records=[
     {proxy:'socks5h://192.0.2.1:1080',proxy_label:'聚合池',egress_addr:'2001:db8::10',success:true},
     {proxy:'socks5h://192.0.2.1:1080',proxy_label:'聚合池',egress_addr:'2001:db8::11',success:true},
@@ -510,4 +535,98 @@ test('both histories show connection-reported IPs and explicitly disclose unavai
   p.render(fixture());
   assert.equal(p.get('probe-history').children[0].children[0].colSpan,7);
   assert.equal(p.get('probe-success-history').children[0].children[0].colSpan,7);
+});
+
+
+test('egress visibility masks both lists and survives polling and language changes',async()=>{
+  const p=panel();
+  const record={model:'gpt-6-astra',proxy:'direct',egress_addr:'203.0.113.42',success:true};
+  const data={records:[],turn_state_override:{probe:fixture({history:[record],success_history:[record]})}};
+  p.renderData(data);
+  const addresses=()=>['probe-history','probe-success-history'].map(id=>p.get(id).children[0].children[3]);
+  for(const cell of addresses()){
+    assert.equal(cell.textContent,'***');
+    assert.doesNotMatch(JSON.stringify(cell),/203\.0\.113\.42/);
+  }
+  p.get('probe-history-panel').open=true;
+  p.get('probe-ip-toggle').events.click();
+  for(const cell of addresses())assert.match(cell.textContent,/203\.0\.113\.42/);
+  assert.equal(p.get('probe-success-ip-toggle').getAttribute('aria-pressed'),'true');
+  p.renderData(data);p.changeLanguage('en');
+  assert.equal(p.get('probe-ip-toggle').textContent,'Hide');
+  assert.equal(p.get('probe-history-panel').open,true);
+  for(const cell of addresses())assert.match(cell.textContent,/203\.0\.113\.42/);
+  p.get('probe-success-ip-toggle').events.click();
+  p.renderData(data);p.changeLanguage('ru');
+  for(const cell of addresses())assert.equal(cell.textContent,'***');
+  assert.equal(p.get('probe-ip-toggle').textContent,'Показать');
+  assert.equal(p.get('probe-success-ip-toggle').getAttribute('aria-pressed'),'false');
+  assert.equal(p.actions.length,0);
+  p.get('probe-ip-toggle').events.click();
+  await p.get('refresh').events.click();
+  p.renderData(data);
+  for(const cell of addresses())assert.equal(cell.textContent,'***');
+});
+
+
+test('manual public sampling keeps three results distinct from model probes and masks IPs',async()=>{
+  const p=panel();
+  const data={records:[],turn_state_override:{probe:fixture({proxies_state:[{id:'pool',proxy:'socks5h://192.0.2.1:1080',pool:true}]})}};
+  p.renderData(data);
+  const check=()=>p.get('pool-rows').children[0].children[2];
+  assert.match(check().textContent,/尚未采样/);assert.equal(p.actions.length,0);
+  const samples=[{time:'2026-09-19T00:00:00Z',ip:'8.8.8.8'},{time:'2026-09-19T00:00:01Z',ip:'1.1.1.1'},{time:'2026-09-19T00:00:02Z',error:'timeout'}];
+  p.setResult({ok:true,egress_check:{exit_id:'pool',source:'ipify',samples}});
+  await check().children[0].children[1].events.click();
+  assert.deepEqual(JSON.parse(JSON.stringify(p.actions)),[{action:'check-egress',id:'pool'}]);
+  assert.match(check().textContent,/2 个不同公网 IP/);
+  assert.match(check().textContent,/查询超时/);
+  assert.doesNotMatch(check().textContent,/8\.8\.8\.8|1\.1\.1\.1/);
+  assert.equal(check().children[2].children.length,3);
+  p.get('pool-ip-toggle').events.click();
+  assert.match(check().textContent,/8\.8\.8\.8/);
+  p.renderData(data);p.changeLanguage('en');
+  assert.match(check().textContent,/Observed 2 distinct public IPs/);
+  assert.match(check().textContent,/Check timed out/);
+  assert.match(p.get('probe-history').textContent,/No probe history/);
+  p.get('pool-ip-toggle').events.click();
+  assert.doesNotMatch(check().textContent,/8\.8\.8\.8|1\.1\.1\.1/);
+});
+
+test('public sampling preserves pending state and never claims a fixed IP from three samples',async()=>{
+  const p=panel();
+  const data={records:[],turn_state_override:{probe:fixture({proxies_state:[{id:'a',proxy:'direct'},{id:'b',proxy:'http://192.0.2.2:80'}]})}};
+  p.renderData(data);
+  const check=i=>p.get('pool-rows').children[i].children[2];
+  let finish;p.setResult(new Promise(resolve=>{finish=resolve;}));
+  const pending=check(0).children[0].children[1].events.click();
+  p.renderData(data);p.changeLanguage('en');
+  assert.equal(check(0).children[0].children[1].textContent,'Sampling…');
+  assert.equal(check(1).children[0].children[1].disabled,true);
+  finish({ok:true,egress_check:{samples:Array.from({length:3},()=>({ip:'8.8.8.8'}))}});await pending;
+  assert.match(check(0).textContent,/does not prove a fixed exit/);
+  assert.equal(check(1).children[0].children[1].disabled,false);
+  p.setResult({egress_check:{samples:[{error:'non_public_ip'},{error:'connection_failed'},{error:'http_status',status_code:429}]}});
+  await check(0).children[0].children[1].events.click();
+  assert.match(check(0).textContent,/Not enough valid samples/);
+  assert.match(check(0).textContent,/No usable public IP/);
+  assert.match(check(0).textContent,/HTTP 429/);
+  assert.doesNotMatch(check(0).textContent,/8\.8\.8\.8/);
+});
+
+test('changed exits and sign-out discard late public sampling results',async()=>{
+  const p=panel();
+  const data={records:[],turn_state_override:{probe:fixture({proxies_state:[{id:'a',proxy:'direct'}]})}};
+  p.renderData(data);
+  let finish;p.setResult(new Promise(resolve=>{finish=resolve;}));
+  const pending=p.get('pool-rows').children[0].children[2].children[0].children[1].events.click();
+  data.turn_state_override.probe.proxies_state[0].proxy='http://192.0.2.10:80';p.renderData(data);
+  finish({egress_check:{samples:[{ip:'8.8.8.8'}]}});await pending;
+  assert.match(p.get('pool-rows').textContent,/尚未采样/);
+  assert.doesNotMatch(p.get('pool-rows').textContent,/8\.8\.8\.8/);
+  p.setResult(new Promise(resolve=>{finish=resolve;}));
+  const pendingLogin=p.get('pool-rows').children[0].children[2].children[0].children[1].events.click();
+  await p.get('refresh').events.click();
+  finish({egress_check:{samples:[{ip:'8.8.8.8'}]}});await pendingLogin;
+  p.renderData(data);assert.match(p.get('pool-rows').textContent,/尚未采样/);
 });

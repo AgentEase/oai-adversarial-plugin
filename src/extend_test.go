@@ -967,6 +967,7 @@ func TestPrefetchScanTriggersOnlyNearExpiry(t *testing.T) {
 		paused:      map[string]bool{}, probing: map[string]bool{}}
 	cfg := parseProbeConfig(probeConfigYAML{Enabled: &enabled,
 		Models: []string{"gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-luna"}})
+	cfg.ProbeInterval = time.Millisecond
 	probeTrack.cfg.Config = cfg
 
 	fresh := synthStateToken(time.Now().Add(-10 * time.Minute))
@@ -985,6 +986,7 @@ func TestPrefetchScanTriggersOnlyNearExpiry(t *testing.T) {
 	// Enable and scan: only the near-expiry model gets an attempt.
 	probeTrack.cfg.Config.Prefetch = cfg.Prefetch
 	probeTrack.prefetchScan()
+	waitPrefetchIdle(t, probeTrack)
 	if probeTrack.prefetchGate["gpt-6-astra"] != (time.Time{}) {
 		t.Fatal("fresh model must not be probed")
 	}
@@ -994,19 +996,26 @@ func TestPrefetchScanTriggersOnlyNearExpiry(t *testing.T) {
 	// Second scan within the retry window is throttled (gate unchanged).
 	gate := probeTrack.prefetchGate["gpt-5.6-sol"]
 	probeTrack.prefetchScan()
+	waitPrefetchIdle(t, probeTrack)
 	if !probeTrack.prefetchGate["gpt-5.6-sol"].Equal(gate) {
 		t.Fatal("retry window must throttle repeats")
 	}
 	// Parked candidate suppresses further attempts even near expiry.
 	candidate := synthStateToken(time.Now())
-	probeTrack.candidates["gpt-5.6-sol"] = stateEntry{Model: "gpt-5.6-sol", Value: candidate, Valid: true}
+	waitPrefetchIdle(t, probeTrack)
 	probeTrack.mu.Lock()
+	probeTrack.candidates["gpt-5.6-sol"] = stateEntry{Model: "gpt-5.6-sol", Value: candidate, Valid: true}
 	probeTrack.prefetchGate["gpt-5.6-sol"] = time.Time{}
 	probeTrack.mu.Unlock()
 	probeTrack.prefetchScan()
+	waitPrefetchIdle(t, probeTrack)
 	if !probeTrack.prefetchGate["gpt-5.6-sol"].IsZero() {
 		t.Fatal("a parked candidate must suppress prefetch")
 	}
+	t.Cleanup(func() {
+		probeTrack.stop()
+		waitPrefetchIdle(t, probeTrack)
+	})
 }
 
 // TestPoolNeverBenched verifies rotating pools (one endpoint presenting many
