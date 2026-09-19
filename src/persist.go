@@ -11,7 +11,7 @@ package main
 // plus once on shutdown. It is read back on the first lifecycle call of a
 // fresh plugin instance.
 //
-// Size: bounded by design (200 audit records, 200 probe history entries,
+// Size: bounded by design (200 audit records, 200 probe history entries, 50 successful probes,
 // 4096-byte state values) to roughly one megabyte, so a JSON file is both
 // sufficient and simpler than a database.
 
@@ -49,6 +49,8 @@ type persistedState struct {
 	ProbesTotal    uint64          `json:"probes_total,omitempty"`
 	ProbesOK       uint64          `json:"probes_ok,omitempty"`
 	ProbeHistory   []probeRecord   `json:"probe_history,omitempty"`
+	// Keep an explicit empty array to distinguish new snapshots from legacy ones.
+	ProbeSuccessHistory []probeRecord `json:"probe_success_history"`
 	Records        []auditRecord   `json:"records,omitempty"`
 	Total          uint64          `json:"total,omitempty"`
 	Inserted       uint64          `json:"inserted,omitempty"`
@@ -172,6 +174,8 @@ func collectState() persistedState {
 	historyCopy := make([]probeRecord, len(probeTrack.history))
 	copy(historyCopy, probeTrack.history)
 	state.ProbeHistory = historyCopy
+	state.ProbeSuccessHistory = make([]probeRecord, len(probeTrack.successHistory))
+	copy(state.ProbeSuccessHistory, probeTrack.successHistory)
 	probeTrack.mu.Unlock()
 
 	history.mu.Lock()
@@ -338,6 +342,17 @@ func applyPersistedState(state persistedState) {
 			probeHistoryCopy = probeHistoryCopy[len(probeHistoryCopy)-probeHistoryLimit:]
 		}
 		probeTrack.history = probeHistoryCopy
+	}
+	successRecords := state.ProbeSuccessHistory
+	if successRecords == nil {
+		// Legacy snapshots can only recover successes still in their mixed history.
+		successRecords = state.ProbeHistory
+	}
+	probeTrack.successHistory = make([]probeRecord, 0, probeSuccessHistoryLimit)
+	for _, record := range successRecords {
+		if record.Success {
+			probeTrack.successHistory = appendBoundedProbeRecord(probeTrack.successHistory, record, probeSuccessHistoryLimit)
+		}
 	}
 	probeTrack.mu.Unlock()
 

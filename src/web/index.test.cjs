@@ -439,3 +439,39 @@ test('switching language after sign-out does not restore previously rendered req
   assert.equal(p.get('results').classList.contains('hidden'),true);
   assert.match(p.get('auth-message').textContent,/No saved CPA session/);
 });
+
+test('successful probes use independent history and respect its explicit empty state',()=>{
+  const p=panel();
+  const success={model:'saved-success',proxy:'direct',proxy_label:'用户名称',success:true,state_length:292};
+  const history=Array.from({length:60},(_,i)=>({model:'failure-'+i,success:false}));
+  p.render(fixture({history,success_history:[success]}));
+  assert.equal(p.get('probe-history').children.length,50);
+  assert.equal(p.get('probe-success-history').children.length,1);
+  assert.match(p.get('probe-success-history').textContent,/saved-success.*用户名称/);
+  p.render(fixture({history:[success],success_history:[]}));
+  assert.equal(p.get('probe-success-history').textContent,'暂无成功记录。');
+  p.render(fixture({history:[...history,success]}));
+  assert.match(p.get('probe-success-history').textContent,/saved-success/);
+  p.render(fixture({success_history:[{success:false},...Array.from({length:60},(_,i)=>({...success,model:'success-'+i}))]}));
+  assert.equal(p.get('probe-success-history').children.length,50);
+  assert.match(p.get('probe-success-history').children[49].textContent,/success-49/);
+});
+
+test('history panels preserve independent open states through refresh and all locales',()=>{
+  const p=panel();
+  const data={total:0,records:[],turn_state_override:{probe:fixture()}};
+  p.renderData(data);
+  p.get('probe-history-panel').open=true;
+  p.get('probe-success-history-panel').open=false;
+  const empty=['No successful probes yet.','尚無成功記錄。','Успешных проверок пока нет.','暂无成功记录。'];
+  for(const [i,language] of ['en','zh-TW','ru','zh-CN'].entries()){
+    p.changeLanguage(language);p.renderData(data);
+    assert.equal(p.get('probe-success-history').textContent,empty[i]);
+    assert.equal(p.get('probe-history-panel').open,true);
+    assert.equal(p.get('probe-success-history-panel').open,false);
+  }
+  p.get('probe-history-panel').open=false;p.get('probe-success-history-panel').open=true;
+  p.renderData(data);
+  assert.equal(p.get('probe-history-panel').open,false);
+  assert.equal(p.get('probe-success-history-panel').open,true);
+});

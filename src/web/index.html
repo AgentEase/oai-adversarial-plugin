@@ -19,8 +19,9 @@
     .panel{background:var(--card);border:1px solid var(--line);border-radius:10px;overflow:hidden;margin-bottom:24px}.toolbar{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;padding:18px 22px;border-bottom:1px solid var(--line)}.actions{display:flex;align-items:center;flex-wrap:wrap;gap:8px;color:var(--muted);font-size:12px}#probe-times{flex-basis:100%;margin-top:2px}
     button,a.primary{cursor:pointer;border:1px solid var(--control-line);border-radius:7px;background:transparent;color:var(--text);padding:7px 12px;min-height:36px;font:inherit;font-size:12px;text-decoration:none}button:hover:not(:disabled){background:var(--subtle);border-color:var(--muted)}button:disabled{opacity:.55;cursor:not-allowed}button.primary,a.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}button.primary:hover:not(:disabled),a.primary:hover{background:var(--text);color:var(--bg)}a.primary{display:inline-block}
     :is(button,a,input,select,summary,[tabindex]):focus-visible{outline:2px solid var(--accent);outline-offset:3px}.switch-btn.on{background:var(--ok-bg);border-color:var(--ok);color:var(--ok)}.icon-btn{font-size:12px;padding:5px 9px;min-height:32px}.icon-btn.paused{color:var(--accent)}.control-cell{white-space:nowrap}.control-cell button+button{margin-left:6px}
-    .table-wrap{overflow:auto;scrollbar-gutter:stable}table{width:100%;border-collapse:collapse;text-align:left;white-space:nowrap}th{font-size:11px;color:var(--muted);font-weight:550;background:var(--subtle);padding:12px 18px}td{padding:16px 18px;border-top:1px solid var(--line);vertical-align:top;font-size:12px}td.model{max-width:210px;white-space:normal;overflow-wrap:anywhere;font-weight:550}tbody tr:hover{background:var(--subtle)}.time{font-size:12px;font-variant-numeric:tabular-nums}.sub,.probe-note{font-size:12px;color:var(--muted)}.none{color:var(--muted)}.src{font-size:11px;color:var(--muted);margin-left:6px}#probe-history td:last-child{min-width:200px;max-width:440px;white-space:normal;overflow-wrap:anywhere}
+    .table-wrap{overflow:auto;scrollbar-gutter:stable}table{width:100%;border-collapse:collapse;text-align:left;white-space:nowrap}th{font-size:11px;color:var(--muted);font-weight:550;background:var(--subtle);padding:12px 18px}td{padding:16px 18px;border-top:1px solid var(--line);vertical-align:top;font-size:12px}td.model{max-width:210px;white-space:normal;overflow-wrap:anywhere;font-weight:550}tbody tr:hover{background:var(--subtle)}.time{font-size:12px;font-variant-numeric:tabular-nums}.sub,.probe-note{font-size:12px;color:var(--muted)}.none{color:var(--muted)}.src{font-size:11px;color:var(--muted);margin-left:6px}#probe-history td:last-child,#probe-success-history td:last-child{min-width:200px;max-width:440px;white-space:normal;overflow-wrap:anywhere}
     .badge{display:inline-block;padding:3px 8px;border-radius:5px;font-size:11px;font-weight:550;line-height:1.6;background:var(--soft);color:var(--accent)}.badge.inserted,.badge.probe-ok,.badge.state-ok{background:var(--ok-bg);color:var(--ok)}.badge.mismatch,.badge.override,.badge.state-warn{background:var(--warn-bg);color:var(--warn)}.badge.mismatch,.badge.override,.badge.skipped{margin-left:6px}.badge.probe-fail,.badge.state-fail{background:var(--danger-bg);color:var(--danger)}.badge.unchanged,.badge.skipped,.badge.state-off{background:var(--subtle);color:var(--muted)}.badge.state-rest{background:var(--soft);color:var(--accent)}.ttl-cell>.badge{margin:0 4px 5px 0}.paused-row td.model{color:var(--muted)}.ttl-cell,.turnstate,.budget{font-variant-numeric:tabular-nums}.ttl-cell .bar{height:4px;border-radius:2px;background:var(--line);margin:8px 0;max-width:150px}.ttl-cell .bar i{display:block;height:100%;border-radius:inherit;background:var(--ok)}
+    .probe-records>summary{cursor:pointer;list-style:none}.probe-records>summary::-webkit-details-marker{display:none}.probe-records>summary:after{content:"";width:7px;height:7px;flex-shrink:0;border:solid var(--muted);border-width:0 1.5px 1.5px 0;transform:rotate(45deg);margin-left:4px}.probe-records[open]>summary:after{transform:rotate(225deg)}.probe-records:not([open])>summary{border-bottom:0}.probe-records>summary:hover{background:var(--subtle)}.probe-records>summary .probe-note{margin-left:auto;font-size:12px;font-weight:400}
     .probe-settings{border-bottom:1px solid var(--line)}.probe-settings summary{display:flex;align-items:center;flex-wrap:wrap;gap:12px;padding:14px 22px;cursor:pointer;list-style:none;font-size:12px}.probe-settings summary::-webkit-details-marker{display:none}.probe-settings summary:after{content:"";width:7px;height:7px;border:solid var(--muted);border-width:0 1.5px 1.5px 0;transform:rotate(45deg);margin-left:auto;margin-right:4px}.probe-settings[open] summary:after{transform:rotate(225deg)}.probe-settings summary:hover{background:var(--subtle)}.settings-title{font-weight:600}.settings-body{display:grid;grid-template-columns:1fr 1fr;padding:0 22px 18px;gap:24px}.settings-line{display:flex;align-items:center;flex-wrap:wrap;gap:8px;font-size:12px;padding:14px 0 0;border-top:1px solid var(--line)}.settings-line label{flex-basis:100%;font-weight:550}.settings-line input{width:84px}.settings-line .sub,.settings-line [role=status]{flex-basis:100%}.settings-error{color:var(--danger)}
     input,select{border:1px solid var(--control-line);border-radius:6px;background:var(--bg);color:var(--text);padding:8px 10px;font:inherit;min-height:36px}input[type=checkbox]{accent-color:var(--accent);min-height:auto}input::placeholder{color:var(--muted)}.exit-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px 24px;padding:22px;border-bottom:1px solid var(--line);background:var(--subtle)}.exit-form label{display:flex;flex-direction:column;gap:6px;font-size:12px}.exit-form input,.exit-form select{width:100%;min-width:0}.exit-form .wide{grid-column:1/-1}.exit-form .check{flex-direction:row;flex-wrap:wrap;align-items:center}.exit-form .check input{width:auto}
     .exit-item{padding:20px 22px;border-top:1px solid var(--line)}.exit-item:first-child{border-top:0}.exit-main{display:grid;grid-template-columns:minmax(180px,1fr) minmax(90px,.38fr) minmax(150px,.6fr) auto;gap:20px;align-items:center}.exit-identity{min-width:0}.exit-name{font-size:14px;font-weight:600;margin:0 0 4px;overflow-wrap:anywhere}.exit-address{font:12px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace;color:var(--muted);overflow-wrap:anywhere}.exit-kind{font-size:11px;color:var(--muted);margin-left:8px}.exit-budget .label{margin-bottom:3px}.exit-meta{display:flex;flex-wrap:wrap;gap:6px 20px;margin-top:14px;padding-top:12px;border-top:1px solid var(--line);font-size:12px;color:var(--muted);overflow-wrap:anywhere}.exit-error{flex-basis:100%;min-width:0;white-space:normal}.exit-ops{display:flex;gap:8px;flex-wrap:wrap}.exit-ops .edit{background:var(--soft);border-color:transparent;color:var(--accent)}.exit-ops .edit:hover{border-color:var(--accent)}
@@ -86,13 +87,20 @@
         <tbody id="probe-values"></tbody>
       </table></div>
     </section>
-    <section class="panel">
-      <div class="toolbar"><h2 class="section-heading"><svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 11a9 9 0 1 1 2.7 7M3 4v7h7"/><path d="M12 7v5l3 2"/></svg><span><span data-i18n="探测记录">探测记录</span></span></h2><div class="actions"><span class="probe-note"><span data-i18n="最近 50 条 · 最新在前">最近 50 条 · 最新在前</span></span></div></div>
+    <details class="panel probe-records" id="probe-history-panel">
+      <summary class="toolbar"><h2 class="section-heading"><svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 11a9 9 0 1 1 2.7 7M3 4v7h7"/><path d="M12 7v5l3 2"/></svg><span><span data-i18n="探测记录">探测记录</span></span></h2><span class="probe-note"><span data-i18n="最近 50 条 · 最新在前">最近 50 条 · 最新在前</span></span></summary>
       <div class="table-wrap" id="probe-history-wrap" tabindex="0" role="region" aria-label="探测记录，可横向滚动" data-i18n-aria-label="探测记录，可横向滚动"><table>
         <thead><tr><th><span data-i18n="时间（UTC+8）">时间（UTC+8）</span></th><th><span data-i18n="模型">模型</span></th><th><span data-i18n="出口">出口</span></th><th><span data-i18n="结果">结果</span></th><th><span data-i18n="耗时">耗时</span></th><th><span data-i18n="说明">说明</span></th></tr></thead>
         <tbody id="probe-history"></tbody>
       </table></div>
-    </section>
+    </details>
+    <details class="panel probe-records" id="probe-success-history-panel">
+      <summary class="toolbar"><h2 class="section-heading"><svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/></svg><span><span data-i18n="成功记录">成功记录</span></span></h2><span class="probe-note"><span data-i18n="独立保留最近 50 条 · 最新在前">独立保留最近 50 条 · 最新在前</span></span></summary>
+      <div class="table-wrap" id="probe-success-history-wrap" tabindex="0" role="region" aria-label="成功记录，可横向滚动" data-i18n-aria-label="成功记录，可横向滚动"><table>
+        <thead><tr><th><span data-i18n="时间（UTC+8）">时间（UTC+8）</span></th><th><span data-i18n="模型">模型</span></th><th><span data-i18n="出口">出口</span></th><th><span data-i18n="结果">结果</span></th><th><span data-i18n="耗时">耗时</span></th><th><span data-i18n="说明">说明</span></th></tr></thead>
+        <tbody id="probe-success-history"></tbody>
+      </table></div>
+    </details>
   </section>
   <section id="view-pool" class="hidden">
     <section class="cards cards-four" aria-label="代理池统计" data-i18n-aria-label="代理池统计">
@@ -246,6 +254,10 @@
     "探测状态":["Probe status", "探測狀態", "Состояние проверок"],
     "探测统计":["Probe statistics", "探測統計", "Статистика проверок"],
     "探测获取":["Probe", "探測取得", "Проверка"],
+    "成功记录":["Successful probes", "成功記錄", "Успешные проверки"],
+    "成功记录，可横向滚动":["Successful probes, horizontally scrollable", "成功記錄，可水平捲動", "Успешные проверки, прокрутка по горизонтали"],
+    "独立保留最近 50 条 · 最新在前":["Latest 50 saved separately · Newest first", "獨立保留最近 50 筆 · 最新在前", "Последние 50 отдельно · Сначала новые"],
+    "暂无成功记录。":["No successful probes yet.", "尚無成功記錄。", "Успешных проверок пока нет."],
     "探测记录":["Probe history", "探測記錄", "История проверок"],
     "探测记录，可横向滚动":["Probe history, horizontally scrollable", "探測記錄，可水平捲動", "История проверок, прокрутка по горизонтали"],
     "探测设置":["Probe settings", "探測設定", "Настройки проверок"],
@@ -878,7 +890,11 @@
     }
     if(!values.length){const tr=document.createElement('tr');const td=cell(tr,t('暂无基线值。可点击「开始探测」手动获取；业务流量观测到健康状态（模型一致 + 292 字节）时也会自动入库。'),'empty');td.colSpan=7;vfrag.append(tr);}
     el('probe-values').replaceChildren(vfrag);
-    const history=(probe.history||[]).slice(0,50);
+    renderProbeHistory('probe-history',(probe.history||[]).slice(0,50),'暂无探测记录。');
+    const successes=Array.isArray(probe.success_history)?probe.success_history:(probe.history||[]);
+    renderProbeHistory('probe-success-history',successes.filter(record=>record.success===true).slice(0,50),'暂无成功记录。');
+  }
+  function renderProbeHistory(target,history,emptyMessage){
     const hfrag=document.createDocumentFragment();
     for(const record of history){
       const tr=document.createElement('tr');
@@ -902,8 +918,8 @@
       }else{detail.textContent=record.error||'—';detail.classList.add('none');}
       hfrag.append(tr);
     }
-    if(!history.length){const tr=document.createElement('tr');const td=cell(tr,t('暂无探测记录。'),'empty');td.colSpan=6;hfrag.append(tr);}
-    el('probe-history').replaceChildren(hfrag);
+    if(!history.length){const tr=document.createElement('tr');const td=cell(tr,t(emptyMessage),'empty');td.colSpan=6;hfrag.append(tr);}
+    el(target).replaceChildren(hfrag);
   }
   function switchTab(name){
     for(const key of ['records','router','pool']){

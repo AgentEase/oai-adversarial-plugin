@@ -56,6 +56,7 @@ const (
 	probeDefaultsUpstreamURL     = "https://chatgpt.com/backend-api/codex/responses"
 	probeDefaultsCredFile        = "/root/.cli-proxy-api/your-codex-auth.json"
 	probeHistoryLimit            = 200
+	probeSuccessHistoryLimit     = 50
 )
 
 // probeConfig is the parsed probe-track configuration block.
@@ -228,6 +229,7 @@ type probeEngine struct {
 	disabledExits  map[string]bool
 	rejectDegraded bool
 	history        []probeRecord
+	successHistory []probeRecord
 	proxyIndex     int
 	consecutive    int
 	lastActivity   string
@@ -1975,12 +1977,19 @@ func (e *probeEngine) appendRecord(record probeRecord) {
 	defer markStateDirty()
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if len(e.history) >= probeHistoryLimit {
-		copy(e.history, e.history[1:])
-		e.history[len(e.history)-1] = record
-		return
+	e.history = appendBoundedProbeRecord(e.history, record, probeHistoryLimit)
+	if record.Success {
+		e.successHistory = appendBoundedProbeRecord(e.successHistory, record, probeSuccessHistoryLimit)
 	}
-	e.history = append(e.history, record)
+}
+
+func appendBoundedProbeRecord(records []probeRecord, record probeRecord, limit int) []probeRecord {
+	if len(records) >= limit {
+		copy(records, records[1:])
+		records[len(records)-1] = record
+		return records
+	}
+	return append(records, record)
 }
 
 // queueModels extracts the model names of the pending queue for the
@@ -2178,18 +2187,19 @@ func probeSummary() map[string]any {
 		}
 		values = append(values, item)
 	}
-	history := make([]probeRecord, len(probeTrack.history))
-	copy(history, probeTrack.history)
-	for i := range history {
-		// Resolve before redaction: different credentials may share an endpoint.
-		history[i].ProxyLabel = cfg.ProxyLabels[history[i].Proxy]
-		history[i].Proxy = publicProxyURL(history[i].Proxy)
-		history[i].Error = redactProxyText(history[i].Error)
+	publicHistory := func(records []probeRecord) []probeRecord {
+		result := make([]probeRecord, len(records))
+		for i, record := range records {
+			// Resolve before redaction: different credentials may share an endpoint.
+			record.ProxyLabel = cfg.ProxyLabels[record.Proxy]
+			record.Proxy = publicProxyURL(record.Proxy)
+			record.Error = redactProxyText(record.Error)
+			result[len(records)-1-i] = record // newest first
+		}
+		return result
 	}
-	// newest first
-	for i, j := 0, len(history)-1; i < j; i, j = i+1, j-1 {
-		history[i], history[j] = history[j], history[i]
-	}
+	history := publicHistory(probeTrack.history)
+	successHistory := publicHistory(probeTrack.successHistory)
 	failures := make([]probeFailure, 0, len(cfg.Models))
 	for _, model := range cfg.Models {
 		if failure, ok := probeTrack.failures[model]; ok && degradationDetectionEnabled(model, "") {
@@ -2325,6 +2335,7 @@ func probeSummary() map[string]any {
 		"values":       values,
 		"failures":     failures,
 		"history":      history,
+		"success_history": successHistory,
 	}
 	probeTrack.mu.Unlock()
 	return summary
