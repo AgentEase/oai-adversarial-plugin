@@ -554,8 +554,11 @@
   function storedValue(name){
     let value=localStorage.getItem(name);
     if(value===null)return null;
-    if(value.startsWith('enc::v1::')){
-      const mask=new TextEncoder().encode('cli-proxy-api-webui::secure-storage|'+location.host+'|'+navigator.userAgent);
+    let maskSource=null;
+    if(value.startsWith('enc::v2::'))maskSource='cli-proxy-api-webui::secure-storage|v2|'+location.host;
+    else if(value.startsWith('enc::v1::'))maskSource='cli-proxy-api-webui::secure-storage|'+location.host+'|'+navigator.userAgent;
+    if(maskSource){
+      const mask=new TextEncoder().encode(maskSource);
       const bytes=Uint8Array.from(atob(value.slice(9)),(character,index)=>character.charCodeAt(0)^mask[index%mask.length]);
       value=new TextDecoder('utf-8',{fatal:true}).decode(bytes);
     }
