@@ -7,6 +7,10 @@ import (
 	"net/http"
 	"strings"
 	"sync/atomic"
+	"time"
+	// Embed the IANA database so timezone validation works in minimal
+	// containers that ship no system zoneinfo.
+	_ "time/tzdata"
 
 	"gopkg.in/yaml.v3"
 )
@@ -76,6 +80,7 @@ func currentTurnStateOverride() *turnStateOverrideState {
 func configureTurnStateOverride(configYAML []byte) error {
 	state := &turnStateOverrideState{}
 	var root struct {
+		Timezone          string                  `yaml:"timezone"`
 		TurnStateOverride turnStateOverrideConfig `yaml:"turn-state-override"`
 	}
 	trimmed := bytes.TrimSpace(configYAML)
@@ -86,6 +91,16 @@ func configureTurnStateOverride(configYAML []byte) error {
 			return fmt.Errorf("decode turn-state-override config: %w", err)
 		}
 	}
+	// Optional top-level target timezone; must be a valid IANA zone name.
+	zone := strings.TrimSpace(root.Timezone)
+	if zone == "" {
+		zone = targetTimezone
+	} else if _, err := time.LoadLocation(zone); err != nil {
+		state = &turnStateOverrideState{Error: fmt.Sprintf("invalid timezone %q: %v", zone, err)}
+		turnStateOverride.Store(state)
+		return fmt.Errorf("invalid timezone %q: %w", zone, err)
+	}
+	configuredTimezone.Store(zone)
 	config := root.TurnStateOverride
 	config.Value = strings.TrimSpace(config.Value)
 	models := make([]string, 0, len(config.Models))

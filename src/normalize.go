@@ -7,12 +7,32 @@ import (
 	"io"
 	"regexp"
 	"strings"
+	"sync/atomic"
 )
 
+// targetTimezone is the default IANA zone used when the plugin config does
+// not set one explicitly.
 const targetTimezone = "America/Los_Angeles"
 
-const timezoneTag = "<timezone>" + targetTimezone + "</timezone>"
-const environmentBlock = "<environment_context>\n" + timezoneTag + "\n</environment_context>"
+// configuredTimezone holds the active zone name and is swapped atomically on
+// every (re)configure so hot reloads take effect without restarting the host.
+var configuredTimezone atomic.Value // string
+
+func init() { configuredTimezone.Store(targetTimezone) }
+
+// currentTimezone returns the configured target timezone, falling back to the
+// default before the first configuration is applied.
+func currentTimezone() string {
+	if zone, ok := configuredTimezone.Load().(string); ok && zone != "" {
+		return zone
+	}
+	return targetTimezone
+}
+
+func timezoneTag() string { return "<timezone>" + currentTimezone() + "</timezone>" }
+func environmentBlock() string {
+	return "<environment_context>\n" + timezoneTag() + "\n</environment_context>"
+}
 
 var (
 	environmentPattern = regexp.MustCompile(`(?is)<environment_context\s*>.*?</environment_context\s*>`)
@@ -46,7 +66,7 @@ func normalizeRequest(body []byte, sourceFormat string) ([]byte, conversion, err
 		return nil, conversion{}, fmt.Errorf("request body must contain one JSON object")
 	}
 	n := normalizer{conversion: conversion{
-		Original: []string{}, Target: targetTimezone, Paths: []string{},
+		Original: []string{}, Target: currentTimezone(), Paths: []string{},
 	}}
 	n.textField(request, "instructions", "$.instructions")
 	n.textField(request, "input", "$.input")
@@ -117,14 +137,15 @@ func (n *normalizer) textField(object map[string]any, key, path string) {
 				n.Original = appendUnique(n.Original, original)
 			}
 		}
+		tag := timezoneTag()
 		if len(matches) > 0 {
-			return timezonePattern.ReplaceAllString(block, timezoneTag)
+			return timezonePattern.ReplaceAllString(block, tag)
 		}
 		if emptyZonePattern.MatchString(block) {
-			return emptyZonePattern.ReplaceAllString(block, timezoneTag)
+			return emptyZonePattern.ReplaceAllString(block, tag)
 		}
 		return closingEnvPattern.ReplaceAllStringFunc(block, func(closing string) string {
-			return timezoneTag + "\n" + closing
+			return tag + "\n" + closing
 		})
 	})
 	if updated != text {
@@ -138,11 +159,11 @@ func (n *normalizer) inject(request map[string]any, sourceFormat string) error {
 	if strings.EqualFold(sourceFormat, "claude") {
 		switch system := request["system"].(type) {
 		case nil:
-			request["system"] = environmentBlock
+			request["system"] = environmentBlock()
 		case string:
 			request["system"] = appendContext(system)
 		case []any:
-			request["system"] = append(system, map[string]any{"type": "text", "text": environmentBlock})
+			request["system"] = append(system, map[string]any{"type": "text", "text": environmentBlock()})
 		default:
 			return fmt.Errorf("unsupported system content")
 		}
@@ -150,14 +171,14 @@ func (n *normalizer) inject(request map[string]any, sourceFormat string) error {
 		return nil
 	}
 	if messages, ok := request["messages"].([]any); ok {
-		contextMessage := map[string]any{"role": "system", "content": environmentBlock}
+		contextMessage := map[string]any{"role": "system", "content": environmentBlock()}
 		request["messages"] = append([]any{contextMessage}, messages...)
 		n.Paths = append(n.Paths, "$.messages[0].content")
 		return nil
 	}
 	switch instructions := request["instructions"].(type) {
 	case nil:
-		request["instructions"] = environmentBlock
+		request["instructions"] = environmentBlock()
 	case string:
 		request["instructions"] = appendContext(instructions)
 	default:
@@ -169,9 +190,9 @@ func (n *normalizer) inject(request map[string]any, sourceFormat string) error {
 
 func appendContext(text string) string {
 	if text == "" {
-		return environmentBlock
+		return environmentBlock()
 	}
-	return text + "\n\n" + environmentBlock
+	return text + "\n\n" + environmentBlock()
 }
 
 func appendUnique(values []string, value string) []string {

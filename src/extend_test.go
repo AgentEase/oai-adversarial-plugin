@@ -1767,6 +1767,34 @@ turn-state-override:
 	}
 }
 
+// TestTimezoneConfigParsing checks the optional top-level timezone override:
+// valid IANA names activate, invalid names reject the config, and omission
+// restores the default.
+func TestTimezoneConfigParsing(t *testing.T) {
+	t.Cleanup(func() { configuredTimezone.Store(targetTimezone) })
+
+	if err := configureTurnStateOverride([]byte(`timezone: "Asia/Singapore"`)); err != nil {
+		t.Fatal(err)
+	}
+	if zone := currentTimezone(); zone != "Asia/Singapore" {
+		t.Fatalf("configured zone must activate, got %q", zone)
+	}
+
+	if err := configureTurnStateOverride([]byte(`timezone: "Not/AZone"`)); err == nil {
+		t.Fatal("invalid zone must be rejected")
+	}
+	if summary := turnStateOverrideSummary(); summary["error"] == "" {
+		t.Fatalf("invalid zone must surface an error: %+v", summary)
+	}
+
+	if err := configureTurnStateOverride([]byte(`enabled: true`)); err != nil {
+		t.Fatal(err)
+	}
+	if zone := currentTimezone(); zone != targetTimezone {
+		t.Fatalf("omitted zone must restore the default, got %q", zone)
+	}
+}
+
 // TestTurnStateOverrideApply drives the rewrite decision matrix.
 func TestTurnStateOverrideApply(t *testing.T) {
 	turnStateOverride = atomic.Value{}
