@@ -12,7 +12,7 @@ import (
 
 const (
 	pluginID                   = "timezone-override"
-	pluginVersion              = "1.5.37"
+	pluginVersion              = "1.5.39"
 	historyLimit               = 200
 	schemaVersion              = 6
 	streamChunkHeaderInitIndex = -1
@@ -148,6 +148,7 @@ func handleMethod(method string, raw []byte) (any, error) {
 	case "plugin.register", "plugin.reconfigure":
 		ensurePersistence()
 		configureTurnStateOverrideFromLifecycle(raw)
+		startStateMirror()
 		return map[string]any{
 			"schema_version": schemaVersion,
 			"metadata": map[string]any{
@@ -191,6 +192,7 @@ func handleMethod(method string, raw []byte) (any, error) {
 	case "management.handle":
 		return management(raw)
 	case "plugin.shutdown":
+		stopStateMirror()
 		probeTrackShutdown()
 		closePersistence()
 		return struct{}{}, nil
@@ -413,6 +415,8 @@ func probeControl(body []byte) (managementResponse, error) {
 		Enabled *bool  `json:"enabled"`
 		Minutes *int   `json:"minutes"`
 		Seconds *int   `json:"seconds"`
+		StartHour *int `json:"start_hour"`
+		EndHour *int   `json:"end_hour"`
 		Exit    *exitEdit `json:"exit"`
 	}
 	if len(body) > 0 {
@@ -421,11 +425,13 @@ func probeControl(body []byte) (managementResponse, error) {
 		}
 	}
 	switch action := strings.ToLower(strings.TrimSpace(req.Action)); action {
-	case "check-egress":
-		result, status := probeTrack.checkEgress(strings.TrimSpace(req.ID), egressCheckURL)
-		payload, _ := json.Marshal(map[string]any{"ok": status == http.StatusOK, "egress_check": result})
-		return managementResponse{StatusCode: status, Body: payload,
-			Headers: http.Header{"Content-Type": {"application/json; charset=utf-8"}, "Cache-Control": {"no-store"}}}, nil
+	case "sleep-hours":
+		if req.StartHour == nil || req.EndHour == nil {
+			return jsonErrorResponse(http.StatusBadRequest, "缺少 start_hour 或 end_hour 字段"), nil
+		}
+		if err := probeTrack.setSleepHours(probeSleepHours{Start: *req.StartHour, End: *req.EndHour}); err != nil {
+			return settingsErrorResponse(err)
+		}
 	case "prefetch-window":
 		if req.Minutes == nil {
 			return jsonErrorResponse(http.StatusBadRequest, "缺少 minutes 字段"), nil

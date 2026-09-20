@@ -312,7 +312,7 @@ test('collapsed settings summary shows effective values without replacing open d
   p.render(fixture({prefetch_minutes:5,interval_seconds:8}));
   assert.equal(p.get('probe-settings').open,true);
   assert.equal(p.get('prefetch-minutes').value,'12');
-  assert.equal(p.get('settings-summary').textContent,'提前预备 5 分钟 · 串行间隔 8 秒');
+  assert.equal(p.get('settings-summary').textContent,'提前预备 5 分钟 · 串行间隔 8 秒 · 不休眠');
   p.render(fixture({settings_error:'设置不可读'}));
   assert.equal(p.get('settings-summary').textContent,'设置异常 · 展开查看');
   assert.equal(p.get('prefetch-save').disabled,true);
@@ -569,64 +569,87 @@ test('egress visibility masks both lists and survives polling and language chang
 });
 
 
-test('manual public sampling keeps three results distinct from model probes and masks IPs',async()=>{
+test('hidden history addresses mask missing and zero values until explicitly shown',()=>{
   const p=panel();
-  const data={records:[],turn_state_override:{probe:fixture({proxies_state:[{id:'pool',proxy:'socks5h://192.0.2.1:1080',pool:true}]})}};
-  p.renderData(data);
-  const check=()=>p.get('pool-rows').children[0].children[2];
-  assert.match(check().textContent,/尚未采样/);assert.equal(p.actions.length,0);
-  const samples=[{time:'2026-09-19T00:00:00Z',ip:'8.8.8.8'},{time:'2026-09-19T00:00:01Z',ip:'1.1.1.1'},{time:'2026-09-19T00:00:02Z',error:'timeout'}];
-  p.setResult({ok:true,egress_check:{exit_id:'pool',source:'ipify',samples}});
-  await check().children[0].children[1].events.click();
-  assert.deepEqual(JSON.parse(JSON.stringify(p.actions)),[{action:'check-egress',id:'pool'}]);
-  assert.match(check().textContent,/2 个不同公网 IP/);
-  assert.match(check().textContent,/查询超时/);
-  assert.doesNotMatch(check().textContent,/8\.8\.8\.8|1\.1\.1\.1/);
-  assert.equal(check().children[2].children.length,3);
-  p.get('pool-ip-toggle').events.click();
-  assert.match(check().textContent,/8\.8\.8\.8/);
-  p.renderData(data);p.changeLanguage('en');
-  assert.match(check().textContent,/Observed 2 distinct public IPs/);
-  assert.match(check().textContent,/Check timed out/);
-  assert.match(p.get('probe-history').textContent,/No probe history/);
-  p.get('pool-ip-toggle').events.click();
-  assert.doesNotMatch(check().textContent,/8\.8\.8\.8|1\.1\.1\.1/);
+  const records=['203.0.113.42',undefined,'','0.0.0.0','::'].map(egress_addr=>({proxy:'socks5h://192.0.2.1:1080',egress_addr,success:true}));
+  const data={records:[],turn_state_override:{probe:fixture({history:records,success_history:records})}};
+  const lists=()=>['probe-history','probe-success-history'].map(id=>p.get(id).children.map(row=>row.children[3]));
+  const assertHidden=()=>{
+    for(const cells of lists())for(const cell of cells){
+      assert.equal(cell.textContent,'***');
+      assert.ok(!cell.title);
+      assert.equal(cell.children.length,0);
+      assert.doesNotMatch(JSON.stringify(cell),/203\.0\.113\.42|未获取/);
+    }
+  };
+  p.renderData(data);assertHidden();
+  p.get('probe-ip-toggle').events.click();
+  for(const cells of lists()){
+    assert.match(cells[0].textContent,/203\.0\.113\.42/);
+    for(const cell of cells.slice(1))assert.equal(cell.textContent,'未获取');
+  }
+  p.get('probe-success-ip-toggle').events.click();
+  p.renderData(data);p.changeLanguage('en');assertHidden();
 });
 
-test('public sampling preserves pending state and never claims a fixed IP from three samples',async()=>{
-  const p=panel();
-  const data={records:[],turn_state_override:{probe:fixture({proxies_state:[{id:'a',proxy:'direct'},{id:'b',proxy:'http://192.0.2.2:80'}]})}};
-  p.renderData(data);
-  const check=i=>p.get('pool-rows').children[i].children[2];
-  let finish;p.setResult(new Promise(resolve=>{finish=resolve;}));
-  const pending=check(0).children[0].children[1].events.click();
-  p.renderData(data);p.changeLanguage('en');
-  assert.equal(check(0).children[0].children[1].textContent,'Sampling…');
-  assert.equal(check(1).children[0].children[1].disabled,true);
-  finish({ok:true,egress_check:{samples:Array.from({length:3},()=>({ip:'8.8.8.8'}))}});await pending;
-  assert.match(check(0).textContent,/does not prove a fixed exit/);
-  assert.equal(check(1).children[0].children[1].disabled,false);
-  p.setResult({egress_check:{samples:[{error:'non_public_ip'},{error:'connection_failed'},{error:'http_status',status_code:429}]}});
-  await check(0).children[0].children[1].events.click();
-  assert.match(check(0).textContent,/Not enough valid samples/);
-  assert.match(check(0).textContent,/No usable public IP/);
-  assert.match(check(0).textContent,/HTTP 429/);
-  assert.doesNotMatch(check(0).textContent,/8\.8\.8\.8/);
+test('sleep settings preserve drafts, validate hours and keep failed saves editable',async()=>{
+  const p=panel();p.render(fixture());
+  assert.equal(p.get('sleep-start-hour').value,'0');
+  assert.equal(p.get('sleep-end-hour').value,'0');
+  p.get('sleep-start-hour').value='23';p.get('sleep-start-hour').events.input();
+  p.get('sleep-end-hour').value='7';p.get('sleep-end-hour').events.input();
+  p.render(fixture({sleep_start_hour:2,sleep_end_hour:8}));
+  assert.equal(p.get('sleep-start-hour').value,'23');
+  assert.equal(p.get('sleep-end-hour').value,'7');
+  for(const value of ['','-1','24','2.5','abc']){
+    p.get('sleep-start-hour').value=value;await p.get('sleep-save').events.click();
+    assert.equal(p.actions.length,0);
+  }
+  p.get('sleep-start-hour').value='23';await p.get('sleep-save').events.click();
+  assert.deepEqual(JSON.parse(JSON.stringify(p.actions)),[{action:'sleep-hours',start_hour:23,end_hour:7}]);
+  assert.match(p.get('sleep-feedback').textContent,/保存失败/);
+  p.render(fixture());assert.equal(p.get('sleep-start-hour').value,'23');
 });
 
-test('changed exits and sign-out discard late public sampling results',async()=>{
-  const p=panel();
-  const data={records:[],turn_state_override:{probe:fixture({proxies_state:[{id:'a',proxy:'direct'}]})}};
-  p.renderData(data);
+test('sleep save is single flight, follows language changes and permits disabling',async()=>{
+  const p=panel(),data={records:[],turn_state_override:{probe:fixture()}};
+  p.renderData(data);p.get('sleep-start-hour').value='2';p.get('sleep-end-hour').value='7';p.get('sleep-start-hour').events.input();
   let finish;p.setResult(new Promise(resolve=>{finish=resolve;}));
-  const pending=p.get('pool-rows').children[0].children[2].children[0].children[1].events.click();
-  data.turn_state_override.probe.proxies_state[0].proxy='http://192.0.2.10:80';p.renderData(data);
-  finish({egress_check:{samples:[{ip:'8.8.8.8'}]}});await pending;
-  assert.match(p.get('pool-rows').textContent,/尚未采样/);
-  assert.doesNotMatch(p.get('pool-rows').textContent,/8\.8\.8\.8/);
-  p.setResult(new Promise(resolve=>{finish=resolve;}));
-  const pendingLogin=p.get('pool-rows').children[0].children[2].children[0].children[1].events.click();
-  await p.get('refresh').events.click();
-  finish({egress_check:{samples:[{ip:'8.8.8.8'}]}});await pendingLogin;
-  p.renderData(data);assert.match(p.get('pool-rows').textContent,/尚未采样/);
+  const saving=p.get('sleep-save').events.click();
+  await p.get('sleep-save').events.click();p.renderData(data);p.changeLanguage('en');
+  assert.equal(p.actions.length,1);assert.equal(p.get('sleep-save').disabled,true);
+  assert.equal(p.get('sleep-start-hour').value,'2');
+  finish(true);await saving;
+  assert.equal(p.get('sleep-feedback').textContent,'Sleep schedule saved');
+  p.get('sleep-start-hour').value='0';p.get('sleep-end-hour').value='0';p.setResult(true);
+  await p.get('sleep-save').events.click();
+  assert.deepEqual(JSON.parse(JSON.stringify(p.actions[1])),{action:'sleep-hours',start_hour:0,end_hour:0});
+});
+
+test('sleep overrides probe activity while preserving baseline and explicit stopped modes',()=>{
+  const p=panel();
+  const sleeping=fixture({sleeping:true,sleep_start_hour:2,sleep_end_hour:7,sleep_until:'2026-01-01T23:00:00Z',running:true,active_models:['gpt-6-astra']});
+  p.render(sleeping);
+  assert.equal(p.get('probe-status').textContent,'休眠中');
+  assert.match(p.get('settings-summary').textContent,/02:00～07:00/);
+  assert.match(p.get('probe-times').textContent,/在途请求完成后等待/);
+  const row=p.get('probe-values').children[0];
+  assert.match(row.children[0].textContent,/休眠中/);
+  assert.match(row.children[5].textContent,/剩余 3m 00s/);
+  assert.doesNotMatch(row.children[5].textContent,/探测中/);
+  assert.equal(row.children[6].children[1].disabled,true);
+  p.render({...sleeping,running:false,active_models:[],halted:true,paused:['gpt-6-astra']});
+  assert.equal(p.get('probe-status').textContent,'全部停止');
+  assert.match(p.get('probe-values').children[0].children[0].textContent,/已暂停/);
+  p.render({...sleeping,sleeping:false,running:false,active_models:[],prefetch_minutes:0});
+  assert.equal(p.get('probe-status').textContent,'手动待命');
+});
+
+test('proxy list retains management actions without independent public sampling',()=>{
+  const p=panel();p.renderPool({proxies_state:[{id:'direct',proxy:'direct',active:true}]});
+  const row=p.get('pool-rows').children[0];
+  assert.equal(row.children.length,2);
+  assert.match(row.textContent,/编辑/);assert.match(row.textContent,/禁用/);assert.match(row.textContent,/重置/);
+  assert.doesNotMatch(row.textContent,/公网|采样|ipify/);
+  assert.equal(p.actions.length,0);
 });

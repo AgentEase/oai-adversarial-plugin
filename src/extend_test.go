@@ -1213,14 +1213,10 @@ func TestStopAbortsAllInFlight(t *testing.T) {
 // the engine.
 func TestWatcherSilentAfterStop(t *testing.T) {
 	enabled := true
-	probeTrack = &probeEngine{
-		values: map[string]stateEntry{}, failures: map[string]probeFailure{},
-		candidates: map[string]stateEntry{}, prefetchGate: map[string]time.Time{},
-		lastAttempt: map[string]time.Time{},
-		paused:      map[string]bool{}, probing: map[string]bool{},
-	}
+	newPrefetchTestEngine(t) // Stop and drain this engine before the next test replaces the global.
 	cfg := parseProbeConfig(probeConfigYAML{Enabled: &enabled, Models: []string{"gpt-6-astra"}})
 	cfg.CredFile = "/nonexistent/cred.json"
+	cfg.ProbeInterval = time.Millisecond
 	probeTrack.cfg.Config = cfg
 	// A baseline about to expire: the watcher would normally probe it.
 	probeTrack.values["gpt-6-astra"] = stateEntry{Model: "gpt-6-astra",
@@ -1250,16 +1246,7 @@ func TestWatcherSilentAfterStop(t *testing.T) {
 	if !reignited {
 		t.Fatal("start-round must re-ignite the engine")
 	}
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		probeTrack.mu.Lock()
-		busy := probeTrack.probing["gpt-6-astra"]
-		probeTrack.mu.Unlock()
-		if !busy {
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+	waitPrefetchIdle(t, probeTrack)
 }
 
 // TestOneOffProbeDoesNotReignite verifies the v1.5.24 semantics: a one-off
@@ -1893,6 +1880,7 @@ func TestLifecycleConfigExtraction(t *testing.T) {
 // TestRegistrationDeclaresResponseCapabilities ensures the new hooks are
 // advertised to the host, otherwise CPA never calls them.
 func TestRegistrationDeclaresResponseCapabilities(t *testing.T) {
+	t.Setenv("LKS_MIRROR_URL", "") // Registration tests must never publish to an operator's configured receiver.
 	result, err := handleMethod("plugin.register", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -2042,6 +2030,37 @@ func TestPrefetchStopModes(t *testing.T) {
 	if !e.halted {
 		t.Fatal("stop-current must not undo a prior full stop")
 	}
+}
+
+func TestPriorityModelCutsAheadOfQueuedProbe(t *testing.T) {
+	e := newPrefetchTestEngine(t)
+	e.cfg.Config.Models = []string{"gpt-6-astra", "gpt-5.6-sol"}
+	e.queueActive = true // keep this unit test from starting a worker
+	defer func() { e.queueActive = false }()
+	e.queue = []probeTask{{Model: "gpt-5.6-sol", Force: false}}
+	if !e.enqueueTask("gpt-6-astra", false) {
+		t.Fatal("priority model should be accepted into the waiting queue")
+	}
+	if len(e.queue) != 2 || e.queue[0].Model != "gpt-6-astra" || e.queue[1].Model != "gpt-5.6-sol" {
+		t.Fatalf("priority model did not cut ahead: %+v", e.queue)
+	}
+	// Re-enqueueing the same model cannot duplicate pending work.
+	e.queue = []probeTask{{Model: "gpt-6-astra", Force: false}}
+	if e.enqueueTask("gpt-6-astra", false) {
+		t.Fatal("duplicate model should not be queued twice")
+	}
+	if len(e.queue) != 1 {
+		t.Fatal("the same model must not be queued twice")
+	}
+	for _, model := range []string{"gpt-5.6-sol-alt-1", "gpt-5.6-sol-alt-2"} {
+		if !e.enqueueTask(model, true) {
+			t.Fatal("unconfigured explicit model rejected")
+		}
+	}
+	if e.queue[1].Model != "gpt-5.6-sol-alt-1" || e.queue[2].Model != "gpt-5.6-sol-alt-2" {
+		t.Fatal("equal-priority models must retain FIFO order")
+	}
+	e.queueActive = false
 }
 
 func TestPrefetchStoppingDrainsRequest(t *testing.T) {

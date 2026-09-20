@@ -25,11 +25,46 @@ import (
 // always sent as a domain name (remote resolution), matching the socks5h
 // semantics of the probe configuration.
 type socksBind struct {
-	host string
-	user string
-	pass string
-	mu   sync.Mutex
-	last string
+	host       string
+	user       string
+	pass       string
+	mu         sync.Mutex
+	last       string
+	dials      int
+	diagnostic socksDiagnostic
+}
+
+// Only fixed categories and protocol bytes are retained; never credentials,
+// destination names, raw errors or the reported address itself.
+type socksDiagnostic struct {
+	Stage       string
+	Error       string
+	Reply       int
+	AddressType int
+	AddressKind string
+}
+
+func (b *socksBind) diagnostics() (socksDiagnostic, int) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.diagnostic, b.dials
+}
+
+func boundAddressKind(bound string) string {
+	if bound == "" {
+		return "empty"
+	}
+	ip := net.ParseIP(bound)
+	if ip == nil {
+		return "domain"
+	}
+	if ip.IsUnspecified() {
+		return "unspecified"
+	}
+	if ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast() {
+		return "non_public"
+	}
+	return "ip_unverified"
 }
 
 // store records the address reported by the proxy for the connection that
@@ -54,7 +89,28 @@ func (b *socksBind) load() string {
 	return b.last
 }
 
-func (b *socksBind) dialContext(ctx context.Context, network, address string) (net.Conn, error) {
+func (b *socksBind) dialContext(ctx context.Context, network, address string) (_ net.Conn, dialErr error) {
+	diagnostic := socksDiagnostic{Stage: "tcp_connect", Reply: -1, AddressType: -1, AddressKind: "not_received"}
+	b.mu.Lock()
+	b.dials++
+	b.diagnostic = socksDiagnostic{Stage: "in_progress", Reply: -1, AddressType: -1, AddressKind: "not_received"}
+	b.mu.Unlock()
+	defer func() {
+		if dialErr != nil {
+			diagnostic.Error = "protocol_or_io"
+			var netErr net.Error
+			if errors.Is(dialErr, context.Canceled) {
+				diagnostic.Error = "canceled"
+			} else if errors.As(dialErr, &netErr) && netErr.Timeout() {
+				diagnostic.Error = "timeout"
+			} else if errors.Is(dialErr, io.EOF) || errors.Is(dialErr, io.ErrUnexpectedEOF) {
+				diagnostic.Error = "truncated_reply"
+			}
+		}
+		b.mu.Lock()
+		b.diagnostic = diagnostic
+		b.mu.Unlock()
+	}()
 	dialer := &net.Dialer{Timeout: 30 * time.Second}
 	conn, err := dialer.DialContext(ctx, "tcp", b.host)
 	if err != nil {
@@ -74,6 +130,7 @@ func (b *socksBind) dialContext(ctx context.Context, network, address string) (n
 
 	// Method negotiation: offer no-auth plus username/password when the
 	// proxy spec carries credentials.
+	diagnostic.Stage = "greeting"
 	methods := []byte{0x00}
 	if b.user != "" || b.pass != "" {
 		methods = []byte{0x00, 0x02}
@@ -93,6 +150,7 @@ func (b *socksBind) dialContext(ctx context.Context, network, address string) (n
 	case 0x00:
 		// No authentication required.
 	case 0x02:
+		diagnostic.Stage = "authentication"
 		if b.user == "" && b.pass == "" {
 			return nil, errors.New("socks5 server demands authentication but no credentials are configured")
 		}
@@ -118,6 +176,7 @@ func (b *socksBind) dialContext(ctx context.Context, network, address string) (n
 		return nil, fmt.Errorf("socks5 server selected unsupported method %d", header[1])
 	}
 
+	diagnostic.Stage = "target_validation"
 	host, portText, err := net.SplitHostPort(address)
 	if err != nil {
 		return nil, fmt.Errorf("socks5 split target %q: %w", address, err)
@@ -132,19 +191,24 @@ func (b *socksBind) dialContext(ctx context.Context, network, address string) (n
 	request := []byte{0x05, 0x01, 0x00, 0x03, byte(len(host))}
 	request = append(request, host...)
 	request = binary.BigEndian.AppendUint16(request, uint16(port))
+	diagnostic.Stage = "connect_write"
 	if _, err := conn.Write(request); err != nil {
 		return nil, fmt.Errorf("socks5 connect write: %w", err)
 	}
+	diagnostic.Stage = "connect_reply"
 	head := make([]byte, 4)
 	if _, err := io.ReadFull(conn, head); err != nil {
 		return nil, fmt.Errorf("socks5 connect reply: %w", err)
 	}
+	diagnostic.Reply = int(head[1])
+	diagnostic.AddressType = int(head[3])
 	if head[0] != 0x05 {
 		return nil, fmt.Errorf("socks5 unexpected reply version %d", head[0])
 	}
 	if head[1] != 0x00 {
 		return nil, fmt.Errorf("socks5 connect failed: %s", socksReplyText(head[1]))
 	}
+	diagnostic.Stage = "bound_address"
 	var boundHost string
 	switch head[3] {
 	case 0x01:
@@ -171,11 +235,14 @@ func (b *socksBind) dialContext(ctx context.Context, network, address string) (n
 	default:
 		return nil, fmt.Errorf("socks5 unsupported bound address type %d", head[3])
 	}
+	diagnostic.AddressKind = boundAddressKind(boundHost)
+	diagnostic.Stage = "bound_port"
 	portRaw := make([]byte, 2)
 	if _, err := io.ReadFull(conn, portRaw); err != nil {
 		return nil, fmt.Errorf("socks5 bound port: %w", err)
 	}
 	b.store(boundHost)
+	diagnostic.Stage = "complete"
 	conn.SetDeadline(time.Time{})
 	ok = true
 	return conn, nil

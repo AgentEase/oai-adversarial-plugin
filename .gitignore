@@ -22,6 +22,7 @@ go.work.sum
 **/runtime-settings.json
 **/runtime-settings.json.*
 **/.runtime-settings-*
+**/mirror-data/
 **/seeds.json
 **/auths/
 .env

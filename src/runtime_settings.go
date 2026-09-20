@@ -22,10 +22,11 @@ const maxExitAttempts = 1000000
 // Dashboard overrides are separate from the frequently written audit snapshot.
 // Confirmed changes are durable before they become visible to the worker.
 type runtimeSettings struct {
-	Version         int           `json:"version"`
-	PrefetchMinutes *int          `json:"prefetch_minutes,omitempty"`
-	IntervalSeconds *int          `json:"interval_seconds,omitempty"`
-	Exits           []managedExit `json:"exits,omitempty"`
+	Version         int              `json:"version"`
+	PrefetchMinutes *int             `json:"prefetch_minutes,omitempty"`
+	IntervalSeconds *int             `json:"interval_seconds,omitempty"`
+	SleepHours      *probeSleepHours `json:"sleep_hours,omitempty"`
+	Exits           []managedExit    `json:"exits,omitempty"`
 }
 
 type managedExit struct {
@@ -159,6 +160,12 @@ func applyRuntimeSettings(base probeConfig, settings runtimeSettings) (probeConf
 		cfg.Prefetch = time.Duration(min(minutes, maximum)) * time.Minute
 	}
 	ids := make(map[string]bool)
+	if settings.SleepHours != nil {
+		if err := settings.SleepHours.validate(); err != nil {
+			return cfg, err
+		}
+		cfg.SleepHours = *settings.SleepHours
+	}
 	if settings.IntervalSeconds != nil {
 		seconds := *settings.IntervalSeconds
 		if seconds < 1 || seconds > 3600 {

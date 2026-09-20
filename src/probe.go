@@ -79,6 +79,7 @@ type probeConfig struct {
 	ExitSuccessCooldown time.Duration
 	PoolAttempts        int
 	Prefetch            time.Duration
+	SleepHours          probeSleepHours
 	SuspectThreshold    int
 	Timeout             time.Duration
 	Prompt              string
@@ -224,7 +225,6 @@ type probeEngine struct {
 	halted         bool
 	stopping       bool
 	shuttingDown   bool
-	egressChecking bool
 	queue          []probeTask
 	queueActive    bool
 	disabledExits  map[string]bool
@@ -480,8 +480,18 @@ func currentProbeConfig() probeConfigState {
 // one-off operator refresh (bypasses the settled-baseline gate and survives
 // a halted engine).
 type probeTask struct {
-	Model string
-	Force bool
+	Model    string
+	Force    bool
+	Progress *probeProgress
+}
+
+// A yielded task keeps its round budget; resuming never starts a fresh round.
+type probeProgress struct {
+	Spent      map[string]int
+	Attempts   int
+	Cursor     int
+	LastError  string
+	LastLength int
 }
 
 func (e *probeEngine) start() bool {
@@ -591,9 +601,10 @@ func (e *probeEngine) abortSignal() <-chan struct{} {
 	return e.abortCh
 }
 
-// enqueueTask appends one probe task to the unified execution queue and
-// starts the worker when it is idle. A model already queued or currently
-// executing is never queued twice.
+// enqueueTask adds one probe task to the unified execution queue and starts the
+// worker when it is idle. Waiting tasks are ordered by cfg.Models priority;
+// tasks with the same priority remain FIFO. A model already queued or
+// currently executing is never queued twice.
 func (e *probeEngine) enqueueTask(model string, force bool) bool {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -616,7 +627,7 @@ func (e *probeEngine) enqueueTaskLocked(model string, force bool) bool {
 	if e.probing[model] {
 		return false
 	}
-	e.queue = append(e.queue, probeTask{Model: model, Force: force})
+	e.insertTaskLocked(probeTask{Model: model, Force: force}, false)
 	active := e.queueActive
 	if !active {
 		e.queueActive = true
@@ -631,6 +642,45 @@ func (e *probeEngine) enqueueTaskLocked(model string, force bool) bool {
 	return true
 }
 
+// Caller holds e.mu. A resumed task preceded equal-priority waiting work.
+func (e *probeEngine) insertTaskLocked(task probeTask, resumed bool) {
+	priority := modelPriority(e.cfg.Config, task.Model)
+	insertAt := len(e.queue)
+	for i, queued := range e.queue {
+		rank := modelPriority(e.cfg.Config, queued.Model)
+		if rank > priority || (resumed && rank == priority) {
+			insertAt = i
+			break
+		}
+	}
+	e.queue = append(e.queue, probeTask{})
+	copy(e.queue[insertAt+1:], e.queue[insertAt:])
+	e.queue[insertAt] = task
+}
+
+// Called at an attempt boundary with e.mu held, never during a request.
+func (e *probeEngine) yieldProbeTaskLocked(task probeTask, progress probeProgress, stop, brake <-chan struct{}) bool {
+	if !e.queueActive || e.stopping || e.shuttingDown || e.paused[task.Model] {
+		return false
+	}
+	select {
+	case <-stop:
+		return false
+	case <-brake:
+		return false
+	default:
+	}
+	for _, queued := range e.queue {
+		if modelPriority(e.cfg.Config, queued.Model) < modelPriority(e.cfg.Config, task.Model) &&
+			!e.paused[queued.Model] && (queued.Force || !e.halted) {
+			task.Progress = &progress
+			e.insertTaskLocked(task, true)
+			return true
+		}
+	}
+	return false
+}
+
 // modelPaused reports whether the model was paused from the dashboard.
 func (e *probeEngine) modelPaused(model string) bool {
 	e.mu.Lock()
@@ -638,9 +688,9 @@ func (e *probeEngine) modelPaused(model string) bool {
 	return e.paused[model]
 }
 
-// queueLoop is the single executor: it takes tasks from the head of the
-// queue in FIFO order, probes one model, waits the queue interval, then
-// moves on to the next task. All probing paths (start-round, one-off
+// queueLoop is the single executor: it takes the highest-priority waiting
+// task (FIFO within one priority), probes one model, waits the queue interval,
+// then moves on to the next task. All probing paths (start-round, one-off
 // refresh, resumed model, hand-off watcher) funnel through this queue, so
 // attempts are serialized and spread evenly across the interval instead of
 // running as independent per-model state machines. stop() cancels the
@@ -672,16 +722,31 @@ func (e *probeEngine) queueLoop() {
 		// waiting (model paused, baseline replenished, engine halted). A
 		// one-off refresh (Force) survives both gates - it is an explicit
 		// command - but still respects an operator pause.
+		intervalWaited := false
 		if cfg.Enabled && !paused && (task.Force || !halted) &&
 			(task.Force || !e.settledBaseline(task.Model, cfg, time.Now().UTC())) {
 			// Capture cancellation before dequeue: a stop between dequeue and
 			// probeModel must not be lost by reading a fresh brake channel.
-			e.probeModel(task.Model, cfg, brake)
+			intervalWaited = e.runProbeTask(task, cfg, brake)
 		}
 		// The queue interval: the pacing between two tasks (and, inside a
 		// task, between retries). Interrupted by the global brake.
-		e.waitProbeInterval(cfg.ProbeInterval, brake, nil)
+		if !intervalWaited {
+			e.waitProbeInterval(cfg.ProbeInterval, brake, nil)
+		}
 	}
+}
+
+// modelPriority follows the configured model order. The first detection model
+// shown by the dashboard therefore cuts ahead of lower-priority waiting work.
+// Unknown models remain valid but run after configured models.
+func modelPriority(cfg probeConfig, model string) int {
+	for i, candidate := range cfg.Models {
+		if candidate == model {
+			return i
+		}
+	}
+	return len(cfg.Models)
 }
 
 // Snapshot the latest interval when a wait starts. A saved change does not
@@ -855,7 +920,7 @@ func (e *probeEngine) prefetchWatchLoop(stop <-chan struct{}) {
 func (e *probeEngine) prefetchScan() {
 	e.mu.Lock()
 	cfg := e.cfg.Config
-	suppressed := !cfg.Enabled || e.cfg.Error != "" || cfg.Prefetch <= 0 || e.halted || e.stopping || e.shuttingDown
+	suppressed := !cfg.Enabled || e.cfg.Error != "" || cfg.Prefetch <= 0 || e.halted || e.stopping || e.shuttingDown || !cfg.SleepHours.until(time.Now()).IsZero()
 	e.mu.Unlock()
 	if suppressed {
 		// The operator stopped all probing; the automatic hand-off watcher
@@ -1463,6 +1528,13 @@ func (e *probeEngine) noteExitOutcome(spec string, healthy bool, errorText strin
 // state is captured (success clears any failure mark) or the resolved attempt
 // cap is exhausted (failure is recorded for the dashboard).
 func (e *probeEngine) probeModel(model string, cfg probeConfig, stop <-chan struct{}) {
+	e.runProbeTask(probeTask{Model: model}, cfg, stop)
+}
+
+// Returns whether the serial interval has already elapsed since the last
+// attempt, so yielding does not add a second delay before priority work.
+func (e *probeEngine) runProbeTask(task probeTask, cfg probeConfig, stop <-chan struct{}) (intervalWaited bool) {
+	model := task.Model
 	if !degradationDetectionEnabled(model, "") {
 		return
 	}
@@ -1501,15 +1573,25 @@ func (e *probeEngine) probeModel(model string, cfg probeConfig, stop <-chan stru
 	maxAttempts := effectiveMaxAttempts(cfg, proxies)
 	budgets := make(map[string]int, len(proxies))
 	spent := make(map[string]int, len(proxies))
-	for _, spec := range proxies {
-		budgets[spec] = exitBudget(cfg, spec)
-	}
 	attempts := 0
 	lastError := ""
 	lastLength := 0
 	cursor := 0
+	if task.Progress != nil {
+		spent = task.Progress.Spent
+		attempts = task.Progress.Attempts
+		cursor = task.Progress.Cursor
+		lastError = task.Progress.LastError
+		lastLength = task.Progress.LastLength
+	}
+	for _, spec := range proxies {
+		budgets[spec] = max(0, exitBudget(cfg, spec)-spent[exitID(cfg, spec)])
+	}
 	brake := e.abortSignal()
 	for {
+		if !e.waitForProbeWake(model, stop, brake) {
+			return
+		}
 		select {
 		case <-stop:
 			return
@@ -1552,17 +1634,27 @@ func (e *probeEngine) probeModel(model string, cfg probeConfig, stop <-chan stru
 			// Every usable egress has spent its share of the round budget.
 			break
 		}
-		cursor = next
 		e.mu.Lock()
 		if revision != e.configRevision {
 			e.mu.Unlock()
 			continue
 		}
+		// A save or the daily boundary may have begun sleep since the wait.
+		if !e.cfg.Config.SleepHours.until(time.Now()).IsZero() {
+			e.mu.Unlock()
+			continue
+		}
+		if e.yieldProbeTaskLocked(task, probeProgress{Spent: spent, Attempts: attempts, Cursor: cursor, LastError: lastError, LastLength: lastLength}, stop, brake) {
+			e.mu.Unlock()
+			return
+		}
+		cursor = next
 		// Reserve this attempt before an edit can publish a new configuration.
 		budgets[proxySpec]--
 		spent[exitID(cfg, proxySpec)]++
 		attempts++
 		e.mu.Unlock()
+		intervalWaited = false
 		record, value := e.probeOnce(model, proxySpec, cfg)
 		e.appendRecord(record)
 		if value != "" {
@@ -1596,6 +1688,7 @@ func (e *probeEngine) probeModel(model string, cfg probeConfig, stop <-chan stru
 		if !e.waitProbeInterval(cfg.ProbeInterval, stop, brake) {
 			return
 		}
+		intervalWaited = true
 	}
 	// Retries exhausted: annotate the failure for the dashboard (attempt
 	// counters, last error and a cool-down hint). Nothing restarts
@@ -1615,6 +1708,7 @@ func (e *probeEngine) probeModel(model string, cfg probeConfig, stop <-chan stru
 	}
 	e.mu.Unlock()
 	markStateDirty()
+	return
 }
 
 // probeOnce sends one minimal upstream request through the given egress and
@@ -1627,6 +1721,11 @@ func (e *probeEngine) probeOnce(model, proxySpec string, cfg probeConfig) (probe
 		Proxy:  proxySpec,
 		Success: false,
 	}
+	var binder *socksBind
+	stage := "credential"
+	defer func() {
+		fmt.Fprint(os.Stderr, probeEgressLog(record, exitID(cfg, proxySpec), proxySpec, binder, stage))
+	}()
 	cred, err := readProbeCredential(cfg.CredFile)
 	if err != nil {
 		record.DurationMS = time.Since(started).Milliseconds()
@@ -1634,6 +1733,7 @@ func (e *probeEngine) probeOnce(model, proxySpec string, cfg probeConfig) (probe
 		e.noteError(record.Error)
 		return record, ""
 	}
+	stage = "transport"
 	transport, binder, err := buildProbeTransport(proxySpec)
 	if err != nil {
 		record.DurationMS = time.Since(started).Milliseconds()
@@ -1656,6 +1756,7 @@ func (e *probeEngine) probeOnce(model, proxySpec string, cfg probeConfig) (probe
 
 	ctx, cancel := context.WithTimeout(context.Background(), cfg.Timeout)
 	defer cancel()
+	stage = "request"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, cfg.UpstreamURL, strings.NewReader(string(encoded)))
 	if err != nil {
 		record.DurationMS = time.Since(started).Milliseconds()
@@ -1673,6 +1774,7 @@ func (e *probeEngine) probeOnce(model, proxySpec string, cfg probeConfig) (probe
 		req.Header.Set("Chatgpt-Account-Id", cred.AccountID)
 	}
 
+	stage = "roundtrip"
 	resp, err := client.Do(req)
 	record.DurationMS = time.Since(started).Milliseconds()
 	if binder != nil {
@@ -1686,6 +1788,7 @@ func (e *probeEngine) probeOnce(model, proxySpec string, cfg probeConfig) (probe
 		return record, ""
 	}
 	defer resp.Body.Close()
+	stage = "response"
 	record.StatusCode = resp.StatusCode
 	if resp.StatusCode != http.StatusOK {
 		// Read a bounded snippet for diagnostics.
@@ -2071,6 +2174,48 @@ func parseTurnStateTimestamp(value string) (time.Time, bool) {
 	return time.Unix(int64(seconds), 0).UTC(), true
 }
 
+// One privacy-safe diagnostic per model attempt, including early failures.
+// Address categories are evidence about BND.ADDR, never verified public IPs.
+func probeEgressLog(record probeRecord, id, spec string, binder *socksBind, stage string) string {
+	protocol, reason := "unknown", "transport_not_ready"
+	spec = strings.TrimSpace(spec)
+	if spec == "" || strings.EqualFold(spec, "direct") {
+		protocol, reason = "direct", "direct_no_proxy_report"
+	} else if parsed, err := url.Parse(spec); err == nil {
+		switch strings.ToLower(parsed.Scheme) {
+		case "http", "https":
+			protocol, reason = strings.ToLower(parsed.Scheme), "http_no_standard_exit_field"
+		case "socks5", "socks5h":
+			protocol = strings.ToLower(parsed.Scheme)
+		}
+	}
+	diagnostic := socksDiagnostic{Stage: "not_started", Reply: -1, AddressType: -1, AddressKind: "not_received"}
+	dials := 0
+	if binder != nil {
+		diagnostic, dials = binder.diagnostics()
+		if dials == 0 {
+			diagnostic = socksDiagnostic{Stage: "not_started", Reply: -1, AddressType: -1, AddressKind: "not_received"}
+			reason = "dial_not_started"
+		} else if diagnostic.Stage == "in_progress" {
+			reason = "dial_pending_at_return"
+		} else if diagnostic.Stage != "complete" {
+			reason = "socks_handshake_failed"
+		} else {
+			switch diagnostic.AddressKind {
+			case "empty":
+				reason = "proxy_reported_empty"
+			case "unspecified":
+				reason = "proxy_reported_unspecified"
+			default:
+				reason = "proxy_reported_unverified"
+			}
+		}
+	}
+	return fmt.Sprintf("[INFO] - probe-egress time=%s exit_id=%q model=%q protocol=%s stage=%s reason=%s socks_stage=%s socks_error=%q socks_reply=%d atyp=%d address_kind=%s dials=%d recorded=%t http_status=%d success=%t\n",
+		record.Time, id, record.Model, protocol, stage, reason, diagnostic.Stage, diagnostic.Error,
+		diagnostic.Reply, diagnostic.AddressType, diagnostic.AddressKind, dials, record.EgressAddr != "", record.StatusCode, record.Success)
+}
+
 // buildProbeTransport builds an HTTP transport bound to the given egress:
 // "direct", "socks5://...", or "http(s)://...". For socks5 / socks5h it also
 // returns a recorder for the server-reported bound address (BND.ADDR).
@@ -2301,6 +2446,10 @@ func probeSummary() map[string]any {
 		"exit_min_active":       cfg.ExitMinActive,
 		"prefetch_minutes":      int(cfg.Prefetch / time.Minute),
 		"prefetch_override":     probeTrack.settings.PrefetchMinutes != nil,
+		"sleep_start_hour":      cfg.SleepHours.Start,
+		"sleep_end_hour":        cfg.SleepHours.End,
+		"sleeping":              cfg.Enabled && !cfg.SleepHours.until(poolNow).IsZero(),
+		"sleep_until":           sleepUntilText(cfg.SleepHours, poolNow),
 		"settings_error":        probeTrack.settingsError,
 		"proxy_index":  probeTrack.proxyIndex,
 		"ttl_minutes":      int(cfg.TTL / time.Minute),
