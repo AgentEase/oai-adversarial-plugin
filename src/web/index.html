@@ -22,26 +22,26 @@
     .table-wrap{overflow:auto;scrollbar-gutter:stable}table{width:100%;border-collapse:collapse;text-align:left;white-space:nowrap}th{font-size:11px;color:var(--muted);font-weight:550;background:var(--subtle);padding:12px 18px}td{padding:16px 18px;border-top:1px solid var(--line);vertical-align:top;font-size:12px}td.model{max-width:210px;white-space:normal;overflow-wrap:anywhere;font-weight:550}tbody tr:hover{background:var(--subtle)}.time{font-size:12px;font-variant-numeric:tabular-nums}.sub,.probe-note{font-size:12px;color:var(--muted)}.none{color:var(--muted)}.src{font-size:11px;color:var(--muted);margin-left:6px}#probe-history td:last-child,#probe-success-history td:last-child{min-width:200px;max-width:440px;white-space:normal;overflow-wrap:anywhere}
     .badge{display:inline-block;padding:3px 8px;border-radius:5px;font-size:11px;font-weight:550;line-height:1.6;background:var(--soft);color:var(--accent)}.badge.inserted,.badge.probe-ok,.badge.state-ok{background:var(--ok-bg);color:var(--ok)}.badge.mismatch,.badge.override,.badge.state-warn{background:var(--warn-bg);color:var(--warn)}.badge.mismatch,.badge.override,.badge.skipped{margin-left:6px}.badge.probe-fail,.badge.state-fail{background:var(--danger-bg);color:var(--danger)}.badge.unchanged,.badge.skipped,.badge.state-off{background:var(--subtle);color:var(--muted)}.badge.state-rest{background:var(--soft);color:var(--accent)}.ttl-cell>.badge{margin:0 4px 5px 0}.paused-row td.model{color:var(--muted)}.ttl-cell,.turnstate,.budget{font-variant-numeric:tabular-nums}.ttl-cell .bar{height:4px;border-radius:2px;background:var(--line);margin:8px 0;max-width:150px}.ttl-cell .bar i{display:block;height:100%;border-radius:inherit;background:var(--ok)}
     .candidate-time{margin-top:16px;color:var(--muted);font-size:11px}
-    .probe-records td.model{min-width:130px}
-    .ip-toggle{margin-left:6px;padding:3px 8px;border-color:transparent;background:var(--soft);color:var(--accent)}
-    .egress-ip{min-width:180px;max-width:300px;white-space:normal;overflow-wrap:anywhere}.egress-ip code{font-variant-numeric:tabular-nums}.egress-ip .sub{margin-top:3px;font-size:11px}
+    .probe-records td.model{min-width:130px}#probe-values td.model{min-width:150px}
     .probe-records>summary{cursor:pointer;list-style:none}.probe-records>summary::-webkit-details-marker{display:none}.probe-records>summary:after{content:"";width:7px;height:7px;flex-shrink:0;border:solid var(--muted);border-width:0 1.5px 1.5px 0;transform:rotate(45deg);margin-left:4px}.probe-records[open]>summary:after{transform:rotate(225deg)}.probe-records:not([open])>summary{border-bottom:0}.probe-records>summary:hover{background:var(--subtle)}.probe-records>summary .probe-note{margin-left:auto;font-size:12px;font-weight:400}
     .probe-settings{border-bottom:1px solid var(--line)}.probe-settings summary{display:flex;align-items:center;flex-wrap:wrap;gap:12px;padding:14px 22px;cursor:pointer;list-style:none;font-size:12px}.probe-settings summary::-webkit-details-marker{display:none}.probe-settings summary:after{content:"";width:7px;height:7px;border:solid var(--muted);border-width:0 1.5px 1.5px 0;transform:rotate(45deg);margin-left:auto;margin-right:4px}.probe-settings[open] summary:after{transform:rotate(225deg)}.probe-settings summary:hover{background:var(--subtle)}.settings-title{font-weight:600}.settings-body{display:grid;grid-template-columns:1fr 1fr;padding:0 22px 18px;gap:24px}.settings-line{display:flex;align-items:center;flex-wrap:wrap;gap:8px;font-size:12px;padding:14px 0 0;border-top:1px solid var(--line)}.settings-line label{flex-basis:100%;font-weight:550}.settings-line input{width:84px}.settings-line .sub,.settings-line [role=status]{flex-basis:100%}.settings-error{color:var(--danger)}
     input,select{border:1px solid var(--control-line);border-radius:6px;background:var(--bg);color:var(--text);padding:8px 10px;font:inherit;min-height:36px}input[type=checkbox]{accent-color:var(--accent);min-height:auto}input::placeholder{color:var(--muted)}.exit-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px 24px;padding:22px;border-bottom:1px solid var(--line);background:var(--subtle)}.exit-form label{display:flex;flex-direction:column;gap:6px;font-size:12px}.exit-form input,.exit-form select{width:100%;min-width:0}.exit-form .wide{grid-column:1/-1}.exit-form .check{flex-direction:row;flex-wrap:wrap;align-items:center}.exit-form .check input{width:auto}
-    .exit-item{padding:20px 22px;border-top:1px solid var(--line)}.exit-item:first-child{border-top:0}.exit-main{display:grid;grid-template-columns:minmax(180px,1fr) minmax(90px,.38fr) minmax(150px,.6fr) auto;gap:20px;align-items:center}.exit-identity{min-width:0}.exit-name{font-size:14px;font-weight:600;margin:0 0 4px;overflow-wrap:anywhere}.exit-address{font:12px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace;color:var(--muted);overflow-wrap:anywhere}.exit-kind{font-size:11px;color:var(--muted);margin-left:8px}.exit-budget .label{margin-bottom:3px}.exit-meta{display:flex;flex-wrap:wrap;gap:6px 20px;margin-top:14px;padding-top:12px;border-top:1px solid var(--line);font-size:12px;color:var(--muted);overflow-wrap:anywhere}.exit-error{flex-basis:100%;min-width:0;white-space:normal}.exit-ops{display:flex;gap:8px;flex-wrap:wrap}.exit-ops .edit{background:var(--soft);border-color:transparent;color:var(--accent)}.exit-ops .edit:hover{border-color:var(--accent)}
-    .empty{text-align:center;white-space:normal;color:var(--muted);padding:48px 24px;font-size:13px}.footer{display:flex;justify-content:space-between;flex-wrap:wrap;gap:12px;padding:14px 22px;border-top:1px solid var(--line);color:var(--muted);font-size:11px}.login{padding:28px;max-width:480px;margin:auto}.login h2{margin-bottom:8px}.login p{font-size:12px;margin-bottom:16px}.hidden{display:none!important}.status{font-size:12px;color:var(--muted);margin-top:12px}
-    @media(max-width:1100px){header{align-items:flex-start;flex-direction:column;gap:14px}.chip-grid{justify-content:flex-start;max-width:none}.cards:not(.cards-four){grid-template-columns:repeat(3,minmax(0,1fr));row-gap:20px}.cards:not(.cards-four) .card:nth-child(3){border-right:0}.exit-main{grid-template-columns:minmax(0,1fr) auto}.exit-identity{grid-column:1;grid-row:1}.exit-state{grid-column:1;grid-row:2}.exit-budget{grid-column:1;grid-row:3}.exit-ops{grid-column:2;grid-row:1/4;flex-direction:column}}
-    @media(max-width:720px){main{padding:22px 14px}.cards,.cards:not(.cards-four){grid-template-columns:repeat(2,minmax(0,1fr));row-gap:20px}.card{padding:0 14px}.card:nth-child(even){border-right:0}.cards:not(.cards-four) .card:nth-child(3){border-right:1px solid var(--line)}h1{font-size:24px}.number{font-size:24px}.toolbar,.exit-item{padding:16px}.toolbar>.actions{flex-basis:100%}.settings-body{grid-template-columns:1fr;padding:0 16px 18px;gap:18px}.probe-settings summary{padding:14px 16px}#settings-summary{order:3;flex-basis:100%}.exit-form{grid-template-columns:1fr;padding:16px}.exit-main{gap:12px}.tabs{gap:6px 18px;flex-wrap:wrap}button,.icon-btn,input,select,a.primary{min-height:44px}.table-wrap{max-width:100%}th,td{padding:12px}.chip-grid{gap:4px}.target{padding:4px 7px}.footer{padding:14px 16px}#probe-values-wrap th:last-child,#probe-values-wrap td:last-child{position:sticky;right:0;background:var(--card);border-left:1px solid var(--line)}.control-cell button{display:block;margin:0 0 6px!important}}
+    .exit-item{padding:20px 22px;border-top:1px solid var(--line)}.exit-item:first-child{border-top:0}.exit-main{display:grid;grid-template-columns:minmax(180px,1fr) minmax(90px,.38fr) minmax(150px,.6fr) minmax(100px,.3fr) auto;gap:20px;align-items:center}.exit-identity{min-width:0}.exit-name{font-size:14px;font-weight:600;margin:0 0 4px;overflow-wrap:anywhere}.exit-address{font:12px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace;color:var(--muted);overflow-wrap:anywhere}.exit-kind{font-size:11px;color:var(--muted);margin-left:8px}.exit-budget .label,.exit-success .label{margin-bottom:3px}.exit-meta{display:flex;flex-wrap:wrap;gap:6px 20px;margin-top:14px;padding-top:12px;border-top:1px solid var(--line);font-size:12px;color:var(--muted);overflow-wrap:anywhere}.exit-error{flex-basis:100%;min-width:0;white-space:normal}.exit-ops{display:flex;gap:8px;flex-wrap:wrap}.exit-ops .edit{background:var(--soft);border-color:transparent;color:var(--accent)}.exit-ops .edit:hover{border-color:var(--accent)}
+    .empty{text-align:center;white-space:normal;color:var(--muted);padding:48px 24px;font-size:13px}.login{padding:28px;max-width:480px;margin:auto}.login h2{margin-bottom:8px}.login p{font-size:12px;margin-bottom:16px}.hidden{display:none!important}.status{font-size:12px;color:var(--muted);margin-top:12px}
+    @media(max-width:1100px){header{align-items:flex-start;flex-direction:column;gap:14px}.chip-grid{justify-content:flex-start;max-width:none}.cards:not(.cards-four){grid-template-columns:repeat(3,minmax(0,1fr));row-gap:20px}.cards:not(.cards-four) .card:nth-child(3){border-right:0}.exit-main{grid-template-columns:minmax(0,1fr) auto}.exit-identity{grid-column:1;grid-row:1}.exit-state{grid-column:1;grid-row:2}.exit-budget{grid-column:1;grid-row:3}.exit-success{grid-column:1;grid-row:4}.exit-ops{grid-column:2;grid-row:1/5;flex-direction:column}}
+    @media(max-width:720px){main{padding:22px 14px}.cards,.cards:not(.cards-four){grid-template-columns:repeat(2,minmax(0,1fr));row-gap:20px}.card{padding:0 14px}.card:nth-child(even){border-right:0}.cards:not(.cards-four) .card:nth-child(3){border-right:1px solid var(--line)}h1{font-size:24px}.number{font-size:24px}.toolbar,.exit-item{padding:16px}.toolbar>.actions{flex-basis:100%}.settings-body{grid-template-columns:1fr;padding:0 16px 18px;gap:18px}.probe-settings summary{padding:14px 16px}#settings-summary{order:3;flex-basis:100%}.exit-form{grid-template-columns:1fr;padding:16px}.exit-main{gap:12px}.tabs{gap:6px 18px;flex-wrap:wrap}button,.icon-btn,input,select,a.primary{min-height:44px}.table-wrap{max-width:100%}th,td{padding:12px}.chip-grid{gap:4px}.target{padding:4px 7px}#probe-values-wrap th:last-child,#probe-values-wrap td:last-child{position:sticky;right:0;background:var(--card);border-left:1px solid var(--line)}.control-cell button{display:block;margin:0 0 6px!important}}
     .section-icon{width:18px;height:18px;flex:none;color:var(--muted)}.section-heading,.settings-title,.tabs button.tab{display:inline-flex;align-items:center;gap:9px}.section-heading{flex:1;min-width:160px}.section-heading:after{content:"";height:1px;background:var(--line);flex:1;min-width:24px;max-width:120px;margin-left:9px}.tabs .section-icon{width:16px;height:16px}.tabs .active .section-icon{color:var(--accent)}.egress-name{max-width:260px;min-width:140px;white-space:normal;overflow-wrap:anywhere}@media(max-width:1100px){html:not([lang^="zh"]) .cards-four{grid-template-columns:repeat(2,minmax(0,1fr));row-gap:18px}html:not([lang^="zh"]) .cards-four .card:nth-child(2){border-right:0}}
     @media(max-width:720px){#view-pool .cards-four{grid-template-columns:repeat(3,minmax(0,1fr))}#view-pool .card:nth-child(2){border-right:1px solid var(--line)}#view-pool .card:nth-child(3){border-right:0}#view-pool .card:last-child{grid-column:1/-1;border-top:1px solid var(--line);padding-top:14px}}
     @media(forced-colors:active){button,.badge,.tabs button.tab.active{border:1px solid ButtonText}.tabs button.tab.active:after{background:Highlight}}
-  </style>
+
+.model-group td{position:static!important;background:var(--subtle);border-top:1px solid var(--line)}.model-group-content{display:flex;align-items:center;gap:12px;min-width:260px}.model-group td{padding-top:12px;padding-bottom:12px;vertical-align:middle}.model-group td.model{max-width:none}.model-disclosure{flex:none}.model-summary{display:flex;align-items:center;gap:8px;white-space:nowrap}.model-summary .badge{flex:none}.model-disclosure{background:transparent;border:0;padding:8px 0;text-align:left;font:inherit;font-weight:650;cursor:pointer;color:inherit}.model-summary .sub{font-weight:400}.request-settings{margin-bottom:24px}.request-settings .settings-body{grid-template-columns:1fr}.request-settings .settings-line{padding-top:12px}#request-timezone-summary{font-weight:400;color:var(--muted);overflow-wrap:anywhere}#timezone-input{width:min(100%,260px)}.account-detail td:first-child{padding-left:28px;overflow-wrap:anywhere}.model-disclosure:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+</style>
 </head>
 <body>
 <main>
   <header>
-    <div><div class="eyebrow">CPA / O-ADVERSARIAL-PLUGIN</div><h1><span data-i18n="O/对抗插件">O/对抗插件</span></h1><p><span data-i18n="查看请求处理、管理健康基线与探测出口。">查看请求处理、管理健康基线与探测出口。</span></p></div>
-    <div class="chip-grid"><div class="target"><span class="dot"></span><code id="target-timezone">—</code></div><div class="target hidden" id="override-chip" title="请求侧 X-Codex-Turn-State 覆写状态" data-i18n-title="请求侧 X-Codex-Turn-State 覆写状态"><span class="dot" id="override-dot"></span><code id="override-label"><span data-i18n="覆写：—">覆写：—</span></code></div><div class="target" title="探测引擎状态" data-i18n-title="探测引擎状态"><span class="dot" id="probe-dot"></span><code id="probe-label"><span data-i18n="探测：—">探测：—</span></code></div><button id="reject-toggle" type="button" class="switch-btn" title="业务流量确认异常时按此开关拦截；探测失败仅在没有可用健康基线时参与拦截，预备失败不影响仍有效的业务值" data-i18n-title="业务流量确认异常时按此开关拦截；探测失败仅在没有可用健康基线时参与拦截，预备失败不影响仍有效的业务值"><span data-i18n="异常请求拦截：—">异常请求拦截：—</span></button></div>
+    <div><div class="eyebrow">CPA / O-ADVERSARIAL-PLUGIN</div><h1><span data-i18n="O/对抗插件">O/对抗插件</span></h1><p><span data-i18n="查看请求记录、模型健康状态与探测出口。">查看请求记录、模型健康状态与探测出口。</span></p></div>
+    <div class="chip-grid"><div class="target"><span class="dot"></span><code id="target-timezone">—</code></div><div class="target hidden" id="override-chip" title="请求侧 X-Codex-Turn-State 覆写状态" data-i18n-title="请求侧 X-Codex-Turn-State 覆写状态"><span class="dot" id="override-dot"></span><code id="override-label"><span data-i18n="覆写：—">覆写：—</span></code></div><div class="target" title="探测引擎状态" data-i18n-title="探测引擎状态"><span class="dot" id="probe-dot"></span><code id="probe-label"><span data-i18n="探测：—">探测：—</span></code></div><button id="account-email-toggle" type="button" class="switch-btn" aria-pressed="false"><span data-i18n="邮箱显示：已关闭">邮箱显示：已关闭</span></button><button id="reject-toggle" type="button" class="switch-btn" title="业务流量确认异常时按此开关拦截；探测失败仅在没有可用健康基线时参与拦截，预备失败不影响仍有效的业务值" data-i18n-title="业务流量确认异常时按此开关拦截；探测失败仅在没有可用健康基线时参与拦截，预备失败不影响仍有效的业务值"><span data-i18n="异常请求拦截：—">异常请求拦截：—</span></button></div>
   </header>
   <nav class="tabs" aria-label="插件功能" data-i18n-aria-label="插件功能">
     <button id="tab-records" type="button" class="tab active" aria-current="page"><svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M8 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-3"/><path d="M16 3h5v5M21 3l-9 9M7 12h2M7 16h10"/></svg><span><span data-i18n="请求记录">请求记录</span></span></button>
@@ -57,19 +57,24 @@
       <div class="card"><div class="label"><span data-i18n="Turn-State 已覆写">Turn-State 已覆写</span></div><div class="number" id="overridden">—</div></div>
       <div class="card"><div class="label"><span data-i18n="含 Turn-State">含 Turn-State</span></div><div class="number" id="turnstates">—</div></div>
     </section>
+    <details class="panel probe-settings request-settings" id="request-settings">
+      <summary><span class="settings-title"><svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true" focusable="false"><path d="M4 7h16M4 17h16M8 4v6M16 14v6"/></svg><span data-i18n="请求设置">请求设置</span></span><span id="request-timezone-summary">—</span></summary>
+      <div class="settings-body">
+      <div class="settings-line"><label for="timezone-input" data-i18n="请求目标时区">请求目标时区</label><input id="timezone-input" list="timezone-options" maxlength="128" spellcheck="false" autocomplete="off" aria-label="请求目标时区" data-i18n-aria-label="请求目标时区"><datalist id="timezone-options"><option value="America/Los_Angeles"></option><option value="America/New_York"></option><option value="Asia/Shanghai"></option><option value="Asia/Singapore"></option><option value="Asia/Tokyo"></option><option value="Europe/London"></option><option value="Europe/Berlin"></option><option value="UTC"></option></datalist><button id="timezone-save" type="button" data-i18n="确认保存">确认保存</button><span id="timezone-feedback" role="status"></span><span class="sub" data-i18n="替换发往上游的请求正文中的时区；不影响探测休眠或页面时间（UTC+8）。保存后覆盖配置默认值。">替换发往上游的请求正文中的时区；不影响探测休眠或页面时间（UTC+8）。保存后覆盖配置默认值。</span></div>
+      </div>
+    </details>
     <section class="panel">
       <div class="login hidden" id="auth-notice">
         <h2><span data-i18n="请先登录 CPA 管理页">请先登录 CPA 管理页</span></h2><p id="auth-message" role="status"></p>
         <a class="primary" id="management-login" target="_top"><span data-i18n="返回 CPA 管理页">返回 CPA 管理页</span></a>
       </div>
-      <details class="probe-records" id="request-history-panel">
+      <details class="probe-records" id="request-history-panel" open>
       <summary class="toolbar"><h2 class="section-heading"><svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M8 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-3"/><path d="M16 3h5v5M21 3l-9 9M7 12h2M7 16h10"/></svg><span><span data-i18n="最近请求">最近请求</span></span></h2><span class="probe-note" data-i18n="最近 50 条 · 最新在前">最近 50 条 · 最新在前</span></summary>
       <div class="toolbar"><span id="refresh-note"><span data-i18n="正在连接">正在连接</span></span><button id="refresh" type="button" disabled><span data-i18n="刷新">刷新</span></button></div>
       <div class="table-wrap hidden" id="results" tabindex="0" role="region" aria-label="最近请求，可横向滚动" data-i18n-aria-label="最近请求，可横向滚动"><table>
         <thead><tr><th><span data-i18n="请求时间（UTC+8）">请求时间（UTC+8）</span></th><th><span data-i18n="模型">模型</span></th><th><span data-i18n="上游响应模型">上游响应模型</span></th><th><span data-i18n="原时区">原时区</span></th><th><span data-i18n="替换后时区">替换后时区</span></th><th><span data-i18n="处理方式">处理方式</span></th><th>X-Codex-Turn-State</th></tr></thead>
         <tbody id="rows"></tbody>
       </table></div>
-      <div class="footer"><span><span data-i18n="保留最近 200 条记录 · 本地快照自动恢复">保留最近 200 条记录 · 本地快照自动恢复</span></span><span><span data-i18n="自动复用 CPA 登录">自动复用 CPA 登录</span></span></div>
       </details>
     </section>
   </section>
@@ -80,16 +85,8 @@
       <div class="card"><div class="label"><span data-i18n="探测成功 / 总探测">探测成功 / 总探测</span></div><div class="number" id="probe-counts">—</div></div>
       <div class="card"><div class="label"><span data-i18n="最近探测活动">最近探测活动</span></div><div class="number" id="probe-activity">—</div></div>
     </section>
-    <details class="panel probe-records" id="account-routing-panel" open>
-      <summary class="toolbar"><h2 class="section-heading"><svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M4 6h16M4 12h10M4 18h7"/><path d="m15 15 3 3 4-5"/></svg><span data-i18n="实验性账号健康路由">实验性账号健康路由</span></h2><span class="probe-note" id="account-routing-note" data-i18n="只读监测">只读监测</span></summary>
-      <div class="table-wrap" tabindex="0" role="region" aria-label="账号与模型健康状态，可横向滚动" data-i18n-aria-label="账号与模型健康状态，可横向滚动"><table>
-        <thead><tr><th data-i18n="账号标识">账号标识</th><th data-i18n="模型族">模型族</th><th data-i18n="健康状态">健康状态</th><th data-i18n="State 长度">State 长度</th><th data-i18n="最近观测（UTC+8）">最近观测（UTC+8）</th><th data-i18n="冷却 / 原因">冷却 / 原因</th></tr></thead>
-        <tbody id="account-routing-rows"></tbody>
-      </table></div>
-      <div class="footer"><span data-i18n="仅展示脱敏账号标识及探测、业务观测结果，不展示凭据。">仅展示脱敏账号标识及探测、业务观测结果，不展示凭据。</span><span data-i18n="同优先级内路由 · 全部冷却时回退 CPA 原调度">同优先级内路由 · 全部冷却时回退 CPA 原调度</span></div>
-    </details>
     <section class="panel">
-      <div class="toolbar"><h2 class="section-heading"><svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6l8-3Z"/><path d="m8 12 3 3 5-6"/></svg><span><span data-i18n="模型健康基线">模型健康基线</span></span></h2><div class="actions"><button id="round-start" type="button" class="primary" title="启用自动预备并开始一轮探测：跳过健康值仍充裕或已备好接班值的模型；所有任务串行执行" data-i18n-title="启用自动预备并开始一轮探测：跳过健康值仍充裕或已备好接班值的模型；所有任务串行执行"><span data-i18n="开始探测">开始探测</span></button><button id="round-stop" type="button" title="取消本轮排队和在途探测，在下一个尝试边界生效；保持自动预备原状态，临近到期时仍可再次探测" data-i18n-title="取消本轮排队和在途探测，在下一个尝试边界生效；保持自动预备原状态，临近到期时仍可再次探测"><span data-i18n="停止当前轮">停止当前轮</span></button><button id="all-stop" type="button" title="取消所有探测并停止自动预备；重启后保持停止，直到再次点击开始探测；已获得的健康值保留" data-i18n-title="取消所有探测并停止自动预备；重启后保持停止，直到再次点击开始探测；已获得的健康值保留"><span data-i18n="停止全部">停止全部</span></button><span id="probe-times" class="probe-note">—</span></div></div>
+      <div class="toolbar"><h2 class="section-heading"><svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6l8-3Z"/><path d="m8 12 3 3 5-6"/></svg><span><span data-i18n="模型健康状态">模型健康状态</span></span></h2><div class="actions"><button id="round-start" type="button" class="primary" title="启用自动预备并开始一轮探测：跳过健康值仍充裕或已备好接班值的模型；所有任务串行执行" data-i18n-title="启用自动预备并开始一轮探测：跳过健康值仍充裕或已备好接班值的模型；所有任务串行执行"><span data-i18n="开始探测">开始探测</span></button><button id="round-stop" type="button" title="取消本轮排队和在途探测，在下一个尝试边界生效；保持自动预备原状态，临近到期时仍可再次探测" data-i18n-title="取消本轮排队和在途探测，在下一个尝试边界生效；保持自动预备原状态，临近到期时仍可再次探测"><span data-i18n="停止当前轮">停止当前轮</span></button><button id="all-stop" type="button" title="取消所有探测并停止自动预备；重启后保持停止，直到再次点击开始探测；已获得的健康值保留" data-i18n-title="取消所有探测并停止自动预备；重启后保持停止，直到再次点击开始探测；已获得的健康值保留"><span data-i18n="停止全部">停止全部</span></button><span id="probe-times" class="probe-note">—</span></div></div>
       <details class="probe-settings" id="probe-settings">
         <summary><span class="settings-title"><svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M4 7h8m4 0h4M4 17h3m4 0h9"/><circle cx="14" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></svg><span><span data-i18n="探测设置">探测设置</span></span></span><span class="sub" id="settings-summary"><span data-i18n="提前预备 · 串行间隔">提前预备 · 串行间隔</span></span></summary>
         <div class="settings-body">
@@ -98,7 +95,7 @@
       <div class="settings-line"><label for="sleep-start-hour"><span data-i18n="每日休眠（UTC+8）">每日休眠（UTC+8）</span></label><input id="sleep-start-hour" type="number" min="0" max="23" step="1" inputmode="numeric" value="0" aria-label="休眠开始小时" data-i18n-aria-label="休眠开始小时"><span>～</span><input id="sleep-end-hour" type="number" min="0" max="23" step="1" inputmode="numeric" value="0" aria-label="休眠结束小时" data-i18n-aria-label="休眠结束小时"><span data-i18n="时">时</span><button id="sleep-save" type="button" data-i18n="确认保存">确认保存</button><span id="sleep-feedback" role="status"></span><span class="sub" data-i18n="按 UTC+8 每日生效，支持跨午夜。0～0（起止相同）关闭休眠；期间不发起探测，在途请求完成后等待，结束后恢复原模式。">按 UTC+8 每日生效，支持跨午夜。0～0（起止相同）关闭休眠；期间不发起探测，在途请求完成后等待，结束后恢复原模式。</span></div>
         </div>
       </details>
-      <div class="table-wrap" id="probe-values-wrap" tabindex="0" role="region" aria-label="模型健康基线，可横向滚动" data-i18n-aria-label="模型健康基线，可横向滚动"><table>
+      <div class="table-wrap" id="probe-values-wrap" tabindex="0" role="region" aria-label="模型健康状态，可横向滚动" data-i18n-aria-label="模型健康状态，可横向滚动"><table>
         <thead><tr><th><span data-i18n="模型">模型</span></th><th><span data-i18n="状态长度">状态长度</span></th><th><span data-i18n="来源">来源</span></th><th><span data-i18n="签发时间（UTC+8）">签发时间（UTC+8）</span></th><th><span data-i18n="到期时间（UTC+8）">到期时间（UTC+8）</span></th><th><span data-i18n="有效期 / 状态">有效期 / 状态</span></th><th><span data-i18n="操作">操作</span></th></tr></thead>
         <tbody id="probe-values"></tbody>
       </table></div>
@@ -106,14 +103,14 @@
     <details class="panel probe-records" id="probe-history-panel">
       <summary class="toolbar"><h2 class="section-heading"><svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 11a9 9 0 1 1 2.7 7M3 4v7h7"/><path d="M12 7v5l3 2"/></svg><span><span data-i18n="探测记录">探测记录</span></span></h2><span class="probe-note"><span data-i18n="最近 50 条 · 最新在前">最近 50 条 · 最新在前</span></span></summary>
       <div class="table-wrap" id="probe-history-wrap" tabindex="0" role="region" aria-label="探测记录，可横向滚动" data-i18n-aria-label="探测记录，可横向滚动"><table>
-        <thead><tr><th><span data-i18n="时间（UTC+8）">时间（UTC+8）</span></th><th><span data-i18n="模型">模型</span></th><th><span data-i18n="出口">出口</span></th><th><span data-i18n="代理回报地址">代理回报地址</span> <button class="ip-toggle" type="button" id="probe-ip-toggle" aria-pressed="false" aria-label="显示出口 IP" data-i18n="显示" data-i18n-aria-label="显示出口 IP">显示</button></th><th><span data-i18n="结果">结果</span></th><th><span data-i18n="耗时">耗时</span></th><th><span data-i18n="说明">说明</span></th></tr></thead>
+        <thead><tr><th><span data-i18n="时间（UTC+8）">时间（UTC+8）</span></th><th><span data-i18n="模型">模型</span></th><th><span data-i18n="出口">出口</span></th><th><span data-i18n="结果">结果</span></th><th><span data-i18n="耗时">耗时</span></th><th><span data-i18n="说明">说明</span></th></tr></thead>
         <tbody id="probe-history"></tbody>
       </table></div>
     </details>
     <details class="panel probe-records" id="probe-success-history-panel">
       <summary class="toolbar"><h2 class="section-heading"><svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/></svg><span><span data-i18n="成功记录">成功记录</span></span></h2><span class="probe-note"><span data-i18n="独立保留最近 50 条 · 最新在前">独立保留最近 50 条 · 最新在前</span></span></summary>
       <div class="table-wrap" id="probe-success-history-wrap" tabindex="0" role="region" aria-label="成功记录，可横向滚动" data-i18n-aria-label="成功记录，可横向滚动"><table>
-        <thead><tr><th><span data-i18n="时间（UTC+8）">时间（UTC+8）</span></th><th><span data-i18n="模型">模型</span></th><th><span data-i18n="出口">出口</span></th><th><span data-i18n="代理回报地址">代理回报地址</span> <button class="ip-toggle" type="button" id="probe-success-ip-toggle" aria-pressed="false" aria-label="显示出口 IP" data-i18n="显示" data-i18n-aria-label="显示出口 IP">显示</button></th><th><span data-i18n="结果">结果</span></th><th><span data-i18n="耗时">耗时</span></th><th><span data-i18n="说明">说明</span></th></tr></thead>
+        <thead><tr><th><span data-i18n="时间（UTC+8）">时间（UTC+8）</span></th><th><span data-i18n="模型">模型</span></th><th><span data-i18n="出口">出口</span></th><th><span data-i18n="结果">结果</span></th><th><span data-i18n="耗时">耗时</span></th><th><span data-i18n="说明">说明</span></th></tr></thead>
         <tbody id="probe-success-history"></tbody>
       </table></div>
     </details>
@@ -148,6 +145,38 @@
 <script>
   // UI message -> [English, Traditional Chinese, Russian]. Simplified Chinese is the key.
   const messages={
+    "请求未携带票据，未覆写":["No request ticket; not overwritten", "請求未攜帶票據，未覆寫", "В запросе нет билета; без перезаписи"],
+    "请求设置":["Request settings", "請求設定", "Настройки запросов"],
+    "{ready}/{count} 账号可用":["{ready}/{count} accounts ready", "{ready}/{count} 帳號可用", "Доступно аккаунтов: {ready}/{count}"],
+    "替换发往上游的请求正文中的时区；不影响探测休眠或页面时间（UTC+8）。保存后覆盖配置默认值。":["Rewrites the timezone in outgoing request bodies. Probe sleep and display time stay UTC+8. Saving overrides the configuration default.", "替換傳往上游的請求正文中的時區；不影響探測休眠或頁面時間（UTC+8）。儲存後覆蓋設定預設值。", "Заменяет часовой пояс в теле исходящих запросов. Время сна проверок и интерфейса остаётся UTC+8. Сохранение заменяет значение конфигурации."],
+
+    "邮箱显示：已开启":["Email display: On", "郵箱顯示：已開啟", "Показ почты: включён"],
+    "邮箱显示：已关闭":["Email display: Off", "郵箱顯示：已關閉", "Показ почты: выключен"],
+    "最新票据 · 预备":["Latest ticket · Standby", "最新票據 · 預備", "Последний билет · Резерв"],
+    "最新票据 · 使用中":["Latest ticket · Active", "最新票據 · 使用中", "Последний билет · Активный"],
+    "原始长度未知":["Original length unknown", "原始長度未知", "Исходная длина неизвестна"],
+    "请求：{value}":["Request: {value}", "請求：{value}", "Запрос: {value}"],
+    "响应：{value}":["Response: {value}", "回應：{value}", "Ответ: {value}"],
+    "收到 {count} 字节":["Received {count} bytes", "收到 {count} 位元組", "Получено {count} байт"],
+    "注入 {count} 字节":["Injected {count} bytes", "注入 {count} 位元組", "Вставлено {count} байт"],
+    "未携带":["Not provided", "未攜帶", "Не передан"],
+    "请求目标时区":["Request target timezone", "請求目標時區", "Целевой часовой пояс запросов"],
+    "请输入有效的 IANA 时区名称":["Enter a valid IANA timezone name", "請輸入有效的 IANA 時區名稱", "Введите корректное имя часового пояса IANA"],
+    "时区已保存，后续请求生效":["Timezone saved; applies to subsequent requests", "時區已儲存，後續請求生效", "Часовой пояс сохранён для следующих запросов"],
+    "保存失败，请检查 IANA 时区名称；原设置未更改":["Save failed. Check the IANA timezone name; previous settings retained.", "儲存失敗，請檢查 IANA 時區名稱；原設定未更改", "Не удалось сохранить. Проверьте часовой пояс IANA; прежние настройки сохранены."],
+
+    "显示邮箱":["Show emails", "顯示信箱", "Показать адреса почты"],
+    "隐藏邮箱":["Hide emails", "隱藏信箱", "Скрыть адреса почты"],
+    "邮箱未提供":["Email not provided", "未提供信箱", "Адрес почты не указан"],
+    "可用":["Available", "可用", "Доступно"],
+    "不可用":["Unavailable", "不可用", "Недоступно"],
+    "已启用 {count} 个账号 · 可用 {ready} 个":["{count} enabled accounts · {ready} available", "已啟用 {count} 個帳號 · 可用 {ready} 個", "Включено аккаунтов: {count} · доступно: {ready}"],
+    "CPA 暂无已启用账号":["No accounts enabled in CPA", "CPA 暫無已啟用帳號", "В CPA нет включённых аккаунтов"],
+    "未注入：账号未识别":["Not injected: account unidentified","未注入：帳號未識別","Не подставлено: аккаунт не определён"],
+    "未注入：此账号无有效票据":["Not injected: no valid ticket for this account","未注入：此帳號無有效票據","Не подставлено: нет билета этого аккаунта"],
+    "账号绑定不可用，未启动探测":["Account binding unavailable; no probes started","帳號綁定不可用，未啟動探測","Нет привязки аккаунта; проверки не запущены"],
+    "账号身份已更换，重启 CPA 后重新绑定":["Account identity changed; restart CPA to rebind","帳號身分已更換，重新啟動 CPA 後重新綁定","Идентификатор аккаунта изменён; перезапустите CPA для привязки"],
+    "该账号暂不可探测":["Probing unavailable for this account","此帳號暫不可探測","Проверка этого аккаунта недоступна"],
     "休眠时间须为 0–23 的整数小时":["Sleep hours must be whole numbers from 0 to 23","休眠時間須為 0–23 的整數小時","Часы сна должны быть целыми числами от 0 до 23"],
     "缺少 start_hour 或 end_hour 字段":["Missing start_hour or end_hour field","缺少 start_hour 或 end_hour 欄位","Отсутствует поле start_hour или end_hour"],
     "每日休眠（UTC+8）":["Daily sleep (UTC+8)", "每日休眠（UTC+8）", "Ежедневный сон (UTC+8)"],
@@ -162,17 +191,13 @@
     "休眠至 {time}（UTC+8）；在途请求完成后等待，结束后按原模式继续":["Sleeping until {time} (UTC+8); in-flight requests finish, then wait. The previous mode resumes afterwards", "休眠至 {time}（UTC+8）；進行中的請求完成後等待，結束後按原模式繼續", "Сон до {time} (UTC+8); текущий запрос завершится, затем ожидание. После сна продолжится прежний режим"],
     "请输入 0–23 的整数小时":["Enter whole hours from 0 to 23", "請輸入 0–23 的整數小時", "Введите целые часы от 0 до 23"],
     "休眠设置已保存":["Sleep schedule saved", "休眠設定已儲存", "Расписание сна сохранено"],
-    "实验性账号健康路由":["Experimental account health routing", "實驗性帳號健康路由", "Экспериментальная маршрутизация аккаунтов"],
     "只读监测":["Read-only monitoring", "唯讀監測", "Мониторинг без управления"],
-    "账号与模型健康状态，可横向滚动":["Account and model health, horizontally scrollable", "帳號與模型健康狀態，可橫向捲動", "Состояние аккаунтов и моделей, горизонтальная прокрутка"],
     "账号标识":["Account ID", "帳號識別", "Идентификатор аккаунта"],
     "模型族":["Model family", "模型族", "Семейство моделей"],
     "健康状态":["Health", "健康狀態", "Состояние"],
     "State 长度":["State length", "State 長度", "Длина State"],
     "最近观测（UTC+8）":["Last observation (UTC+8)", "最近觀測（UTC+8）", "Последнее наблюдение (UTC+8)"],
     "冷却 / 原因":["Cooldown / reason", "冷卻 / 原因", "Ожидание / причина"],
-    "仅展示脱敏账号标识及探测、业务观测结果，不展示凭据。":["Only masked account IDs and probe/traffic evidence are shown. Credentials are never displayed.", "僅顯示去識別帳號及探測、業務觀測結果，不顯示憑據。", "Показаны только обезличенные аккаунты и результаты проверок/запросов, без учётных данных."],
-    "同优先级内路由 · 全部冷却时回退 CPA 原调度":["Routes within the same priority; all cooling falls back to CPA", "同優先級內路由 · 全部冷卻時回退 CPA 原調度", "Одинаковый приоритет; если все ожидают — выбор CPA"],
     "配置错误：{error}":["Configuration error: {error}", "設定錯誤：{error}", "Ошибка настройки: {error}"],
     "路由已开启 · 同优先级健康优先":["Routing enabled · healthy accounts first within the same priority", "路由已開啟 · 同優先級健康優先", "Маршрутизация включена · исправные аккаунты одного приоритета"],
     "只读监测 · 路由未开启":["Monitoring only · routing disabled", "唯讀監測 · 路由未開啟", "Только мониторинг · маршрутизация отключена"],
@@ -180,7 +205,6 @@
     "瞬时失败":["Transient failure", "暫時失敗", "Временный сбой"],
     "待观察":["Awaiting evidence", "待觀察", "Ожидание данных"],
     "冷却 {time}":["Cooldown {time}", "冷卻 {time}", "Ожидание {time}"],
-    "尚无账号级使用记录。完成一次 Codex 请求后，这里会按脱敏 AuthID 展示健康证据。":["No account evidence yet. Completed Codex requests appear with masked account IDs.", "尚無帳號級使用記錄。完成 Codex 請求後，將以去識別 AuthID 顯示健康證據。", "Данных об аккаунтах пока нет. После запросов Codex здесь появятся обезличенные результаты."],
     "健康":["Healthy", "健康", "Исправен"],
     "降级":["Degraded", "降級", "Ухудшение"],
     "预备就绪（{time}）":["Candidate ready ({time})","預備就緒（{time}）","Замена готова ({time})"],
@@ -221,7 +245,6 @@
     "保存失败，原出口未更改；请查看页面错误提示":["Save failed. The exit was not changed; see the page error message.", "儲存失敗，原出口未更改；請查看頁面錯誤提示", "Не удалось сохранить. Выход не изменён; см. сообщение об ошибке."],
     "保存失败，原设置未更改":["Save failed. The previous setting is unchanged.", "儲存失敗，原設定未更改", "Не удалось сохранить. Прежняя настройка не изменена."],
     "保留原值":["Original retained", "保留原值", "Исходное сохранено"],
-    "保留最近 200 条记录 · 本地快照自动恢复":["Latest 200 records · Restored from local snapshots", "保留最近 200 筆記錄 · 自動還原本機快照", "Последние 200 записей · Восстановление из локального снимка"],
     "停止使用该出口，保留计数与历史":["Stop using this exit; keep its counters and history", "停止使用此出口，保留計數與歷史", "Отключить выход, сохранив счётчики и историю"],
     "停止全部":["Stop all", "停止全部", "Остановить всё"],
     "停止当前轮":["Stop this round", "停止目前輪次", "Остановить раунд"],
@@ -305,17 +328,6 @@
     "探测状态":["Probe status", "探測狀態", "Состояние проверок"],
     "探测统计":["Probe statistics", "探測統計", "Статистика проверок"],
     "探测获取":["Probe", "探測取得", "Проверка"],
-    "显示":["Show", "顯示", "Показать"],
-    "隐藏":["Hide", "隱藏", "Скрыть"],
-    "显示出口 IP":["Show egress IPs", "顯示出口 IP", "Показать IP выходов"],
-    "隐藏出口 IP":["Hide egress IPs", "隱藏出口 IP", "Скрыть IP выходов"],
-    "出口 IP 已隐藏":["Egress IP hidden", "出口 IP 已隱藏", "IP выхода скрыт"],
-    "代理回报地址":["Proxy-reported address", "代理回報位址", "Адрес по данным прокси"],
-    "代理回报 · 未核验":["Proxy-reported · Unverified", "代理回報 · 未核驗", "По данным прокси · Не проверен"],
-    "未获取":["Unavailable", "未取得", "Нет данных"],
-    "本次 SOCKS5 连接的代理回报地址（BND.ADDR），不保证等于上游看到的公网 IP。":["Proxy-reported address (BND.ADDR) for this SOCKS5 connection; it may differ from the public IP seen by the upstream.", "本次 SOCKS5 連線的代理回報位址（BND.ADDR），不保證等於上游看到的公網 IP。", "Адрес BND.ADDR этого SOCKS5-соединения по данным прокси; он может отличаться от публичного IP, видимого серверу."],
-    "本次连接未获得可用的代理回报地址，无法判断出口是否轮换。":["No usable proxy-reported address for this connection; exit rotation cannot be determined.", "本次連線未取得可用的代理回報位址，無法判斷出口是否輪換。", "Прокси не сообщил пригодный адрес этого соединения; смену выхода определить нельзя."],
-    "此连接未提供出口 IP；代理入口地址不能代表实际公网出口。":["This connection did not provide an egress IP; the proxy endpoint is not the actual public exit.", "此連線未提供出口 IP；代理入口位址不能代表實際公網出口。", "IP выхода для этого соединения недоступен; адрес входа в прокси не является фактическим публичным выходом."],
     "成功记录":["Successful probes", "成功記錄", "Успешные проверки"],
     "成功记录，可横向滚动":["Successful probes, horizontally scrollable", "成功記錄，可水平捲動", "Успешные проверки, прокрутка по горизонтали"],
     "独立保留最近 50 条 · 最新在前":["Latest 50 saved separately · Newest first", "獨立保留最近 50 筆 · 最新在前", "Последние 50 отдельно · Сначала новые"],
@@ -369,16 +381,19 @@
     "来自响应":["Response", "來自回應", "Ответ"],
     "来自流":["Stream", "來自串流", "Поток"],
     "来自请求":["Request", "來自請求", "Запрос"],
-    "查看请求处理、管理健康基线与探测出口。":["Inspect requests, manage healthy baselines and probe exits.", "檢視請求處理、管理健康基線與探測出口。", "Просмотр запросов, управление исправными эталонами и выходами проверок."],
+    "查看请求记录、模型健康状态与探测出口。":["View request records, model health and probe exits.", "查看請求記錄、模型健康狀態與探測出口。", "Запросы, состояние моделей и выходы проверок."],
     "模型":["Model", "模型", "Модель"],
     "模型不一致":["Model mismatch", "模型不一致", "Несовпадение модели"],
-    "模型健康基线":["Healthy baselines", "模型健康基線", "Исправные эталоны"],
-    "模型健康基线，可横向滚动":["Healthy baselines, horizontally scrollable", "模型健康基線，可水平捲動", "Исправные эталоны, прокрутка по горизонтали"],
+    "模型健康状态":["Model health", "模型健康狀態", "Состояние моделей"],
+    "模型健康状态，可横向滚动":["Model health, horizontally scrollable", "模型健康狀態，可水平捲動", "Состояние моделей, прокрутка по горизонтали"],
     "正在停止":["Stopping", "正在停止", "Остановка"],
     "正在停止…":["Stopping…", "正在停止…", "Остановка…"],
     "正在连接":["Connecting", "正在連線", "Подключение"],
     "每 5 秒刷新":["Refreshes every 5 seconds", "每 5 秒重新整理", "Обновление каждые 5 секунд"],
     "每轮基础次数":["Base attempts per round", "每輪基本次數", "Базовые попытки за раунд"],
+    "累计成功":["Cumulative successes", "累計成功", "Успешных проверок"],
+    "{count} 次":["{count} times", "{count} 次", "{count} раз"],
+    "自 {time}（UTC+8）起统计；不含此前历史":["Counted since {time} (UTC+8); earlier history excluded", "自 {time}（UTC+8）起統計；不含此前歷史", "С {time} (UTC+8); без более ранней истории"],
     "每轮探测预算":["Attempts per round", "每輪探測預算", "Попытки за раунд"],
     "每轮预算 = 基础次数 × 倍率，向上取整":["Round budget = base attempts × multiplier, rounded up", "每輪預算 = 基本次數 × 倍率，無條件進位", "Бюджет раунда = базовые попытки × множитель, округление вверх"],
     "清除冷却、轮休与连续失败计数；不解除禁用":["Clear cooldown, rest and consecutive failures; keep disabled exits disabled", "清除冷卻、輪休與連續失敗計數；不解除禁用", "Сбросить охлаждение, отдых и серии ошибок; не включать отключённые выходы"],
@@ -400,7 +415,6 @@
     "编辑时留空保留原值":["Leave blank to keep the current value", "編輯時留空以保留原值", "Оставьте пустым, чтобы сохранить значение"],
     "耗时":["Duration", "耗時", "Длительность"],
     "聚合池":["Pool", "聚合池", "Пул"],
-    "自动复用 CPA 登录":["Uses your CPA session", "自動沿用 CPA 登入", "Используется сеанс CPA"],
     "自动预备不可用":["Automatic prefetch unavailable", "自動預備不可用", "Автоподготовка недоступна"],
     "自动预备已停止":["Automatic prefetch stopped", "自動預備已停止", "Автоподготовка остановлена"],
     "自动预备已停止 · 点击开始探测恢复":["Automatic prefetch stopped · Select Start probes to resume", "自動預備已停止 · 開始探測即可繼續", "Автоподготовка остановлена · Запустите проверки для возобновления"],
@@ -448,6 +462,13 @@
     "；上次整轮 {count} 次失败（悬停看详情）":["; {count} failures in the previous round (hover for details)", "；上次整輪 {count} 次失敗（停留查看詳情）", "; {count} ошибок в прошлом раунде (подробности при наведении)"]
   };
   let locale='zh-CN';
+  let showAccountEmails=false;
+  const expandedModels=new Set();
+  function accountLabel(entry){return showAccountEmails?(entry.account_email||t('邮箱未提供')):'***';}
+  function accountBaselineUsable(entry,lengths){
+    return entry.account_available!==false&&entry.valid!==false&&lengths.includes(entry.value_length)&&entry.expired!==true&&Number(entry.remaining_seconds)>0&&(!entry.expires_at||new Date(entry.expires_at).getTime()>Date.now());
+  }
+
   const languageIndex={en:0,'zh-TW':1,ru:2};
   function t(message,params={}){
     const translated=messages[message]?.[languageIndex[locale]]??message;
@@ -572,7 +593,7 @@
   const sources = {request:'来自请求',response:'来自响应',stream:'来自流',probe:'探测获取',business:'业务观测',seed:'历史种子'};
   function sourceLabel(source){return t(sources[source]||source||'');}
   let lastData=null;
-  let egressVisible=false;
+  let timezoneDirty=false,timezoneSaving=false;
   let loading = false, rejectedKey = '';
   let prefetchDirty=false,prefetchSaving=false,prefetchLimit=54,editingExitID='',exitSaving=false,controlRevision=0;
   let intervalDirty=false,intervalSaving=false;
@@ -606,7 +627,7 @@
     }catch{return '';}
   }
   function requireLogin(message='未找到已保存的 CPA 登录状态。请在管理页登录并启用“记住密码”，本页会自动连接。'){
-    lastData=null;egressVisible=false;renderProbeHistories({});renderPool({});
+    lastData=null;renderProbeHistories({});renderPool({});
     setMessage('auth-message',()=>t(message));el('auth-notice').classList.remove('hidden');el('results').classList.add('hidden');
     el('rows').replaceChildren();for(const key of ['total','replaced','inserted','mismatches','turnstates','overridden'])el(key).textContent='—';
     el('override-chip').classList.add('hidden');
@@ -647,6 +668,9 @@
   }
   function render(data){
     el('target-timezone').textContent=data.target||'—';
+    el('request-timezone-summary').textContent=t('请求目标时区')+' · '+(data.target||'—');
+    if(!timezoneDirty&&!timezoneSaving)el('timezone-input').value=data.target||'';
+    el('timezone-save').disabled=timezoneSaving||!!data.turn_state_override?.probe?.settings_error;
     lastData=data;
     el('total').textContent=Number(data.total).toLocaleString(locale);
     el('replaced').textContent=Number(data.replaced).toLocaleString(locale);
@@ -670,7 +694,7 @@
     for(const record of data.records.slice(0,50)){
       const tr=document.createElement('tr');
       const time=cell(tr,clock.format(new Date(record.time)),'time');time.title=record.time;
-      const model=cell(tr,record.model,'model');model.title=record.model;
+      const model=cell(tr,record.model,'model');if(record.account){const account=document.createElement('div');account.className='sub';account.textContent=accountLabel(record);model.append(account);}model.title=record.model;
       const upstream=cell(tr,'');
       if(record.detection_exempt){
         if(record.upstream_model){const code=document.createElement('code');code.textContent=record.upstream_model;upstream.append(code);}
@@ -687,22 +711,31 @@
       else{const badge=document.createElement('span');badge.className='badge '+record.action;badge.textContent=t(labels[record.action]||record.action);action.append(badge);}
       const turnstate=cell(tr,'','turnstate');
       if(record.degraded_rejected){turnstate.textContent=t('未发往上游');turnstate.classList.add('none');}
-      else if(record.turn_state_length>0){
+      else if(record.turn_state_override==='applied'||record.turn_state_override==='applied-config'){
+        const original=record.turn_state_original_length;
+        const originalText=original===0?t('未携带'):Number.isInteger(original)&&original>0?t('收到 {count} 字节',{count:original.toLocaleString(locale)}):t('原始长度未知');
+        const injected=Number(record.turn_state_injected_length||0);
+        turnstate.textContent=t('请求：{value}',{value:originalText+' → '+(injected>0?t('注入 {count} 字节',{count:injected.toLocaleString(locale)}):'—')});
+        const badge=document.createElement('span');badge.className='badge override';badge.textContent=t(record.turn_state_override==='applied-config'?'已覆写（配置值）':'已覆写');turnstate.append(badge);
+      }else if(record.turn_state_response_original_length!=null){
+        const original=record.turn_state_original_length;
+        turnstate.textContent=t('请求：{value}',{value:original===0?t('未携带'):Number.isInteger(original)&&original>0?t('收到 {count} 字节',{count:original.toLocaleString(locale)}):t('原始长度未知')});
+      }else if(record.turn_state_length>0){
         turnstate.textContent=t('{count} 字节',{count:record.turn_state_length.toLocaleString(locale)});
         const src=document.createElement('span');src.className='src';src.textContent=sourceLabel(record.turn_state_source);turnstate.append(src);
-        if(record.turn_state_override==='applied'){const b=document.createElement('span');b.className='badge override';b.textContent=t('已覆写');turnstate.append(b);}
-        else if(record.turn_state_override==='applied-config'){const b=document.createElement('span');b.className='badge override';b.textContent=t('已覆写（配置值）');turnstate.append(b);}
-        else if(record.turn_state_override==='skipped-existing'){const b=document.createElement('span');b.className='badge skipped';b.textContent=t('保留原值');turnstate.append(b);}
+        if(record.turn_state_override==='skipped-existing'){const b=document.createElement('span');b.className='badge skipped';b.textContent=t('保留原值');turnstate.append(b);}
         const detail=(record.turn_state_value||record.turn_state_preview||'')+(record.turn_state_truncated?t('（已截断）'):'');
-        turnstate.title=detail+(record.turn_state_source?('　（'+ (sourceLabel(record.turn_state_source)) +'）'):'');
-      }else if(record.turn_state_override==='applied'||record.turn_state_override==='applied-config'){
-        const injected=Number(record.turn_state_injected_length||0);
-        if(injected>0){turnstate.textContent=t('{count} 字节',{count:injected.toLocaleString(locale)});}
-        const b=document.createElement('span');b.className='badge override';
-        b.textContent=record.turn_state_override==='applied-config'?t('已覆写（配置值）'):t('已覆写');
-        turnstate.append(b);
-        if(injected>0){turnstate.title=t('插件注入 {count} 字节（{source}）',{count:injected,source:(record.turn_state_override==='applied-config'?t('配置值'):t('探测值'))});}
-      }else{turnstate.textContent=t('未观测');turnstate.classList.add('none');}
+        turnstate.title=detail+(record.turn_state_source?('　（'+sourceLabel(record.turn_state_source)+'）'):'');
+      }else{turnstate.textContent=t(record.turn_state_override==='skipped-missing'?'请求未携带票据，未覆写':'未观测');turnstate.classList.add('none');}
+      if(record.turn_state_override==='skipped-missing'&&record.turn_state_length>0){const notice=document.createElement('div');notice.className='sub';notice.textContent=t('请求未携带票据，未覆写');turnstate.append(notice);}
+      if(!record.degraded_rejected&&(record.turn_state_override==='applied'||record.turn_state_override==='applied-config'||record.turn_state_response_original_length!=null)){
+        const received=record.turn_state_response_original_length??(['response','stream'].includes(record.turn_state_source)?record.turn_state_length:null);
+        const injected=record.turn_state_response_injected_length||0;
+        let value=Number.isInteger(received)&&received>0?t('收到 {count} 字节',{count:received.toLocaleString(locale)}):t('未观测');
+        if(injected>0)value+=' → '+t('注入 {count} 字节',{count:injected.toLocaleString(locale)});
+        const response=document.createElement('div');response.className='sub';response.textContent=t('响应：{value}',{value});turnstate.append(response);
+      }
+      if(record.turn_state_override==='account-unavailable'||record.turn_state_override==='account-baseline-unavailable'){const notice=document.createElement('span');notice.className='badge state-warn';notice.textContent=t(record.turn_state_override==='account-unavailable'?'未注入：账号未识别':'未注入：此账号无有效票据');turnstate.append(notice);}
       if(record.trace_id) tr.title='Trace ID: '+record.trace_id;
       fragment.append(tr);
     }
@@ -710,41 +743,9 @@
     el('rows').replaceChildren(fragment);el('auth-notice').classList.add('hidden');el('results').classList.remove('hidden');
     renderProbe(override.probe);
     renderPool(override.probe);
-    renderAccountRouting(data.account_routing||{});
     setMessage('refresh-note',()=>t('每 5 秒刷新'));setMessage('status',()=>t('已复用 CPA 登录 · 插件 v{version}',{version:data.version}));
   }
-  function renderAccountRouting(routing){
-    routing=routing||{};
-    const accounts=Array.isArray(routing.accounts)?routing.accounts:[];
-    const enabled=routing.enabled===true&&!routing.error;
-    const note=el('account-routing-note');
-    note.textContent=routing.error?t('配置错误：{error}',{error:routing.error}):t(enabled?'路由已开启 · 同优先级健康优先':'只读监测 · 路由未开启');
-    note.className='probe-note'+(routing.error?' settings-error':'');
-    const frag=document.createDocumentFragment();
-    for(const item of accounts){
-      const tr=document.createElement('tr');
-      cell(tr,item.account||'—','model');
-      cell(tr,item.model||'—');
-      const state=cell(tr,'','ttl-cell');
-      const badge=document.createElement('span');
-      const healthy=item.state==='healthy';
-      badge.className='badge '+(healthy?'state-ok':item.state?'state-fail':'state-warn');
-      const labels={healthy:'健康',degraded:'降级',auth_error:'鉴权失败',transient_failure:'瞬时失败'};
-      badge.textContent=t(labels[item.state]||'待观察');state.append(badge);
-      cell(tr,item.last_state_length?String(item.last_state_length)+' B':'—',item.last_state_length?'':'none');
-      cell(tr,item.observed_at?fmtBeijing(item.observed_at):'—','time');
-      const detail=cell(tr,'','ttl-cell');
-      const until=item.cooldown_until?new Date(item.cooldown_until).getTime():0;
-      if(until>Date.now()){
-        const seconds=Math.max(0,Math.floor((until-Date.now())/1000));
-        const cooling=document.createElement('span');cooling.className='badge state-warn';cooling.textContent=t('冷却 {time}',{time:fmtDuration(seconds)});detail.append(cooling);
-      }
-      const reason=document.createElement('div');reason.className='sub';reason.textContent=item.last_reason||'—';detail.append(reason);
-      frag.append(tr);
-    }
-    if(!accounts.length){const tr=document.createElement('tr');const td=cell(tr,t('尚无账号级使用记录。完成一次 Codex 请求后，这里会按脱敏 AuthID 展示健康证据。'),'empty');td.colSpan=6;frag.append(tr);}
-    el('account-routing-rows').replaceChildren(frag);
-  }
+
   function renderPool(probe){
     probe=probe||{};
     const items=probe.proxies_state||[];
@@ -782,6 +783,10 @@
       const multiplier=item.multiplier??1;
       const budgetValue=document.createElement('div');budgetValue.className='budget';budgetValue.textContent=t('{base} × {multiplier} = {count} 次',{base,multiplier,count:item.budget??Math.ceil(base*multiplier)});
       budget.append(budgetLabel,budgetValue);
+      const successes=document.createElement('div');successes.className='exit-success';
+      const successLabel=document.createElement('div');successLabel.className='label';successLabel.textContent=t('累计成功');
+      const successValue=document.createElement('div');successValue.className='badge '+(item.success_count==null?'state-off':'state-ok');successValue.textContent=item.success_count==null?'—':t('{count} 次',{count:item.success_count});
+      successes.append(successLabel,successValue);
       const ops=document.createElement('div');ops.className='exit-ops';
       const edit=document.createElement('button');edit.type='button';edit.className='edit';edit.textContent=t('编辑');edit.disabled=!item.id||exitSaving;
       edit.addEventListener('click',()=>openExitEditor(item));
@@ -792,7 +797,7 @@
       const reset=document.createElement('button');reset.type='button';reset.textContent=t('重置');reset.title=t('清除冷却、轮休与连续失败计数；不解除禁用');
       reset.addEventListener('click',async()=>{reset.disabled=true;if(await probeControl({action:'reset-exit',...identity})){setTimeout(refresh,600);}else reset.disabled=false;});
       ops.append(edit,toggle,reset);
-      main.append(identityBox,state,budget,ops);
+      main.append(identityBox,state,budget,successes,ops);
       const meta=document.createElement('div');meta.className='exit-meta';
       const failures=document.createElement('span');failures.textContent=t('连续失败 {count} 次',{count:item.failures||0});meta.append(failures);
       if(item.until){
@@ -806,9 +811,10 @@
     if(!items.length){const empty=document.createElement('div');empty.className='empty';empty.textContent=t('暂无出口。添加代理后可在这里管理探测预算和启用状态。');frag.append(empty);}
     el('pool-rows').replaceChildren(frag);
     el('pool-note').textContent=probe.settings_error||(t('保存不会启动探测；{budget}',{budget:probe.max_attempts_explicit?t('整轮上限 {count} 次优先于各出口预算',{count:probe.max_attempts_per_round}):t('整轮上限按各出口预算合计')}));
+    if(!probe.settings_error&&probe.exit_success_since)el('pool-note').textContent+=' · '+t('自 {time}（UTC+8）起统计；不含此前历史',{time:fmtBeijing(probe.exit_success_since)});
     el('pool-add').disabled=exitSaving||!!probe.settings_error;
   }
-  function renderProbe(probe){
+  function renderProbe(probe,animatedModel){
     probe=probe||{};
     const lengths=probe.accepted_state_lengths||[292,332];
     const enabled=probe.enabled===true;
@@ -816,7 +822,7 @@
     const values=probe.values||[];
     const detectionModels=probe.detection_models??models.filter(model=>!values.some(entry=>entry.model===model&&entry.detection_enabled===false));
     const noDetection=models.length>0&&detectionModels.length===0;
-    const ready=enabled&&!probe.error&&!noDetection;
+    const ready=enabled&&!probe.error&&!noDetection&&probe.account_binding_ready!==false;
     const prefetchMinutes=probe.prefetch_minutes??3;
     prefetchLimit=Math.max(0,Number(probe.ttl_minutes??55)-1);
     el('prefetch-minutes').max=String(prefetchLimit);
@@ -866,12 +872,12 @@
     roundStart.textContent=probe.running&&probe.halted?t('启用自动预备'):probe.running?t('探测中…'):t('开始探测');
     el('round-stop').disabled=!probe.running||probe.stopping;
     el('all-stop').disabled=probe.halted&&!probe.running;
-    el('probe-priority').textContent=detectionModels.length?detectionModels[0]:'—';
+    el('probe-priority').textContent=detectionModels.length?(values.find(v=>(v.target||v.model)===detectionModels[0])?.model||detectionModels[0]):'—';
     el('probe-counts').textContent=Number(probe.probes_ok||0).toLocaleString(locale)+' / '+Number(probe.probes_total||0).toLocaleString(locale);
     el('probe-activity').textContent=probe.last_activity||probe.last_error||'—';
     const queueNote=probe.queue_length?(' · '+t('队列 {count} 项',{count:probe.queue_length})):'';
     const prefetchNote=sleeping&&!probe.halted?t('休眠至 {time}（UTC+8）；在途请求完成后等待，结束后按原模式继续',{time:fmtBeijing(probe.sleep_until)}):noDetection?t('当前模型均不检测'):autoPrefetch?t('自动预备已开启'):!ready?t('自动预备不可用'):probe.halted?t('自动预备已停止 · 点击开始探测恢复'):t('自动预备已关闭（窗口为 0）');
-    el('probe-times').textContent=prefetchNote+' · '+t('每出口尝试 {attempts} 次 · 池预算 {budget} 次',{attempts:probe.attempts_per_proxy??3,budget:probe.pool_attempts??100})+queueNote;
+    el('probe-times').textContent=(probe.account_binding_ready===false?t('账号绑定不可用，未启动探测'):prefetchNote)+' · '+t('每出口尝试 {attempts} 次 · 池预算 {budget} 次',{attempts:probe.attempts_per_proxy??3,budget:probe.pool_attempts??100})+queueNote;
     if(probe.stopping&&autoPrefetch)el('probe-times').textContent+=t(' · 本轮结束后继续自动预备');
     const failureByModel={};
     for(const failure of (probe.failures||[])){failureByModel[failure.model]=failure;}
@@ -884,10 +890,55 @@
     rejectBtn.disabled=false;
     if(probe.reject_degraded){rejectBtn.classList.add('on');rejectBtn.textContent=t('异常请求拦截：已开启');}
     else{rejectBtn.classList.remove('on');rejectBtn.textContent=t('异常请求拦截：已关闭');}
+    const emailToggle=el('account-email-toggle');
+    emailToggle.classList.toggle('on',showAccountEmails);emailToggle.textContent=t(showAccountEmails?'邮箱显示：已开启':'邮箱显示：已关闭');emailToggle.setAttribute('aria-pressed',String(showAccountEmails));
+    const grouped=values.some(entry=>entry.target&&entry.account)||probe.account_mode==='all-accounts';
+    const groups=new Map();
+    for(const entry of values){if(!groups.has(entry.model))groups.set(entry.model,[]);groups.get(entry.model).push(entry);}
+    if(grouped)for(const name of probe.models||[]){if(!groups.has(name))groups.set(name,[]);}
     const vfrag=document.createDocumentFragment();
-    for(const entry of values){
+    const emitted=new Set(),revealRows=[];let disclosureToFocus;
+    function appendGroup(name,entries){
+      const tr=document.createElement('tr');tr.className='model-group';
+      const expanded=expandedModels.has(name);if(name===animatedModel&&!expanded)revealRows.push(tr);
+      const groupCell=cell(tr,'','model');const content=document.createElement('div');content.className='model-group-content';groupCell.append(content);const button=document.createElement('button');button.type='button';button.className='model-disclosure';
+      button.textContent=(expandedModels.has(name)?'⌄ ':'› ')+name;button.setAttribute('aria-expanded',String(expandedModels.has(name)));
+      button.addEventListener('click',()=>{if(expandedModels.has(name))expandedModels.delete(name);else expandedModels.add(name);renderProbe(probe,name);});content.append(button);if(name===animatedModel)disclosureToFocus=button;
+      const summary=document.createElement('div');summary.className='model-summary';content.append(summary);
+      const checked=entries.some(e=>e.detection_enabled!==false);
+      const count=entries.filter(e=>accountBaselineUsable(e,lengths)&&!businessByModel[e.target||e.model]).length;
+      const badge=document.createElement('span');badge.className='badge '+(!checked&&entries.length?'state-off':count?'state-ok':'state-fail');
+      badge.textContent=t(!checked&&entries.length?'不检测':count?'可用':'不可用');summary.append(badge);
+      const coverage=document.createElement('span');coverage.className='sub';coverage.textContent=entries.length?t('{ready}/{count} 账号可用',{count:entries.length,ready:count}):t('CPA 暂无已启用账号');coverage.title=entries.length?t('已启用 {count} 个账号 · 可用 {ready} 个',{count:entries.length,ready:count}):'';summary.append(coverage);
+      if(expanded){for(let i=0;i<6;i++)cell(tr,'');vfrag.append(tr);return;}
+      // Select one actual ticket; never combine metadata across accounts/slots.
+      const tickets=entries.flatMap(e=>e.detection_enabled===false?[]:[
+        ...(e.value_length?[{...e,prepared:false}]:[]),
+        ...(e.candidate?.value_length?[{...e.candidate,account:e.account,account_email:e.account_email,prepared:true}]:[])
+      ]);
+      const stamp=ticket=>Date.parse(ticket.issued_at||ticket.captured_at||'')||0;
+      tickets.sort((a,b)=>stamp(b)-stamp(a)||(Date.parse(b.captured_at)||0)-(Date.parse(a.captured_at)||0));
+      const latest=tickets[0];
+      if(latest){
+        const lengthCell=cell(tr,'');const lengthBadge=document.createElement('span');
+        lengthBadge.className='badge '+(lengths.includes(latest.value_length)?'state-ok':'state-warn');
+        lengthBadge.textContent=t('{count} 字节',{count:latest.value_length});lengthBadge.title=t(lengths.includes(latest.value_length)?'长度符合配置策略':'长度不符合配置策略');lengthCell.append(lengthBadge);
+        const source=cell(tr,t(latest.prepared?'最新票据 · 预备':'最新票据 · 使用中'));
+        const owner=document.createElement('div');owner.className='sub';owner.textContent=accountLabel(latest);source.append(owner);
+        cell(tr,fmtBeijing(latest.issued_at),'time');cell(tr,fmtBeijing(latest.expires_at),'time');
+        const ttl=cell(tr,remainingText(latest.expires_at),'ttl-cell');
+        if(latest.remaining_seconds!==undefined)ttl.textContent=Number(latest.remaining_seconds)>0?t('剩余 {time}',{time:fmtDuration(Number(latest.remaining_seconds))}):t('已到期');
+      }else{for(let i=0;i<5;i++)cell(tr,'—','none');}
+      cell(tr,'—','none');
+      vfrag.append(tr);
+    }
+    for(const entry of (grouped?[...groups.values()].flat():values)){
+      if(grouped&&!emitted.has(entry.model)){appendGroup(entry.model,groups.get(entry.model));emitted.add(entry.model);}
       const tr=document.createElement('tr');
-      const model=cell(tr,entry.model,'model');
+      if(grouped){tr.className='account-detail';tr.classList.toggle('hidden',!expandedModels.has(entry.model));if(entry.model===animatedModel&&expandedModels.has(entry.model))revealRows.push(tr);}
+      const target=entry.target||entry.model;
+      const model=cell(tr,grouped?accountLabel(entry):entry.model,'model');
+      if(entry.account&&!grouped){const label=document.createElement('div');label.className='sub';label.textContent=accountLabel(entry);model.append(label);}
       if(entry.detection_enabled===false){
         for(let i=0;i<4;i++)cell(tr,'—','none');
         const status=cell(tr,'','ttl-cell');
@@ -916,25 +967,27 @@
       // Participation, live activity and baseline validity are independent.
       const activeSet=new Set(probe.active_models||[]);
       const liveQueue=new Set(probe.queue_models||[]);
-      const isActive=activeSet.has(entry.model);
-      const isPaused=pausedSet.has(entry.model);
+      const isActive=activeSet.has(target);
+      const isPaused=pausedSet.has(target);
       if(isPaused&&!isActive) tr.classList.add('paused-row');
       const rowStatus=document.createElement('div');rowStatus.className='sub';
-      rowStatus.textContent=sleeping&&!isPaused&&(!probe.halted||isActive)&&!probe.stopping?t('休眠中'):isActive?(probe.stopping||isPaused?t('正在停止'):liveQueue.has(entry.model)?t('排队中'):t('探测中')):isPaused?t('已暂停'):!ready?t('探测不可用'):probe.halted?t('自动预备已停止'):autoPrefetch?t('自动预备待命'):t('手动待命');
+      rowStatus.textContent=sleeping&&!isPaused&&(!probe.halted||isActive)&&!probe.stopping?t('休眠中'):isActive?(probe.stopping||isPaused?t('正在停止'):liveQueue.has(target)?t('排队中'):t('探测中')):isPaused?t('已暂停'):!ready?t('探测不可用'):probe.halted?t('自动预备已停止'):autoPrefetch?t('自动预备待命'):t('手动待命');
       model.append(rowStatus);
-      const failure=failureByModel[entry.model];
-      const suspicion=suspectByModel[entry.model];
-      const businessMark=businessByModel[entry.model];
+      if(entry.account_identity_changed)rowStatus.textContent=t('账号身份已更换，重启 CPA 后重新绑定');
+      else if(entry.account_available===false)rowStatus.textContent=t('该账号暂不可探测');
+      const failure=failureByModel[target];
+      const suspicion=suspectByModel[target];
+      const businessMark=businessByModel[target];
       const remaining=Number(entry.remaining_seconds);
       const hasRemaining=entry.remaining_seconds!==undefined&&!isNaN(remaining);
       const expired=entry.expired===true||(hasRemaining&&remaining<=0)||(entry.expires_at&&new Date(entry.expires_at).getTime()<=Date.now());
       const baselineUsable=entry.valid!==false&&lengths.includes(entry.value_length)&&!expired&&hasRemaining;
-      if(activeSet.has(entry.model)&&!sleeping){
+      if(activeSet.has(target)&&!sleeping){
         // Live truth wins over history: while this model is actually being
         // probed, show that instead of a stale round-failure annotation.
         const badge=document.createElement('span');
         badge.className='badge state-ok';
-        const queued=liveQueue.has(entry.model);
+        const queued=liveQueue.has(target);
         badge.textContent=probe.stopping||isPaused?t('正在停止…'):queued?t('队列等待中'):t('探测中…');
         const hist=failure?(t('；上次整轮 {count} 次失败（悬停看详情）',{count:failure.attempts})):'';
         badge.title=t('该模型正在进行探测')+(queued?t('（已排入执行队列，等待轮次）'):t('（当前探测轮结果未出）'))+hist;
@@ -991,30 +1044,30 @@
       toggle.className='icon-btn'+(isPaused?' paused':'');
       toggle.textContent=isPaused?t('恢复'):t('暂停');
       toggle.title=isPaused?t('恢复：解除该模型暂停并探测一次；不改变全局自动预备状态'):t('暂停该模型：取消排队与在途探测，并停止该模型的自动预备；已有健康值保留');
-      toggle.disabled=!!probe.stopping;
-      toggle.addEventListener('click',async()=>{toggle.disabled=true;if(await probeControl({model:entry.model,action:isPaused?'resume':'pause'}))refresh();else toggle.disabled=false;});
+      toggle.disabled=!!probe.stopping||entry.account_available===false;
+      toggle.addEventListener('click',async()=>{toggle.disabled=true;if(await probeControl({model:entry.model,...(entry.target?{target:entry.target}:{}),action:isPaused?'resume':'pause'}))refresh();else toggle.disabled=false;});
       control.append(toggle);
       const probeNow=document.createElement('button');
       probeNow.type='button';
       probeNow.className='icon-btn';
       probeNow.textContent=t('探测一次');
       probeNow.title=t('探测一次：加入统一串行队列；新值先作为接班值，不改变全局自动预备状态；已暂停模型请先恢复');
-      probeNow.disabled=!ready||sleeping||probe.stopping||isPaused||isActive;
-      probeNow.addEventListener('click',async()=>{probeNow.disabled=true;if(await probeControl({model:entry.model,action:'probe-model'})){setTimeout(refresh,1500);}else probeNow.disabled=false;});
+      probeNow.disabled=entry.account_available===false||!ready||sleeping||probe.stopping||isPaused||isActive;
+      probeNow.addEventListener('click',async()=>{probeNow.disabled=true;if(await probeControl({model:entry.model,...(entry.target?{target:entry.target}:{}),action:'probe-model'})){setTimeout(refresh,1500);}else probeNow.disabled=false;});
       control.append(probeNow);
       vfrag.append(tr);
     }
-    if(!values.length){const tr=document.createElement('tr');const td=cell(tr,t('暂无基线值。可点击「开始探测」手动获取；符合长度策略且模型一致的业务状态也会自动入库。'),'empty');td.colSpan=7;vfrag.append(tr);}
+    if(grouped)for(const [name,entries] of groups){if(!emitted.has(name))appendGroup(name,entries);}
+    if(!values.length&&!grouped){const tr=document.createElement('tr');const td=cell(tr,t('暂无基线值。可点击「开始探测」手动获取；符合长度策略且模型一致的业务状态也会自动入库。'),'empty');td.colSpan=7;vfrag.append(tr);}
     el('probe-values').replaceChildren(vfrag);
+    // Animate only explicit disclosure changes, never polling or language updates.
+    if(animatedModel&&!window.matchMedia('(prefers-reduced-motion: reduce)').matches){
+      for(const row of revealRows)if(typeof row.animate==='function')row.animate([{opacity:.25,transform:'translateY(-3px)'},{opacity:1,transform:'translateY(0)'}],{duration:160,easing:'ease-out'});
+    }
+    if(disclosureToFocus)disclosureToFocus.focus({preventScroll:true});
     renderProbeHistories(probe);
   }
   function renderProbeHistories(probe){
-    for(const id of ['probe-ip-toggle','probe-success-ip-toggle']){
-      const button=el(id),label=egressVisible?'隐藏':'显示',accessible=egressVisible?'隐藏出口 IP':'显示出口 IP';
-      button.textContent=t(label);button.setAttribute('data-i18n',label);
-      button.setAttribute('aria-label',t(accessible));button.setAttribute('data-i18n-aria-label',accessible);
-      button.setAttribute('aria-pressed',String(egressVisible));
-    }
     renderProbeHistory('probe-history',(probe.history||[]).slice(0,50),'暂无探测记录。',probe.accepted_state_lengths);
     const successes=Array.isArray(probe.success_history)?probe.success_history:(probe.history||[]);
     renderProbeHistory('probe-success-history',successes.filter(record=>record.success===true).slice(0,50),'暂无成功记录。',probe.accepted_state_lengths);
@@ -1024,21 +1077,9 @@
     for(const record of history){
       const tr=document.createElement('tr');
       cell(tr,record.time?fmtBeijing(record.time):'—','time');
-      const model=cell(tr,record.model,'model');
+      const model=cell(tr,record.model,'model');if(record.account){const account=document.createElement('div');account.className='sub';account.textContent=accountLabel(record);model.append(account);}
       const egress=cell(tr,record.proxy_label||proxyLabel(record.proxy),'egress-name');
       egress.title=proxyLabel(record.proxy);
-      const address=cell(tr,'','egress-ip');
-      const reported=record.egress_addr&&record.egress_addr!=='0.0.0.0'&&record.egress_addr!=='::';
-      if(!egressVisible){
-        address.textContent='***';address.setAttribute('aria-label',t('出口 IP 已隐藏'));
-      }else if(reported){
-        const ip=document.createElement('code');ip.textContent=record.egress_addr;address.append(ip);
-        const source=document.createElement('div');source.className='sub';source.textContent=t('代理回报 · 未核验');address.append(source);
-        address.title=t('本次 SOCKS5 连接的代理回报地址（BND.ADDR），不保证等于上游看到的公网 IP。');
-      }else{
-        address.textContent=t('未获取');address.classList.add('none');
-        address.title=/^socks5h?:/i.test(record.proxy||'')?t('本次连接未获得可用的代理回报地址，无法判断出口是否轮换。'):t('此连接未提供出口 IP；代理入口地址不能代表实际公网出口。');
-      }
       const result=cell(tr,'');
       const badge=document.createElement('span');badge.className='badge '+(record.success?'probe-ok':'probe-fail');
       badge.textContent=record.success?t('获取成功'):t('失败');result.append(badge);
@@ -1054,7 +1095,7 @@
       }else{detail.textContent=record.error||'—';detail.classList.add('none');}
       hfrag.append(tr);
     }
-    if(!history.length){const tr=document.createElement('tr');const td=cell(tr,t(emptyMessage),'empty');td.colSpan=7;hfrag.append(tr);}
+    if(!history.length){const tr=document.createElement('tr');const td=cell(tr,t(emptyMessage),'empty');td.colSpan=6;hfrag.append(tr);}
     el(target).replaceChildren(hfrag);
   }
   function switchTab(name){
@@ -1087,11 +1128,21 @@
     }finally{loading=false;const key=readManagementKey();el('refresh').disabled=!key||key===rejectedKey;}
   }
   el('refresh').addEventListener('click',refresh);
+  el('account-email-toggle').addEventListener('click',()=>{showAccountEmails=!showAccountEmails;if(lastData)render(lastData);});
   el('reject-toggle').addEventListener('click',async()=>{const button=el('reject-toggle');button.disabled=true;const enable=!button.classList.contains('on');if(await probeControl({action:'reject-degraded',enabled:enable}))refresh();else button.disabled=false;});
   el('round-start').addEventListener('click',async()=>{const button=el('round-start');button.disabled=true;if(await probeControl({action:'start-round'}))refresh();else button.disabled=false;});
   el('round-stop').addEventListener('click',async()=>{const button=el('round-stop');button.disabled=true;if(await probeControl({action:'stop-current'}))refresh();else button.disabled=false;});
   el('all-stop').addEventListener('click',async()=>{const button=el('all-stop');button.disabled=true;if(await probeControl({action:'stop-all'}))refresh();else button.disabled=false;});
   el('pool-reset-all').addEventListener('click',async()=>{const button=el('pool-reset-all');button.disabled=true;if(await probeControl({action:'reset-exit'})){setTimeout(refresh,600);}else button.disabled=false;});
+  el('timezone-input').addEventListener('input',()=>{timezoneDirty=true;setMessage('timezone-feedback',()=>t('尚未保存'));});
+  el('timezone-save').addEventListener('click',async()=>{
+    if(timezoneSaving)return;
+    const timezone=el('timezone-input').value.trim();
+    if(!timezone||timezone==='Local'||timezone.length>128){setMessage('timezone-feedback',()=>t('请输入有效的 IANA 时区名称'));return;}
+    timezoneSaving=true;el('timezone-save').disabled=true;el('timezone-input').disabled=true;
+    if(await probeControl({action:'target-timezone',timezone})){timezoneDirty=false;setMessage('timezone-feedback',()=>t('时区已保存，后续请求生效'));}else{setMessage('timezone-feedback',()=>t('保存失败，请检查 IANA 时区名称；原设置未更改'));}
+    timezoneSaving=false;el('timezone-save').disabled=false;el('timezone-input').disabled=false;refresh();
+  });
   el('prefetch-minutes').addEventListener('input',()=>{prefetchDirty=true;setMessage('prefetch-feedback',()=>t('尚未保存'));});
   el('prefetch-save').addEventListener('click',async()=>{
     if(prefetchSaving)return;
@@ -1148,11 +1199,7 @@
     for(const name of ['label','kind','url','username','password','clear-auth','attempts','multiplier'])el('exit-'+name).disabled=url==='direct'&&['kind','url','username','password','clear-auth'].includes(name);
     exitSaving=false;el('exit-save').disabled=false;el('exit-cancel').disabled=false;el('pool-add').disabled=false;refresh();
   });
-  for(const id of ['probe-ip-toggle','probe-success-ip-toggle'])el(id).addEventListener('click',()=>{
-    egressVisible=!egressVisible;
-    renderProbeHistories(lastData?.turn_state_override?.probe||{});
-    if(lastData)renderPool(lastData.turn_state_override?.probe);
-  });
+
   setupLanguageSync();
   window.addEventListener('storage',event=>{if(event.key===null||['cli-proxy-auth','isLoggedIn','managementKey','apiBase','apiUrl'].includes(event.key))refresh();});
   window.addEventListener('focus',refresh);

@@ -62,7 +62,7 @@ func (e *probeEngine) waitForProbeWake(model string, stop, brake <-chan struct{}
 	for {
 		e.mu.Lock()
 		until := e.cfg.Config.SleepHours.until(time.Now())
-		cancelled := e.paused[model] || e.shuttingDown
+		cancelled := e.targetPausedLocked(model) || e.shuttingDown
 		e.mu.Unlock()
 		if cancelled {
 			return false

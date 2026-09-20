@@ -13,7 +13,7 @@ func TestUsageProxyFailureDoesNotCoolAccount(t *testing.T) {
 	m.observe(r, now)
 	m.observe(r, now.Add(time.Second))
 	e := m.health[accountHealthKey("review-account", "astra")]
-	if !e.CooldownUntil.IsZero() {
+	if e.State != "" {
 		t.Fatalf("proxy-only failures cooled the account: state=%s reason=%s", e.State, e.LastReason)
 	}
 }
@@ -34,7 +34,7 @@ func TestSuccessfulRequestResetsConsecutiveFailures(t *testing.T) {
 	m.observe(routingUsage("review-account", 0, 0, false), now.Add(time.Second))
 	m.observe(routingUsage("review-account", 0, 502, true), now.Add(2*time.Second))
 	e := m.health[accountHealthKey("review-account", "astra")]
-	if !e.CooldownUntil.IsZero() {
+	if e.ConsecutiveFailures != 1 || e.State != "" {
 		t.Fatalf("nonconsecutive failures cooled account: failures=%d", e.ConsecutiveFailures)
 	}
 }
@@ -74,7 +74,7 @@ func TestUsageTransportAndRateLimitDoNotPenalizeAccount(t *testing.T) {
 		m.observe(r, now.Add(time.Second))
 		m.observe(r, now.Add(2*time.Second))
 		e := m.health[accountHealthKey("test-account", "astra")]
-		if e.State != "healthy" || e.ConsecutiveFailures != 0 || !e.CooldownUntil.IsZero() || !e.HealthyAt.Equal(now) {
+		if e.State != "healthy" || e.ConsecutiveFailures != 0 || !e.HealthyAt.Equal(now) {
 			t.Fatalf("transport/rate limit polluted health for status %d", tc.status)
 		}
 	}

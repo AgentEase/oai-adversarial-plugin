@@ -128,7 +128,12 @@ func configureTurnStateOverride(configYAML []byte) error {
 	// the baseline even with the probe track disabled. Until then, do not inject.
 	_ = configureProbeTrack(config.Probe)
 	// Publish only after the complete rewrite configuration passed validation.
+	probeTrack.mu.Lock()
+	if override := probeTrack.settings.Timezone; override != nil && validateTargetTimezone(*override) == nil {
+		zone = *override
+	}
 	configuredTimezone.Store(zone)
+	probeTrack.mu.Unlock()
 	lengths := config.AcceptedStateLengths
 	if lengths == nil {
 		lengths = []int{292, 332}
@@ -154,9 +159,9 @@ func turnStateOverrideMatches(config turnStateOverrideConfig, models ...string) 
 		if candidate == "" {
 			continue
 		}
-		lowerCandidate := strings.ToLower(candidate)
+		lowerCandidate := strings.ToLower(targetModel(candidate))
 		for _, target := range config.Models {
-			if strings.HasPrefix(lowerCandidate, strings.ToLower(target)) {
+			if strings.HasPrefix(lowerCandidate, strings.ToLower(targetModel(target))) {
 				return true
 			}
 		}
@@ -209,6 +214,9 @@ func applyTurnStateOverride(model, requestedModel string, headers http.Header) (
 	existing := headerValue(headers, turnStateHeader)
 	keepExisting := existing != "" && isAcceptedStateLength(len(existing)) && !state.Config.Force
 	if baseline == "" {
+		if scope, _ := splitTarget(model); scope != "" {
+			return nil, "account-baseline-unavailable"
+		}
 		if !state.Config.Enabled || state.Config.Value == "" {
 			return nil, ""
 		}
@@ -267,9 +275,9 @@ func repairTurnStateHeader(model, requestedModel, observedModel, state string) h
 // turnStateModelMatched reports whether a single candidate model name is
 // targeted by the static rewrite list (case-insensitive prefix).
 func turnStateModelMatched(config turnStateOverrideConfig, candidate string) bool {
-	lower := strings.ToLower(candidate)
+	lower := strings.ToLower(targetModel(candidate))
 	for _, target := range config.Models {
-		if strings.HasPrefix(lower, strings.ToLower(target)) {
+		if strings.HasPrefix(lower, strings.ToLower(targetModel(target))) {
 			return true
 		}
 	}
@@ -305,11 +313,13 @@ func interceptNonStreamingResponse(raw []byte) (responseInterceptOutput, error) 
 		history.observeModel(req.RequestID, "", model)
 	}
 	history.observeTurnState(req.RequestID, state, "response")
-	observeBusinessStateForRequest(req.Model, req.RequestedModel, state, upstream)
+	scope := responseMetadataAccount(req.RequestID, req.Metadata)
+	observeScopedBusiness(scope, req.Model, req.RequestedModel, state, upstream)
 	out := responseInterceptOutput{}
-	if headers := repairTurnStateHeader(req.Model, req.RequestedModel, upstream, state); headers != nil {
+	if headers := repairScopedHeader(scope, req.Model, req.RequestedModel, upstream, state); headers != nil {
 		out.Headers = headers
 	}
+	history.observeResponseTicket(req.RequestID, scope, state, out.Headers)
 	return out, nil
 }
 
@@ -331,13 +341,40 @@ func interceptStreamChunk(raw []byte) (responseInterceptOutput, error) {
 	state := headerValue(req.ResponseHeaders, turnStateHeader)
 	history.observeTurnState(req.RequestID, state, "stream")
 	if upstream != "" || state != "" {
-		observeBusinessStateForRequest(req.Model, req.RequestedModel, state, upstream)
+		observeScopedBusiness(responseMetadataAccount(req.RequestID, req.Metadata), req.Model, req.RequestedModel, state, upstream)
 	}
 	out := responseInterceptOutput{}
-	if headers := repairTurnStateHeader(req.Model, req.RequestedModel, upstream, state); headers != nil {
+	if headers := repairScopedHeader(responseMetadataAccount(req.RequestID, req.Metadata), req.Model, req.RequestedModel, upstream, state); headers != nil {
 		out.Headers = headers
 	}
+	history.observeResponseTicket(req.RequestID, responseMetadataAccount(req.RequestID, req.Metadata), state, out.Headers)
 	return out, nil
+}
+
+// Record the response header decision independently of the request injection.
+// Later stream chunks may repeat already-repaired headers; keep the actual
+// replacement evidence until the next request attempt resets it.
+func (s *auditState) observeResponseTicket(requestID, scope, value string, replacement http.Header) {
+	length := len(strings.TrimSpace(value))
+	if requestID == "" || length == 0 {
+		return
+	}
+	injected := len(headerValue(replacement, turnStateHeader))
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.records {
+		r := &s.records[i]
+		if r.RequestID != requestID || r.AccountScope != scope {
+			continue
+		}
+		if r.TurnStateResponseInjectedLength > 0 && injected == 0 {
+			return
+		}
+		r.TurnStateResponseOriginalLength = &length
+		r.TurnStateResponseInjectedLength = injected
+		markStateDirty()
+		return
+	}
 }
 
 // observeWebSocketEvent observes upstream websocket response events (the Codex
@@ -350,7 +387,7 @@ func observeWebSocketEvent(raw []byte) (struct{}, error) {
 	}
 	if model, ok := probeUpstreamModel(event.Payload); ok {
 		history.observeModel(event.RequestID, event.TraceID, model)
-		observeBusinessStateForRequest(event.Model, event.RequestedModel, "", model)
+		observeScopedBusiness(responseAccount(event.RequestID, event.AuthID), event.Model, event.RequestedModel, "", model)
 	}
 	return struct{}{}, nil
 }
@@ -362,7 +399,7 @@ func degradationDetectionEnabled(model, requestedModel string) bool {
 	if strings.TrimSpace(requestedModel) != "" {
 		model = requestedModel
 	}
-	model = strings.ToLower(strings.TrimSpace(model))
+	model = strings.ToLower(strings.TrimSpace(targetModel(model)))
 	if model == "luna" || model == "terra" {
 		return false
 	}

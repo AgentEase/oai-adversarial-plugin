@@ -28,6 +28,8 @@ type Ticket struct {
 }
 
 type Model struct {
+	AccountsTotal   int     `json:"accounts_total,omitempty"`
+	AccountsReady   int     `json:"accounts_ready,omitempty"`
 	Name            string  `json:"name"`
 	Detection       bool    `json:"detection"`
 	Activity        string  `json:"activity"`
@@ -111,6 +113,9 @@ func (e Event) Validate() error {
 	}
 	seen := map[string]bool{}
 	for _, m := range s.Models {
+		if m.AccountsTotal < 0 || m.AccountsReady < 0 || m.AccountsReady > m.AccountsTotal {
+			return bad
+		}
 		if !modelName.MatchString(m.Name) || seen[m.Name] || m.FailureAttempts < 0 || !oneOf(m.Activity, "unchecked", "stopping", "queued", "probing", "paused", "unavailable", "halted", "standby", "manual", "sleeping") || !oneOf(m.Evidence, "none", "business", "failed", "suspect") {
 			return bad
 		}

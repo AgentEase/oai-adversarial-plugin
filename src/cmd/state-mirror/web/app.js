@@ -2,6 +2,7 @@
 (() => {
   'use strict';
   const messages={
+    accounts:['账号基线：{ready} / {total} 可用','Account baselines: {ready} / {total} ready','帳號基線：{ready} / {total} 可用','Базовые значения аккаунтов: {ready} / {total}'],
     sleeping:['休眠中','Sleeping','休眠中','Спящий режим'],
     sleepOff:['不休眠','Sleep disabled','不休眠','Сон отключён'],
     sleepHours:['休眠 {start}～{end}（UTC+8）','Sleep {start}–{end} (UTC+8)','休眠 {start}～{end}（UTC+8）','Сон {start}–{end} (UTC+8)'],
@@ -70,6 +71,7 @@
       const tr=document.createElement('tr');const name=cell(tr,'');textNode(name,model.name,'model');
       if(!model.detection){for(let i=0;i<4;i++)cell(tr,'—','muted');badge(cell(tr,''),t('unchecked'));rows.append(tr);continue;}
       textNode(name,t(model.activity));
+      if(model.accounts_total>1)textNode(name,t('accounts',{ready:model.accounts_ready,total:model.accounts_total}));
       const ticket=model.active,length=cell(tr,'');if(ticket?.length)badge(length,ticket.length+' B',ticket.valid?'ok':'warn');else length.textContent='—';
       cell(tr,ticket?t(ticket.source==='business'?'businessSource':ticket.source):'—');
       for(const field of ['issued_at','expires_at']){const td=cell(tr,formatTime(ticket?.[field]),'time');if(model.candidate)textNode(td,t('prepared',{time:formatTime(model.candidate[field])}),'candidate');}

@@ -23,6 +23,7 @@ const maxExitAttempts = 1000000
 // Confirmed changes are durable before they become visible to the worker.
 type runtimeSettings struct {
 	Version         int              `json:"version"`
+	Timezone        *string          `json:"timezone,omitempty"`
 	PrefetchMinutes *int             `json:"prefetch_minutes,omitempty"`
 	IntervalSeconds *int             `json:"interval_seconds,omitempty"`
 	SleepHours      *probeSleepHours `json:"sleep_hours,omitempty"`
@@ -139,6 +140,11 @@ func normalizeExitURL(input, previous string, edit exitEdit) (string, error) {
 // Copies all mutable routing maps: in-flight requests may retain older cfgs.
 func applyRuntimeSettings(base probeConfig, settings runtimeSettings) (probeConfig, error) {
 	cfg := base
+	if settings.Timezone != nil {
+		if err := validateTargetTimezone(*settings.Timezone); err != nil {
+			return cfg, err
+		}
+	}
 	cfg.Proxies = append([]string(nil), base.Proxies...)
 	cfg.ProxyPools = make(map[string]bool)
 	cfg.ProxyLabels = make(map[string]string)
@@ -313,10 +319,32 @@ func (e *probeEngine) saveSettingsLocked(settings runtimeSettings) error {
 		}
 	}
 	e.settings = settings
+	if settings.Timezone != nil {
+		configuredTimezone.Store(*settings.Timezone)
+	}
 	e.cfg = probeConfigState{Config: cfg, Error: base.Error}
 	e.configRevision++
 	markStateDirty()
 	return nil
+}
+
+func validateTargetTimezone(zone string) error {
+	if zone == "" || zone == "Local" || len(zone) > 128 {
+		return errors.New("请输入有效的 IANA 时区名称")
+	}
+	if _, err := time.LoadLocation(zone); err != nil {
+		return errors.New("请输入有效的 IANA 时区名称")
+	}
+	return nil
+}
+
+func (e *probeEngine) setTargetTimezone(zone string) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	zone = strings.TrimSpace(zone)
+	settings := e.settings
+	settings.Timezone = &zone
+	return e.saveSettingsLocked(settings)
 }
 
 func (e *probeEngine) setPrefetchMinutes(minutes int) error {

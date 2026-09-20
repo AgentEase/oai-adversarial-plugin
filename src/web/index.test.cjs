@@ -24,6 +24,7 @@ class Element {
   getAttribute(name){return this.attributes[name]??null;}
   scrollIntoView(){}
   focus(){this.focused=true;}
+  animate(frames,options){this.animation={frames,options};}
 }
 
 function panel(options={}) {
@@ -44,7 +45,7 @@ function panel(options={}) {
   const media={matches:!!options.darkSystem,addEventListener:(name,fn)=>{mediaEvents[name]=fn;}};
   const observers=[];
   const notify=attr=>{for(const observer of observers)if(observer.filter.includes(attr))observer.fn();};
-  const win={addEventListener:(name,fn)=>{(windowEvents[name]??=[]).push(fn);},matchMedia:()=>media};
+  const win={addEventListener:(name,fn)=>{(windowEvents[name]??=[]).push(fn);},matchMedia:query=>query.includes('prefers-reduced-motion')?{matches:!!options.reducedMotion}:media};
   win.parent=options.embedded?{document:{documentElement:host},getComputedStyle:()=>({getPropertyValue:name=>options.hostTokens?.[name]||''})}:win;
   if(options.crossOrigin)Object.defineProperty(win,'parent',{get(){throw new Error('cross origin');}});
   const context=vm.createContext({
@@ -201,9 +202,9 @@ test('proxy editing retains authentication by omission and uses stable IDs',asyn
   p.renderPool({proxies_state:[item]});
   const row=p.get('pool-rows').children[0];
   assert.match(row.children[0].children[2].textContent,/3 × 1 = 3/);
-  await row.children[0].children[3].children[1].events.click();
+  await row.children[0].children[4].children[1].events.click();
   assert.equal(p.actions[0].id,'exit-test');assert.equal(p.actions[0].proxy,undefined);
-  row.children[0].children[3].children[0].events.click();
+  row.children[0].children[4].children[0].events.click();
   assert.equal(p.get('exit-password').value,'');assert.equal(p.get('exit-username').value,'');
   assert.match(p.get('exit-auth-note').textContent,/已配置认证/);
   p.get('exit-multiplier').value='2';await p.get('exit-save').events.click();
@@ -328,7 +329,7 @@ test('proxy list preserves long details, visible actions and disabled versus coo
   assert.equal(p.get('pool-cooling').textContent,'1');
   const first=p.get('pool-rows').children[0];
   assert.match(first.textContent,new RegExp(error));
-  const ops=first.children[0].children[3];
+  const ops=first.children[0].children[4];
   assert.deepEqual(ops.children.map(button=>button.textContent),['编辑','启用','重置']);
   ops.children[0].events.click();assert.equal(p.get('exit-label').focused,true);
   await ops.children[2].events.click();
@@ -412,7 +413,6 @@ test('translation catalogs cover static UI and retain every interpolation parame
 
 test('probe history uses supplied exit names as text and keeps safe address fallback',()=>{
   const p=panel({storedLanguage:'en'});
-  p.get('probe-ip-toggle').events.click();
   p.render(fixture({history:[
     {proxy:'socks5h://192.0.2.1:1080',proxy_label:'自定义出口 <img src=x>',egress_addr:'2001:db8::1',success:true,state_length:292},
     {proxy:'socks5h://192.0.2.1:1080',proxy_label:'另一个账号',success:false},
@@ -422,8 +422,8 @@ test('probe history uses supplied exit names as text and keeps safe address fall
   const rows=p.get('probe-history').children;
   assert.match(rows[0].children[2].textContent,/自定义出口 <img src=x>/);
   assert.equal(rows[0].children[2].title,'socks5h://192.0.2.1:1080');
-  assert.match(rows[0].children[3].textContent,/2001:db8::1/);
-  assert.match(rows[0].children[3].textContent,/Proxy-reported · Unverified/);
+  assert.equal(rows[0].children.length,6);
+  assert.doesNotMatch(JSON.stringify(rows),/2001:db8::1/);
   assert.equal(rows[1].children[2].textContent,'另一个账号');
   assert.equal(rows[2].children[2].textContent,'Direct');
   assert.equal(rows[3].children[2].textContent,'http://192.0.2.2:8080');
@@ -502,94 +502,48 @@ test('history panels preserve independent open states through refresh and all lo
 });
 
 
-test('both histories show connection-reported IPs and explicitly disclose unavailable exits',()=>{
+test('both histories omit reported addresses and visibility controls in every language',()=>{
   const p=panel();
-  p.get('probe-ip-toggle').events.click();
-  const records=[
-    {proxy:'socks5h://192.0.2.1:1080',proxy_label:'聚合池',egress_addr:'2001:db8::10',success:true},
-    {proxy:'socks5h://192.0.2.1:1080',proxy_label:'聚合池',egress_addr:'2001:db8::11',success:true},
-    {proxy:'socks5h://192.0.2.1:1080',egress_addr:'0.0.0.0',success:true},
-    {proxy:'socks5://192.0.2.1:1080',egress_addr:'::',success:true},
-    {proxy:'http://192.0.2.2:8080',success:true},
-    {proxy:'direct',success:true},
-    {proxy:'socks5h://192.0.2.1:1080',egress_addr:'<img src=x>',success:true}
-  ];
-  const data={records:[],turn_state_override:{probe:fixture({history:records,success_history:records})}};
-  p.renderData(data);
-  for(const id of ['probe-history','probe-success-history']){
-    const rows=p.get(id).children;
-    assert.equal(rows[0].children.length,7);
-    assert.equal(rows[0].children[2].textContent,'聚合池');
-    assert.match(rows[0].children[3].textContent,/2001:db8::10.*未核验/);
-    assert.match(rows[1].children[3].textContent,/2001:db8::11/);
-    assert.match(rows[0].children[3].title,/不保证等于上游/);
-    for(const row of rows.slice(2,6))assert.equal(row.children[3].textContent,'未获取');
-    assert.match(rows[2].children[3].title,/无法判断/);
-    assert.match(rows[4].children[3].title,/入口地址不能代表/);
-    assert.equal(rows[6].children[3].children[0].textContent,'<img src=x>');
-  }
-  for(const [locale,word] of [['en','Unavailable'],['zh-TW','未取得'],['ru','Нет данных']]){
-    p.changeLanguage(locale);
-    assert.equal(p.get('probe-history').children[4].children[3].textContent,word);
-  }
-  p.render(fixture());
-  assert.equal(p.get('probe-history').children[0].children[0].colSpan,7);
-  assert.equal(p.get('probe-success-history').children[0].children[0].colSpan,7);
-});
-
-
-test('egress visibility masks both lists and survives polling and language changes',async()=>{
-  const p=panel();
-  const record={model:'gpt-6-astra',proxy:'direct',egress_addr:'203.0.113.42',success:true};
+  const record={proxy:'direct',proxy_label:'自定义出口',egress_addr:'203.0.113.42',success:true,state_length:292};
   const data={records:[],turn_state_override:{probe:fixture({history:[record],success_history:[record]})}};
   p.renderData(data);
-  const addresses=()=>['probe-history','probe-success-history'].map(id=>p.get(id).children[0].children[3]);
-  for(const cell of addresses()){
-    assert.equal(cell.textContent,'***');
-    assert.doesNotMatch(JSON.stringify(cell),/203\.0\.113\.42/);
+  for(const locale of ['zh-CN','en','zh-TW','ru']){
+    p.changeLanguage(locale);p.renderData(data);
+    for(const id of ['probe-history','probe-success-history']){
+      const row=p.get(id).children[0];
+      assert.equal(row.children.length,6);
+      assert.equal(row.children[2].textContent,'自定义出口');
+      assert.doesNotMatch(JSON.stringify(row),/203\.0\.113\.42/);
+    }
   }
-  p.get('probe-history-panel').open=true;
-  p.get('probe-ip-toggle').events.click();
-  for(const cell of addresses())assert.match(cell.textContent,/203\.0\.113\.42/);
-  assert.equal(p.get('probe-success-ip-toggle').getAttribute('aria-pressed'),'true');
-  p.renderData(data);p.changeLanguage('en');
-  assert.equal(p.get('probe-ip-toggle').textContent,'Hide');
-  assert.equal(p.get('probe-history-panel').open,true);
-  for(const cell of addresses())assert.match(cell.textContent,/203\.0\.113\.42/);
-  p.get('probe-success-ip-toggle').events.click();
-  p.renderData(data);p.changeLanguage('ru');
-  for(const cell of addresses())assert.equal(cell.textContent,'***');
-  assert.equal(p.get('probe-ip-toggle').textContent,'Показать');
-  assert.equal(p.get('probe-success-ip-toggle').getAttribute('aria-pressed'),'false');
-  assert.equal(p.actions.length,0);
-  p.get('probe-ip-toggle').events.click();
-  await p.get('refresh').events.click();
-  p.renderData(data);
-  for(const cell of addresses())assert.equal(cell.textContent,'***');
+  assert.doesNotMatch(fs.readFileSync(__dirname+'/index.html','utf8'),/egressVisible|ip-toggle|egress-ip|代理回报地址/);
+  p.render(fixture());
+  for(const id of ['probe-history','probe-success-history'])assert.equal(p.get(id).children[0].children[0].colSpan,6);
 });
 
-
-test('hidden history addresses mask missing and zero values until explicitly shown',()=>{
+test('pool shows independent cumulative counts and a localized counting start',()=>{
   const p=panel();
-  const records=['203.0.113.42',undefined,'','0.0.0.0','::'].map(egress_addr=>({proxy:'socks5h://192.0.2.1:1080',egress_addr,success:true}));
-  const data={records:[],turn_state_override:{probe:fixture({history:records,success_history:records})}};
-  const lists=()=>['probe-history','probe-success-history'].map(id=>p.get(id).children.map(row=>row.children[3]));
-  const assertHidden=()=>{
-    for(const cells of lists())for(const cell of cells){
-      assert.equal(cell.textContent,'***');
-      assert.ok(!cell.title);
-      assert.equal(cell.children.length,0);
-      assert.doesNotMatch(JSON.stringify(cell),/203\.0\.113\.42|未获取/);
-    }
-  };
-  p.renderData(data);assertHidden();
-  p.get('probe-ip-toggle').events.click();
-  for(const cells of lists()){
-    assert.match(cells[0].textContent,/203\.0\.113\.42/);
-    for(const cell of cells.slice(1))assert.equal(cell.textContent,'未获取');
+  const probe=fixture({exit_success_since:'2026-09-20T01:00:00Z',proxies_state:[
+    {id:'a',proxy:'direct',success_count:'0'},
+    {id:'b',proxy:'http://192.0.2.1:80',success_count:'9007199254740993',disabled:true},
+    {id:'legacy',proxy:'http://192.0.2.2:80'}
+  ],success_history:[]});
+  const data={records:[],turn_state_override:{probe}};
+  p.renderData(data);
+  for(const [locale,label] of [['zh-CN','累计成功'],['en','Cumulative successes'],['zh-TW','累計成功'],['ru','Успешных проверок']]){
+    p.changeLanguage(locale);p.renderData(data);
+    const rows=p.get('pool-rows').children;
+    assert.equal(rows[0].children[0].children[3].children[0].textContent,label);
+    assert.match(rows[0].children[0].children[3].textContent,/0/);
+    assert.equal(rows[0].children[0].children[3].children[1].className,'badge state-ok');
+    assert.match(rows[1].children[0].children[3].textContent,/9007199254740993/);
+    assert.equal(rows[1].children[0].children[3].children[1].className,'badge state-ok');
+    assert.equal(rows[2].children[0].children[3].children[1].textContent,'—');
+    assert.equal(rows[2].children[0].children[3].children[1].className,'badge state-off');
+    assert.match(p.get('pool-note').textContent,/09:00:00/);
+    assert.match(p.get('pool-note').textContent,/2026/);
+    assert.equal(rows[0].children[0].children[4].children.length,3);
   }
-  p.get('probe-success-ip-toggle').events.click();
-  p.renderData(data);p.changeLanguage('en');assertHidden();
 });
 
 test('sleep settings preserve drafts, validate hours and keep failed saves editable',async()=>{
@@ -712,20 +666,193 @@ test('configured lengths drive baseline and history badges',()=>{
   p.render(probe);
   assert.equal(p.get('probe-values').children[0].children[1].children[0].className,'badge state-ok');
   const rows=p.get('probe-history').children;
-  assert.equal(rows[0].children[6].children[0].className,'badge state-ok');
-  assert.equal(rows[1].children[6].children[0].className,'badge state-warn');
+  assert.equal(rows[0].children[5].children[0].className,'badge state-ok');
+  assert.equal(rows[1].children[5].children[0].className,'badge state-warn');
   assert.match(p.get('probe-values').textContent,/剩余/);
 });
 
-test('account routing status follows all CPA languages and preserves user text',()=>{
+test('same-model account rows retain separate activity, evidence and actions',async()=>{
+  const p=panel();p.setResult(false);
+  const value=fixture().values[0];
+  p.render(fixture({account_binding_ready:true,values:[
+    {...value,target:'account-A/astra',account:'auth-fixture-A',account_available:true},
+    {...value,target:'account-B/astra',account:'auth-fixture-B',account_available:true}
+  ],paused:['account-A/astra'],business:[{model:'account-A/astra',reason:'fixture-only'}]}));
+  const [a,b]=p.get('probe-values').children.filter(row=>row.classList.contains('account-detail'));
+  assert.match(a.children[0].textContent,/\*\*\*/);
+  assert.doesNotMatch(b.children[0].textContent,/auth-fixture-B/);
+  assert.equal(a.classList.contains('paused-row'),true);
+  assert.equal(b.classList.contains('paused-row'),false);
+  assert.match(a.textContent,/业务确认/);
+  assert.doesNotMatch(b.textContent,/业务确认/);
+  await b.children[6].children[1].events.click();
+  assert.deepEqual(JSON.parse(JSON.stringify(p.actions.pop())),{model:value.model,target:'account-B/astra',action:'probe-model'});
+  await a.children[6].children[0].events.click();
+  assert.deepEqual(JSON.parse(JSON.stringify(p.actions.pop())),{model:value.model,target:'account-A/astra',action:'resume'});
+});
+
+test('missing account binding and removed account rows cannot start probes',()=>{
   const p=panel();
-  const data={records:[],turn_state_override:{probe:fixture()},account_routing:{enabled:true,accounts:[{
-    account:'auth-test-account',model:'astra',state:'healthy',last_state_length:308,observed_at:new Date().toISOString()}]}};
+  p.render(fixture({account_binding_ready:false}));
+  assert.equal(p.get('round-start').disabled,true);
+  assert.match(p.get('probe-times').textContent,/账号绑定不可用/);
+  p.render(fixture({account_binding_ready:true,values:[{...fixture().values[0],target:'removed/astra',account:'removed',account_available:false}]}));
+  assert.equal(p.get('probe-values').children.find(row=>row.classList.contains('account-detail')).children[6].children[1].disabled,true);
+});
+
+test('model groups aggregate availability and keep independent expansion across refresh and language',()=>{
+  const p=panel(),base=fixture().values[0];
+  const values=[
+    {...base,model:'astra',target:'A/astra',account:'auth-A',account_email:'a@example.test',account_available:true},
+    {...base,model:'astra',target:'B/astra',account:'auth-B',account_email:'b@example.test',valid:false,account_available:true},
+    {...base,model:'sol',target:'A/sol',account:'auth-A',valid:false,account_available:true}
+  ];
+  const probe=fixture({models:['astra','sol'],values});
+  p.render(probe);
+  let rows=p.get('probe-values').children;
+  assert.equal(rows[0].children[0].children[0].children[1].children[0].textContent,'可用');
+  assert.equal(rows[3].children[0].children[0].children[1].children[0].textContent,'不可用');
+  assert.equal(rows[1].classList.contains('hidden'),true);
+  rows[0].children[0].children[0].children[0].events.click();
+  p.render(probe);
+  rows=p.get('probe-values').children;
+  assert.equal(rows[1].classList.contains('hidden'),false);
+  assert.equal(rows[4].classList.contains('hidden'),true);
+  assert.equal(rows[0].children[0].children[0].children[0].getAttribute('aria-expanded'),'true');
+  p.renderData({records:[],turn_state_override:{probe}});p.changeLanguage('en');
+  rows=p.get('probe-values').children;
+  assert.equal(rows[0].children[0].children[0].children[1].children[0].textContent,'Available');
+  assert.equal(rows[1].classList.contains('hidden'),false);
+  p.render({...probe,values:values.map(e=>({...e,remaining_seconds:-1,expired:true}))});
+  assert.equal(p.get('probe-values').children[0].children[0].children[0].children[1].children[0].textContent,'Unavailable');
+});
+
+test('email visibility applies to baseline and history without exposing auth hashes',()=>{
+  const p=panel(),entry={...fixture().values[0],target:'A/astra',account:'auth-private',account_email:'a@example.test'};
+  const data={records:[{time:new Date().toISOString(),model:'gpt-6-astra',account:'auth-private',account_email:'a@example.test'}],turn_state_override:{probe:fixture({values:[entry],history:[{model:'gpt-6-astra',account:'auth-private',account_email:'a@example.test',success:true,state_length:292}]})}};
   p.renderData(data);
-  for(const [locale,label] of [['en','Healthy'],['zh-TW','健康'],['ru','Исправен'],['zh-CN','健康']]){
-    p.changeLanguage(locale);
-    assert.match(p.get('account-routing-rows').textContent,new RegExp(label));
-    assert.match(p.get('account-routing-rows').textContent,/auth-test-account/);
-    if(locale==='en')assert.match(p.get('account-routing-note').textContent,/Routing enabled/);
+  assert.equal(p.get('account-email-toggle').textContent,'邮箱显示：已关闭');
+  assert.equal(p.get('account-email-toggle').classList.contains('on'),false);
+  for(const id of ['probe-values','rows','probe-history']){assert.doesNotMatch(p.get(id).textContent,/a@example|auth-private/);assert.match(p.get(id).textContent,/\*\*\*/);}
+  p.get('account-email-toggle').events.click();
+  assert.equal(p.get('account-email-toggle').textContent,'邮箱显示：已开启');
+  assert.equal(p.get('account-email-toggle').classList.contains('on'),true);
+  for(const id of ['probe-values','rows','probe-history'])assert.match(p.get(id).textContent,/a@example\.test/);
+  p.changeLanguage('ru');p.renderData(data);
+  assert.match(p.get('probe-values').textContent,/a@example\.test/);
+  p.get('account-email-toggle').events.click();
+  assert.doesNotMatch(p.get('probe-values').textContent,/a@example/);
+  assert.equal(p.get('account-email-toggle').getAttribute('aria-pressed'),'false');
+  const html=fs.readFileSync(__dirname+'/index.html','utf8');
+  assert.doesNotMatch(html,/id="account-routing-panel"|id="cooldown-toggle"/);
+});
+
+test('collapsed model shows one newest ticket with its own account metadata',()=>{
+  const p=panel(),base=fixture().values[0];
+  const older=new Date(Date.now()-600000).toISOString(),newer=new Date(Date.now()-60000).toISOString();
+  const entries=[{...base,issued_at:older,target:'A/astra',account:'a',account_email:'a@example.test'},
+    {...base,issued_at:older,target:'B/astra',account:'b',account_email:'b@example.test',candidate:{value_length:332,issued_at:newer,expires_at:base.expires_at,remaining_seconds:200,source:'probe'}}];
+  const data={records:[],turn_state_override:{probe:fixture({values:entries})}};
+  p.renderData(data);
+  const row=p.get('probe-values').children[0];
+  assert.equal(row.children.length,7);
+  assert.equal(row.children[1].textContent,'332 字节');
+  assert.match(row.children[2].textContent,/最新票据 · 预备/);
+  assert.doesNotMatch(JSON.stringify(row),/b@example/);
+  assert.equal(p.get('probe-values').children[1].classList.contains('hidden'),true);
+  p.get('account-email-toggle').events.click();
+  assert.match(p.get('probe-values').children[0].children[2].textContent,/b@example/);
+  assert.doesNotMatch(p.get('probe-values').children[0].children[2].textContent,/a@example/);
+});
+
+test('overwritten requests show original to injected lengths including zero and unknown',()=>{
+  const p=panel();
+  const records=[356,0,undefined].map(turn_state_original_length=>({time:new Date().toISOString(),turn_state_original_length,turn_state_length:332,turn_state_injected_length:292,turn_state_override:'applied'}));
+  p.renderData({records,turn_state_override:{probe:fixture()}});
+  const rows=p.get('rows').children;
+  assert.match(rows[0].textContent,/请求：收到 356 字节 → 注入 292 字节/);
+  assert.match(rows[1].textContent,/请求：未携带 → 注入 292 字节/);
+  assert.match(rows[2].textContent,/原始长度未知 → 注入 292 字节/);
+  assert.doesNotMatch(rows[0].textContent,/332/);
+  p.changeLanguage('en');assert.match(p.get('rows').children[0].textContent,/Request: Received 356 bytes → Injected 292 bytes/);
+});
+
+test('request and response injection lengths remain separate in all locales',()=>{
+  const p=panel(),base={time:new Date().toISOString(),turn_state_original_length:0,turn_state_injected_length:292,turn_state_override:'applied'};
+  const records=[{...base,turn_state_response_original_length:312,turn_state_response_injected_length:292,turn_state_length:292,turn_state_source:'stream'},
+    {...base,turn_state_length:332,turn_state_source:'stream'}, {...base,turn_state_length:356,turn_state_source:'request'}];
+  p.renderData({records,turn_state_override:{probe:fixture()}});
+  for(const lang of ['zh-CN','en','zh-TW','ru']){
+    p.changeLanguage(lang);
+    const rows=p.get('rows').children;
+    assert.equal((rows[0].textContent.match(/→/g)||[]).length,2);
+    assert.match(rows[0].textContent,/312/);
+    assert.equal((rows[1].textContent.match(/→/g)||[]).length,1);
+    assert.match(rows[1].textContent,/332/);
+    assert.doesNotMatch(rows[2].textContent,/356/);
   }
+  p.changeLanguage('zh-CN');
+  assert.match(p.get('rows').children[0].textContent,/响应：收到 312 字节 → 注入 292 字节/);
+  assert.match(p.get('rows').children[2].textContent,/响应：未观测/);
+  assert.doesNotMatch(p.get('rows').textContent,/回灌/);
+});
+
+test('missing request tickets are not labelled overwritten and response evidence remains visible',()=>{
+  const p=panel();
+  const records=[0,312].map(turn_state_length=>({time:new Date().toISOString(),turn_state_original_length:0,turn_state_override:'skipped-missing',turn_state_length,turn_state_source:turn_state_length?'response':''}));
+  const data={records,turn_state_override:{probe:fixture()}};
+  p.renderData(data);
+  for(const [locale,label] of [['zh-CN','请求未携带票据，未覆写'],['en','No request ticket; not overwritten'],['zh-TW','請求未攜帶票據，未覆寫'],['ru','В запросе нет билета; без перезаписи']]){
+    p.changeLanguage(locale);p.renderData(data);
+    const rows=p.get('rows').children;
+    for(const row of rows){assert.ok(row.textContent.includes(label));assert.doesNotMatch(row.textContent,/→/);}
+    assert.match(rows[1].textContent,/312/);
+  }
+});
+
+test('timezone editing keeps drafts through polling and locale changes and confirms explicitly',async()=>{
+  const p=panel(),data={target:'America/Los_Angeles',records:[],turn_state_override:{probe:fixture()}};
+  p.renderData(data);assert.equal(p.get('timezone-input').value,data.target);
+  p.get('timezone-input').value='Asia/Tokyo';p.get('timezone-input').events.input();
+  p.changeLanguage('en');p.renderData(data);
+  assert.equal(p.get('timezone-input').value,'Asia/Tokyo');assert.equal(p.actions.length,0);
+  await p.get('timezone-save').events.click();
+  assert.deepEqual(JSON.parse(JSON.stringify(p.actions[0])),{action:'target-timezone',timezone:'Asia/Tokyo'});
+  assert.equal(p.get('timezone-input').value,'Asia/Tokyo');assert.match(p.get('timezone-feedback').textContent,/Save failed/);
+  p.get('timezone-input').value='';await p.get('timezone-save').events.click();assert.equal(p.actions.length,1);
+  p.get('timezone-input').value='UTC';p.setResult(true);await p.get('timezone-save').events.click();
+  assert.match(p.get('timezone-feedback').textContent,/Timezone saved/);
+  p.renderData({...data,target:'UTC'});assert.equal(p.get('timezone-input').value,'UTC');
+});
+
+test('model disclosure hides outer ticket details and restores policy-colored length when collapsed',()=>{
+  const p=panel(),base=fixture().values[0];
+  const probe=fixture({accepted_state_lengths:[308],values:[{...base,value_length:308,target:'A/astra',account:'A'}]});
+  p.render(probe);
+  const rows=()=>p.get('probe-values').children;
+  assert.equal(rows()[0].children[1].children[0].className,'badge state-ok');
+  assert.match(rows()[0].children[0].textContent,/1\/1 账号可用/);
+  rows()[0].children[0].children[0].children[0].events.click();
+  assert.ok(rows()[0].children.slice(1).every(cell=>cell.textContent===''));
+  assert.equal(rows()[1].classList.contains('hidden'),false);
+  assert.equal(rows()[1].animation.options.duration,160);
+  assert.equal(rows()[0].children[0].children[0].children[0].focused,true);
+  p.render(probe);
+  assert.ok(rows()[0].children.slice(1).every(cell=>cell.textContent===''));
+  assert.equal(rows()[1].animation,undefined); // Polling does not replay motion.
+  rows()[0].children[0].children[0].children[0].events.click();
+  assert.equal(rows()[0].children[1].children[0].className,'badge state-ok');
+  assert.equal(rows()[0].animation.options.duration,160);
+  assert.equal(rows()[1].classList.contains('hidden'),true);
+  p.render({...probe,accepted_state_lengths:[292]});
+  assert.equal(rows()[0].children[1].children[0].className,'badge state-warn');
+});
+
+test('reduced motion skips model disclosure animations without changing expansion',()=>{
+  const p=panel({reducedMotion:true});
+  p.render(fixture({values:[{...fixture().values[0],target:'A/astra',account:'A'}]}));
+  p.get('probe-values').children[0].children[0].children[0].children[0].events.click();
+  const rows=p.get('probe-values').children;
+  assert.equal(rows[1].classList.contains('hidden'),false);
+  assert.equal(rows[1].animation,undefined);
 });

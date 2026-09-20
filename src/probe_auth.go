@@ -9,6 +9,8 @@ import (
 )
 
 type hostAuthEntry struct {
+	Scope          string    `json:"-"`
+	Path           string    `json:"path"`
 	ID             string    `json:"id"`
 	AuthIndex      string    `json:"auth_index"`
 	Name           string    `json:"name"`
@@ -71,12 +73,10 @@ func (e *probeEngine) resolveProbeCredential(cfg probeConfig) (probeCredential, 
 	for _, entry := range eligible[:limit] {
 		raw, err := hostAuthGetFunc(entry.AuthIndex)
 		if err != nil {
-			e.cooldownProbeAccount(entry.AuthIndex, 90*time.Second)
 			continue
 		}
 		var cred probeCredential
 		if json.Unmarshal(raw, &cred) != nil || strings.TrimSpace(cred.AccessToken) == "" {
-			e.cooldownProbeAccount(entry.AuthIndex, cfg.AuthCooldown)
 			continue
 		}
 		cred.AuthIndex = entry.AuthIndex
@@ -90,31 +90,12 @@ func (e *probeEngine) resolveProbeCredential(cfg probeConfig) (probeCredential, 
 
 func (e *probeEngine) eligibleProbeAccounts(entries []hostAuthEntry, now time.Time) []hostAuthEntry {
 	eligible := make([]hostAuthEntry, 0, len(entries))
-	e.mu.Lock()
-	if e.authCooldowns == nil {
-		e.authCooldowns = map[string]time.Time{}
-	}
-	for id, until := range e.authCooldowns {
-		if !now.Before(until) {
-			delete(e.authCooldowns, id)
-		}
-	}
 	for _, entry := range entries {
-		provider := strings.ToLower(entry.Provider + " " + entry.Type)
-		status := strings.ToLower(strings.TrimSpace(entry.Status))
-		_, cooling := e.authCooldowns[entry.AuthIndex]
-		if entry.AuthIndex == "" || entry.Disabled || entry.Unavailable || cooling || (!entry.NextRetryAfter.IsZero() && now.Before(entry.NextRetryAfter)) {
-			continue
-		}
-		if !strings.Contains(provider, "codex") && !strings.Contains(provider, "openai") {
-			continue
-		}
-		if status == "disabled" || status == "unavailable" || status == "error" {
+		if entry.AuthIndex == "" || !authEntryEnabled(entry) {
 			continue
 		}
 		eligible = append(eligible, entry)
 	}
-	e.mu.Unlock()
 	sort.SliceStable(eligible, func(i, j int) bool {
 		if eligible[i].Priority != eligible[j].Priority {
 			return eligible[i].Priority > eligible[j].Priority
@@ -141,6 +122,7 @@ func (e *probeEngine) authSelectionWatchLoop(stop <-chan struct{}) {
 		case <-stop:
 			return
 		case <-ticker.C:
+			e.syncProbeAccounts()
 			e.authSelectionScan()
 		}
 	}
@@ -148,12 +130,20 @@ func (e *probeEngine) authSelectionWatchLoop(stop <-chan struct{}) {
 
 func (e *probeEngine) authSelectionScan() {
 	e.mu.Lock()
+	allAccounts := e.cfg.Config.AccountMode == "all-accounts"
+	e.mu.Unlock()
+	if allAccounts {
+		e.prefetchScan()
+		return
+	}
+	e.mu.Lock()
 	cfg := e.cfg.Config
 	suppressed := !cfg.Enabled || cfg.Prefetch <= 0 || !cfg.SleepHours.until(time.Now()).IsZero() || cfg.AccountMode != "highest-priority" || e.cfg.Error != "" || e.halted || e.stopping || e.shuttingDown
 	e.mu.Unlock()
 	if suppressed {
 		return
 	}
+	e.syncProbeAccounts()
 	entries, err := hostAuthListFunc()
 	if err != nil {
 		return
@@ -171,32 +161,33 @@ func (e *probeEngine) authSelectionScan() {
 	if !cfg.Enabled || cfg.Prefetch <= 0 || !cfg.SleepHours.until(time.Now()).IsZero() || cfg.AccountMode != "highest-priority" || e.cfg.Error != "" || e.halted || e.stopping || e.shuttingDown {
 		return
 	}
+	selectedScope := ""
+	for _, entry := range e.accounts {
+		if entry.ID == eligible[0].ID && authEntryAvailable(entry, time.Now()) {
+			selectedScope = entry.Scope
+			break
+		}
+	}
 	if !e.autoAuthSeen {
 		e.autoAuthSeen = true
 		e.lastAutoAuth = selected
+		e.lastAutoScope = selectedScope
 		return
 	}
-	if selected == e.lastAutoAuth {
+	if selected == e.lastAutoAuth && selectedScope == e.lastAutoScope {
 		return
 	}
 	e.lastAutoAuth = selected
+	e.lastAutoScope = selectedScope
 	for _, model := range cfg.Models {
 		if degradationDetectionEnabled(model, "") {
-			e.enqueueTaskLocked(model, true)
+			for _, entry := range e.accounts {
+				if entry.ID == eligible[0].ID && entry.Scope != "" && authEntryAvailable(entry, time.Now()) {
+					e.enqueueTaskLocked(scopedTarget(entry.Scope, model), true)
+				}
+			}
 		}
 	}
-}
-
-func (e *probeEngine) cooldownProbeAccount(index string, duration time.Duration) {
-	if index == "" || duration <= 0 {
-		return
-	}
-	e.mu.Lock()
-	if e.authCooldowns == nil {
-		e.authCooldowns = map[string]time.Time{}
-	}
-	e.authCooldowns[index] = time.Now().Add(duration)
-	e.mu.Unlock()
 }
 
 func maskedAccountLabel(entry hostAuthEntry) string {

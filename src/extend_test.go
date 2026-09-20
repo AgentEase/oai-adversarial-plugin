@@ -400,14 +400,15 @@ func TestProbeControlEndpoint(t *testing.T) {
 // record must carry empty arrays (never nil) for original/paths so that the
 // dashboard JSON never contains null for them.
 func TestInterceptDegradedRejection(t *testing.T) {
+	installFixtureHostAuth(t)
 	history = auditState{}
 	probeTrack = &probeEngine{values: map[string]stateEntry{}, failures: map[string]probeFailure{},
 		paused: map[string]bool{}, probing: map[string]bool{}}
-	probeTrack.failures["gpt-6-astra"] = probeFailure{Model: "gpt-6-astra", Attempts: 30, Rounds: 10,
+	probeTrack.failures[scopedTarget(credentialScope("fixture-account", "synthetic-fixture-token", ""), "gpt-6-astra")] = probeFailure{Model: "gpt-6-astra", Attempts: 30, Rounds: 10,
 		LastError: "state length 312 != 332 (suspected degraded)"}
 	probeTrack.setRejectDegraded(true)
-	raw, _ := json.Marshal(interceptRequest{
-		RequestID: "req-reject", ToFormat: "codex", Model: "gpt-6-astra",
+	raw, _ := json.Marshal(interceptRequest{Metadata: map[string]any{"selected_auth_id": "fixture-account", "selected_auth_index": "fixture-index"},
+		Headers: http.Header{"Authorization": {"Bearer synthetic-fixture-token"}}, RequestID: "req-reject", ToFormat: "codex", Model: "gpt-6-astra",
 		Body: []byte(`{"input":"hello"}`),
 	})
 	resp, err := intercept(raw)
@@ -579,6 +580,7 @@ func TestManualRoundControl(t *testing.T) {
 		AttemptsPerHop:   &one,
 		MaxAttemptsRound: &one,
 	})
+	probeTrack.cfg.Config.AccountMode = ""
 
 	waitFinished := func() {
 		deadline := time.Now().Add(3 * time.Second)
@@ -968,6 +970,7 @@ func TestPrefetchScanTriggersOnlyNearExpiry(t *testing.T) {
 	cfg := parseProbeConfig(probeConfigYAML{Enabled: &enabled,
 		Models: []string{"gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-luna"}})
 	cfg.ProbeInterval = time.Millisecond
+	cfg.AccountMode = ""
 	probeTrack.cfg.Config = cfg
 
 	fresh := synthStateToken(time.Now().Add(-10 * time.Minute))
@@ -1070,6 +1073,7 @@ func TestPoolNeverBenched(t *testing.T) {
 		t.Fatal("healthy capture must clear the pool counters")
 	}
 }
+
 // TestPauseAbortsInFlightRound verifies the v1.5.20 fix: pausing a model
 // from the dashboard stops its already-running round at the next attempt
 // boundary without writing a failure annotation (a pause is a deliberate
@@ -1217,6 +1221,7 @@ func TestWatcherSilentAfterStop(t *testing.T) {
 	cfg := parseProbeConfig(probeConfigYAML{Enabled: &enabled, Models: []string{"gpt-6-astra"}})
 	cfg.CredFile = "/nonexistent/cred.json"
 	cfg.ProbeInterval = time.Millisecond
+	cfg.AccountMode = ""
 	probeTrack.cfg.Config = cfg
 	// A baseline about to expire: the watcher would normally probe it.
 	probeTrack.values["gpt-6-astra"] = stateEntry{Model: "gpt-6-astra",
@@ -1659,6 +1664,7 @@ func TestValidityDisplay(t *testing.T) {
 	probeTrack = &probeEngine{values: map[string]stateEntry{}, failures: map[string]probeFailure{},
 		paused: map[string]bool{}, probing: map[string]bool{}}
 	cfg := parseProbeConfig(probeConfigYAML{Enabled: &enabled, TTLMinutes: nil})
+	cfg.AccountMode = ""
 	probeTrack.cfg.Config = cfg
 	if cfg.TTL != 55*time.Minute {
 		t.Fatalf("default validity wrong: %v", cfg.TTL)
@@ -1851,6 +1857,7 @@ func TestTurnStateOverrideApply(t *testing.T) {
 // header replacement and records the override status alongside the timezone
 // normalization.
 func TestInterceptRequestAppliesRewrite(t *testing.T) {
+	installFixtureHostAuth(t)
 	history = auditState{}
 	turnStateOverride = atomic.Value{}
 	t.Cleanup(func() { turnStateOverride = atomic.Value{} })
@@ -1863,20 +1870,22 @@ func TestInterceptRequestAppliesRewrite(t *testing.T) {
 `)); err != nil {
 		t.Fatal(err)
 	}
-	raw, _ := json.Marshal(interceptRequest{
+	value := synthStateToken(time.Now())
+	probeTrack.storeValue(scopedTarget(credentialScope("fixture-account", "synthetic-fixture-token", ""), "gpt-6-astra"), value, "probe", "", currentProbeConfig().Config)
+	raw, _ := json.Marshal(interceptRequest{Metadata: map[string]any{"selected_auth_id": "fixture-account", "selected_auth_index": "fixture-index"},
 		RequestID: "req-rw", ToFormat: "codex", Model: "gpt-6-astra",
-		Headers: http.Header{turnStateHeader: {"CLIENT-STATE"}},
+		Headers: http.Header{turnStateHeader: {"CLIENT-STATE"}, "Authorization": {"Bearer synthetic-fixture-token"}},
 		Body:    []byte(`{"input":"hello"}`),
 	})
 	resp, err := intercept(raw)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resp.Headers == nil || resp.Headers.Get(turnStateHeader) != "REWRITTEN-STATE" {
+	if resp.Headers == nil || resp.Headers.Get(turnStateHeader) != value {
 		t.Fatalf("interceptor must return the header rewrite: %+v", resp)
 	}
 	record := history.snapshot()["records"].([]auditRecord)[0]
-	if record.TurnStateOverride != "applied-config" {
+	if record.TurnStateOverride != "applied" {
 		t.Fatalf("record must show applied-config: %+v", record)
 	}
 	// The observed request-side value stays the client's original view.
@@ -1956,9 +1965,10 @@ func TestAuditUpsertPreservesObservations(t *testing.T) {
 }
 
 // TestTurnStateInjectedLengthRecorded verifies the byte length written into
-// the header is recorded, so the dashboard can show the field size even when
-// no turn-state was observed on the request or response path.
+// the header is recorded independently of the original request ticket and
+// remains available even before any response has been observed.
 func TestTurnStateInjectedLengthRecorded(t *testing.T) {
+	installFixtureHostAuth(t)
 	history = auditState{}
 	turnStateOverride = atomic.Value{}
 	t.Cleanup(func() { turnStateOverride = atomic.Value{} })
@@ -1971,24 +1981,26 @@ func TestTurnStateInjectedLengthRecorded(t *testing.T) {
 `)); err != nil {
 		t.Fatal(err)
 	}
-	raw, _ := json.Marshal(interceptRequest{
-		RequestID: "req-inj", ToFormat: "codex", Model: "gpt-6-astra",
+	value := synthStateToken(time.Now())
+	probeTrack.storeValue(scopedTarget(credentialScope("fixture-account", "synthetic-fixture-token", ""), "gpt-6-astra"), value, "probe", "", currentProbeConfig().Config)
+	raw, _ := json.Marshal(interceptRequest{Metadata: map[string]any{"selected_auth_id": "fixture-account", "selected_auth_index": "fixture-index"},
+		Headers: http.Header{"Authorization": {"Bearer synthetic-fixture-token"}, turnStateHeader: {"old"}}, RequestID: "req-inj", ToFormat: "codex", Model: "gpt-6-astra",
 		Body: []byte(`{"input":"hello"}`),
 	})
 	if _, err := intercept(raw); err != nil {
 		t.Fatal(err)
 	}
 	record := history.snapshot()["records"].([]auditRecord)[0]
-	if record.TurnStateLength != 0 {
-		t.Fatalf("no observed turn-state expected: %+v", record)
+	if record.TurnStateLength != 3 {
+		t.Fatal("original request ticket length was not retained")
 	}
-	if record.TurnStateOverride != "applied-config" || record.TurnStateInjectedLength != len("REWRITTEN-STATE") {
+	if record.TurnStateOverride != "applied" || record.TurnStateInjectedLength != len(value) {
 		t.Fatalf("injected length must be recorded: %+v", record)
 	}
 	// A retry keeps the recorded injection length.
-	history.record(auditRecord{RequestID: "req-inj", Model: "gpt-6-astra", conversion: conversion{Target: targetTimezone, Action: "unchanged"}})
+	history.record(auditRecord{AccountScope: credentialScope("fixture-account", "synthetic-fixture-token", ""), AuthBinding: accountScope("fixture-account"), RequestID: "req-inj", Model: "gpt-6-astra", conversion: conversion{Target: targetTimezone, Action: "unchanged"}})
 	after := history.snapshot()["records"].([]auditRecord)[0]
-	if after.TurnStateInjectedLength != len("REWRITTEN-STATE") {
+	if after.TurnStateInjectedLength != len(value) {
 		t.Fatalf("injected length lost on retry: %+v", after)
 	}
 }
@@ -2003,6 +2015,7 @@ func newPrefetchTestEngine(t *testing.T) *probeEngine {
 		probing: map[string]bool{}, prefetchGate: map[string]time.Time{}, rejectDegraded: true,
 	}
 	e.cfg.Config = parseProbeConfig(probeConfigYAML{Enabled: &enabled, Models: []string{"gpt-6-astra"}})
+	e.cfg.Config.AccountMode = "" // Exercise the internal single-target engine; account binding has dedicated tests.
 	e.cfg.Config.CredFile = filepath.Join(t.TempDir(), "missing-auth.json")
 	e.cfg.Config.ProbeInterval = time.Millisecond
 	e.cfg.Config.MaxAttemptsPerRound = 1
@@ -2167,7 +2180,7 @@ func TestPrefetchCapturePreservesNewerState(t *testing.T) {
 		t.Fatal("an echoed successor restored from an older snapshot must be discarded")
 	}
 	e.storeValue("gpt-6-astra", successor, "probe", "direct", cfg)
-	for _, value := range []string{active, synthStateToken(now.Add(-5*time.Minute)), synthStateToken(now.Add(-2*cfg.TTL))} {
+	for _, value := range []string{active, synthStateToken(now.Add(-5 * time.Minute)), synthStateToken(now.Add(-2 * cfg.TTL))} {
 		e.storeValue("gpt-6-astra", value, "business", "", cfg)
 		if e.values["gpt-6-astra"].Value != active || e.candidates["gpt-6-astra"].Value != successor {
 			t.Fatal("repeated, older and expired captures must preserve both healthy slots")
@@ -2207,7 +2220,7 @@ func TestPrefetchCandidateSuppressesQueueAndPromotes(t *testing.T) {
 	if e.probesTotal != 0 {
 		t.Fatal("a successor acquired while queued must suppress the stale task at dequeue")
 	}
-	e.values["gpt-6-astra"] = stateEntry{Model: "gpt-6-astra", Value: synthStateToken(time.Now().Add(-2*cfg.TTL)), Valid: true}
+	e.values["gpt-6-astra"] = stateEntry{Model: "gpt-6-astra", Value: synthStateToken(time.Now().Add(-2 * cfg.TTL)), Valid: true}
 	e.stop()
 	probeSummary()
 	if e.values["gpt-6-astra"].Value != successor || len(e.candidates) != 0 || !e.halted {
@@ -2247,16 +2260,17 @@ func TestPrefetchRestartKeepsBaselineAndMode(t *testing.T) {
 }
 
 func TestPrefetchFailureDoesNotRejectHealthyBusiness(t *testing.T) {
+	installFixtureHostAuth(t)
 	e := newPrefetchTestEngine(t)
 	cfg := e.cfg.Config
 	turnStateOverride.Store(&turnStateOverrideState{Config: turnStateOverrideConfig{Enabled: true, Force: true, Models: cfg.Models}})
 	t.Cleanup(func() { turnStateOverride = atomic.Value{} })
 	active := synthStateToken(time.Now().Add(-cfg.TTL + 3*time.Minute))
 	successor := synthStateToken(time.Now())
-	e.storeValue("gpt-6-astra", active, "seed", "", cfg)
+	e.storeValue(scopedTarget(credentialScope("fixture-account", "synthetic-fixture-token", ""), "gpt-6-astra"), active, "seed", "", cfg)
 	assertBusiness := func(want string, blocked bool) {
 		t.Helper()
-		raw, _ := json.Marshal(interceptRequest{RequestID: "prefetch-business", ToFormat: "codex", Model: "gpt-6-astra", Body: []byte(`{"input":"hello"}`)})
+		raw, _ := json.Marshal(interceptRequest{Metadata: map[string]any{"selected_auth_id": "fixture-account", "selected_auth_index": "fixture-index"}, Headers: http.Header{"Authorization": {"Bearer synthetic-fixture-token"}, turnStateHeader: {"old"}}, RequestID: "prefetch-business", ToFormat: "codex", Model: "gpt-6-astra", Body: []byte(`{"input":"hello"}`)})
 		response, err := intercept(raw)
 		if err != nil || response.Terminate != blocked {
 			t.Fatalf("business rejection mismatch: blocked=%v response=%+v err=%v", blocked, response, err)
@@ -2266,16 +2280,16 @@ func TestPrefetchFailureDoesNotRejectHealthyBusiness(t *testing.T) {
 		}
 	}
 	for i := 0; i < cfg.SuspectThreshold; i++ {
-		e.noteProbeFailure("gpt-6-astra", probeRecord{Error: "model mismatch: requested gpt-6-astra got other"}, cfg)
+		e.noteProbeFailure(scopedTarget(credentialScope("fixture-account", "synthetic-fixture-token", ""), "gpt-6-astra"), probeRecord{Error: "model mismatch: requested gpt-6-astra got other"}, cfg)
 		assertBusiness(active, false)
 	}
-	e.failures["gpt-6-astra"] = probeFailure{LastError: "model mismatch: requested gpt-6-astra got other"}
+	e.failures[scopedTarget(credentialScope("fixture-account", "synthetic-fixture-token", ""), "gpt-6-astra")] = probeFailure{LastError: "model mismatch: requested gpt-6-astra got other"}
 	assertBusiness(active, false)
-	e.storeValue("gpt-6-astra", successor, "probe", "direct", cfg)
+	e.storeValue(scopedTarget(credentialScope("fixture-account", "synthetic-fixture-token", ""), "gpt-6-astra"), successor, "probe", "direct", cfg)
 	assertBusiness(active, false)
 	// Keep the old probe annotations to ensure rejection checks promote before
 	// deciding, rather than relying on a probe-success side effect.
-	e.values["gpt-6-astra"] = stateEntry{Model: "gpt-6-astra", Value: synthStateToken(time.Now().Add(-2*cfg.TTL)), Valid: true}
+	e.values[scopedTarget(credentialScope("fixture-account", "synthetic-fixture-token", ""), "gpt-6-astra")] = stateEntry{Model: "gpt-6-astra", Value: synthStateToken(time.Now().Add(-2 * cfg.TTL)), Valid: true}
 	assertBusiness(successor, false)
 	if len(e.candidates) != 0 {
 		t.Fatal("business must atomically consume the successor")
@@ -2283,10 +2297,10 @@ func TestPrefetchFailureDoesNotRejectHealthyBusiness(t *testing.T) {
 	if reason := degradedRejectMessage("gpt-6-astra-preview", "gpt-6-astra"); reason != "" {
 		t.Fatal("the requested-model baseline must also protect a routed alias")
 	}
-	e.values["gpt-6-astra"] = stateEntry{Value: synthStateToken(time.Now().Add(-2*cfg.TTL)), Valid: true}
+	e.values[scopedTarget(credentialScope("fixture-account", "synthetic-fixture-token", ""), "gpt-6-astra")] = stateEntry{Value: synthStateToken(time.Now().Add(-2 * cfg.TTL)), Valid: true}
 	assertBusiness("", true)
-	e.storeValue("gpt-6-astra", successor, "probe", "direct", cfg)
-	e.noteBusinessDegradation("gpt-6-astra", "业务模型不一致")
+	e.storeValue(scopedTarget(credentialScope("fixture-account", "synthetic-fixture-token", ""), "gpt-6-astra"), successor, "probe", "direct", cfg)
+	e.noteBusinessDegradation(scopedTarget(credentialScope("fixture-account", "synthetic-fixture-token", ""), "gpt-6-astra"), "业务模型不一致")
 	assertBusiness("", true)
 }
 
@@ -2388,7 +2402,7 @@ func TestUncheckedProbeEntrypointsAndSummary(t *testing.T) {
 				t.Fatal("unchecked model controls must explicitly acknowledge a no-op")
 			}
 		}
-		e.values[model] = stateEntry{Model: model, Value: synthStateToken(time.Now().Add(-2*e.cfg.Config.TTL)), Valid: true}
+		e.values[model] = stateEntry{Model: model, Value: synthStateToken(time.Now().Add(-2 * e.cfg.Config.TTL)), Valid: true}
 		e.failures[model] = probeFailure{Model: model, LastError: "model mismatch"}
 		e.suspects[model] = probeSuspicion{Model: model, Failures: 100, LastError: "state length 312 != 332"}
 		e.business[model] = businessDegradation{Model: model, Reason: "旧标记"}
@@ -2411,7 +2425,7 @@ func TestUncheckedProbeEntrypointsAndSummary(t *testing.T) {
 		t.Fatal("all-unchecked configuration must not advertise prefetch")
 	}
 	for _, value := range summary["values"].([]map[string]any) {
-		if value["detection_enabled"] != false || len(value) != 2 {
+		if value["detection_enabled"] != false || value["value_length"] != nil {
 			t.Fatal("unchecked rows must expose their policy instead of stale baseline status")
 		}
 	}
@@ -2848,5 +2862,17 @@ func TestRuntimeIntervalAppliesToNextWait(t *testing.T) {
 	}
 	if time.Since(start) > 900*time.Millisecond {
 		t.Fatal("a closed stop channel must end the wait immediately")
+	}
+}
+
+func installFixtureHostAuth(t *testing.T) {
+	t.Helper()
+	list, get := hostAuthListFunc, hostAuthGetFunc
+	t.Cleanup(func() { hostAuthListFunc, hostAuthGetFunc = list, get })
+	hostAuthListFunc = func() ([]hostAuthEntry, error) {
+		return []hostAuthEntry{{ID: "fixture-account", AuthIndex: "fixture-index", Provider: "codex"}}, nil
+	}
+	hostAuthGetFunc = func(index string) (json.RawMessage, error) {
+		return json.Marshal(map[string]string{"access_token": "synthetic-fixture-token"})
 	}
 }

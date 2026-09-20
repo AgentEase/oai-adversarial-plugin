@@ -46,12 +46,12 @@ func TestAccountRoutingUsageAndSchedulerAvoidDegraded(t *testing.T) {
 		t.Fatalf("pick = %+v", got)
 	}
 	entry := m.health[accountHealthKey("degraded", "astra")]
-	if entry.State != "degraded" || entry.LastStateLength != 356 || !now.Before(entry.CooldownUntil) {
+	if entry.State != "degraded" || entry.LastStateLength != 356 {
 		t.Fatalf("degraded entry = %+v", entry)
 	}
 }
 
-func TestAccountRoutingKeepsBuiltinForAllUnknownOrAllCooling(t *testing.T) {
+func TestAccountRoutingKeepsBuiltinForAllUnknownOrNoHealthy(t *testing.T) {
 	m := newRoutingTestManager(true)
 	now := time.Now().UTC()
 	if got := m.pick(routingRequest("a", "b"), now); got.Handled {
@@ -64,12 +64,12 @@ func TestAccountRoutingKeepsBuiltinForAllUnknownOrAllCooling(t *testing.T) {
 	}
 }
 
-func TestAccountRoutingChoosesUnknownInsteadOfCoolingCandidate(t *testing.T) {
+func TestAccountRoutingLeavesFailuresToHostWithoutCooldown(t *testing.T) {
 	m := newRoutingTestManager(true)
 	now := time.Now().UTC()
 	m.observe(routingUsage("bad", 312, 0, false), now)
 	got := m.pick(routingRequest("bad", "new"), now.Add(time.Minute))
-	if !got.Handled || got.AuthID != "new" {
+	if got.Handled {
 		t.Fatalf("pick = %+v", got)
 	}
 }
@@ -107,7 +107,7 @@ func TestAccountRouting401AndTransientThreshold(t *testing.T) {
 	m := newRoutingTestManager(true)
 	now := time.Now().UTC()
 	m.observe(routingUsage("revoked", 0, http.StatusUnauthorized, true), now)
-	if got := m.health[accountHealthKey("revoked", "astra")]; got.State != "auth_error" || got.CooldownUntil.IsZero() {
+	if got := m.health[accountHealthKey("revoked", "astra")]; got.State != "auth_error" {
 		t.Fatalf("revoked = %+v", got)
 	}
 	m.observe(routingUsage("flaky", 0, http.StatusBadGateway, true), now)
@@ -115,7 +115,7 @@ func TestAccountRouting401AndTransientThreshold(t *testing.T) {
 		t.Fatalf("first transient failure must not cool down: %+v", got)
 	}
 	m.observe(routingUsage("flaky", 0, http.StatusBadGateway, true), now.Add(time.Second))
-	if got := m.health[accountHealthKey("flaky", "astra")]; got.State != "transient_failure" || got.CooldownUntil.IsZero() {
+	if got := m.health[accountHealthKey("flaky", "astra")]; got.State != "transient_failure" {
 		t.Fatalf("second transient failure = %+v", got)
 	}
 }
@@ -124,7 +124,7 @@ func TestAccountRoutingRateLimitDoesNotCoolDown(t *testing.T) {
 	m := newRoutingTestManager(true)
 	m.observe(routingUsage("limited", 0, http.StatusTooManyRequests, true), time.Now().UTC())
 	got := m.health[accountHealthKey("limited", "astra")]
-	if got.State != "" || !got.CooldownUntil.IsZero() || got.LastReason != "rate_limited" {
+	if got.State != "" || got.LastReason != "rate_limited" {
 		t.Fatalf("rate limited = %+v", got)
 	}
 }
@@ -176,7 +176,7 @@ func TestConfigureAccountRoutingAliases(t *testing.T) {
 		t.Fatal(err)
 	}
 	summary := accountRoutingSummary()
-	if summary["enabled"] != true || summary["degraded_cooldown_minutes"] != 90 || summary["failure_cooldown_minutes"] != 7 || summary["failure_threshold"] != 3 {
+	if summary["enabled"] != true || summary["failure_threshold"] != 3 {
 		t.Fatalf("summary = %#v", summary)
 	}
 }

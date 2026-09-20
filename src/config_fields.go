@@ -24,13 +24,10 @@ var panelFields = []panelField{
 	{Name: "operation-mode", Type: "enum", EnumValues: []string{"business-only", "probe"}, Description: "运行模式：business-only 仅业务观测、不发主动探测；probe 启用探测能力（任务由探测控制台控制）。留空继承旧 YAML。"},
 	{Name: "experimental-account-routing", Type: "boolean", Description: "实验性账号路由：仅在同一优先级候选中优先健康账号，按配置的长度策略、模型一致性和鉴权结果评估。关闭时仍只读记录健康证据。"},
 	{Name: "accepted-state-lengths", Type: "array", Description: "可接受的 State 字节长度，JSON 整数数组；默认 [292,332]。1–32 个不同值，每个 1–4096。按实际账号配置，不根据 Team 等套餐名称推断。", path: []string{"accepted-state-lengths"}},
-	{Name: "account-degraded-cooldown-minutes", Type: "integer", Description: "账号不满足长度策略、模型不一致或出现 401/403 后的路由冷却分钟数（1–1440）。", min: 1, max: 1440},
-	{Name: "account-failure-cooldown-minutes", Type: "integer", Description: "连续瞬时失败达到阈值后的短冷却分钟数（1–120）。", min: 1, max: 120},
-	{Name: "account-failure-threshold", Type: "integer", Description: "无异常 state 的连续失败达到多少次后短暂避开该账号（1–10）。", min: 1, max: 10},
-	{Name: "probe-account-mode", Type: "enum", EnumValues: []string{"highest-priority", "fixed"}, Description: "探测账号：highest-priority 自动选择 CPA 中优先级最高的健康 Codex 账号；fixed 使用凭证文件。", path: []string{"probe", "account-mode"}},
+	{Name: "account-failure-threshold", Type: "integer", Description: "连续失败达到多少次后记录瞬时异常证据（1–10）；不冷却或禁用账号。", min: 1, max: 10},
+	{Name: "probe-account-mode", Type: "enum", EnumValues: []string{"all-accounts", "highest-priority", "fixed"}, Description: "探测账号：all-accounts 为所有可用账号独立维护票据；highest-priority 自动选择 CPA 中优先级最高的健康 Codex 账号；fixed 使用凭证文件。", path: []string{"probe", "account-mode"}},
 	{Name: "probe-candidate-limit", Type: "integer", Description: "每轮允许尝试的候选账号上限（1–50）。", path: []string{"probe", "candidate-limit"}, min: 1, max: 50},
-	{Name: "probe-auth-cooldown-minutes", Type: "integer", Description: "401/403 或无效凭证被跳过的冷却分钟数（1–1440）。", path: []string{"probe", "auth-cooldown-minutes"}, min: 1, max: 1440},
-	{Name: "override-policy", Type: "enum", EnumValues: []string{"preserve-healthy-client", "always"}, Description: "覆写策略：保留健康客户端 state，或始终优先使用有效基线。留空继承旧 YAML。"},
+	{Name: "override-policy", Type: "enum", EnumValues: []string{"preserve-healthy-client", "always"}, Description: "覆写策略兼容旧配置；账号隔离模式只使用本账号的有效基线，不按长度信任客户端票据。"},
 	{Name: "override-models", Type: "array", Description: "覆写目标模型前缀，JSON 字符串数组；留空继承旧 YAML。", path: []string{"models"}},
 	{Name: "probe-models", Type: "array", Description: "主动探测模型列表；仅业务观测模式下不发探测请求。", path: []string{"probe", "models"}},
 	{Name: "probe-credential-file", Type: "string", Description: "主动探测凭证文件路径（不是 Token）；仅 fixed 账号模式使用。自动选号通过 CPA Host Auth 获取凭据。", path: []string{"probe", "cred-file"}},
@@ -142,6 +139,12 @@ func normalizePanelConfig(input []byte) ([]byte, error) {
 		delete(probe, "cred-file")
 	}
 	// Validate the final merged values, without changing legacy-only semantics.
+	if value, exists := probe["account-mode"]; exists {
+		mode, ok := value.(string)
+		if !ok || (mode != "fixed" && mode != "highest-priority" && mode != "all-accounts") {
+			return nil, fmt.Errorf("invalid probe account-mode")
+		}
+	}
 	if root["prefetch-minutes"] != nil || root["state-ttl-minutes"] != nil {
 		ttl := probeDefaultsTTLMinutes
 		if n, ok := probe["ttl-minutes"].(int); ok {

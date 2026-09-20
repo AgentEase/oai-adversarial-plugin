@@ -22,6 +22,8 @@ plugins:
       # values reject the whole config update. Defaults to
       # America/Los_Angeles when omitted. Match it to the egress IP's
       # geolocation, e.g. Asia/Singapore for a Singapore VPS.
+      # Dashboard timezone overrides are persisted in runtime-settings.json.
+      # Display and sleep schedule remain UTC+8.
       # timezone: "America/Los_Angeles"
       # Empirical acceptance policy; replace for your accounts, not by plan name.
       # Also supported as turn-state-override.accepted-state-lengths.
@@ -37,21 +39,22 @@ plugins:
         models:
           - gpt-6-astra
 
-        # Fallback static value used when no fresh baseline is available yet
-        # (first start, no recorded history, no seeds file). The primary
-        # value is the per-model healthy baseline, which is seeded from
-        # server records and refreshed by business observations and manual
-        # probe rounds. Only the pristine 292-byte state is accepted.
-        value: "REPLACE_WITH_YOUR_TOKEN"
+        # Legacy global values have no account provenance and are never used
+        # as a fallback for account-bound requests. Do not put tickets here.
+        value: ""
 
-        # true  = always replace an existing client value
-        # false = keep a healthy (292-byte) client value; degraded-length
-        #         values are still replaced
+        # Compatibility setting. Account-bound requests always use their own
+        # baseline, or clear the unbound client ticket when none is available.
         force: true
 
         # ---- probe track (manual mode) --------------------------------------
         probe:
           enabled: true
+
+          # Opt in to all eligible host credentials: N accounts x M checked
+          # models x 2 independent slots, sharing one serial worker.
+          # Default fixed requires an exact host auth-file path binding.
+          # account-mode: "all-accounts"
 
           # Probe priority order for manual rounds: models are tried in this
           # order, once each, until the round is stopped or the list ends.

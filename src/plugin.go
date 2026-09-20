@@ -12,7 +12,7 @@ import (
 
 const (
 	pluginID                   = "timezone-override"
-	pluginVersion              = "1.5.39"
+	pluginVersion              = "1.5.47"
 	historyLimit               = 200
 	schemaVersion              = 6
 	streamChunkHeaderInitIndex = -1
@@ -22,6 +22,7 @@ const (
 var dashboard []byte
 
 type interceptRequest struct {
+	Metadata       map[string]any
 	RequestID      string
 	TraceID        string
 	SourceFormat   string
@@ -33,6 +34,7 @@ type interceptRequest struct {
 }
 
 type interceptResponse struct {
+	ClearHeaders    []string    `json:"ClearHeaders,omitempty"`
 	Body            []byte      `json:"Body,omitempty"`
 	Headers         http.Header `json:"Headers,omitempty"`
 	Terminate       bool        `json:"Terminate,omitempty"`
@@ -101,6 +103,10 @@ type responseInterceptOutput struct {
 }
 
 type auditRecord struct {
+	AccountScope string `json:"-"`
+	AuthBinding  string `json:"-"`
+	Account      string `json:"account,omitempty"`
+	AccountEmail string `json:"account_email,omitempty"`
 	conversion
 	RequestID               string `json:"request_id"`
 	TraceID                 string `json:"trace_id,omitempty"`
@@ -118,6 +124,9 @@ type auditRecord struct {
 	TurnStateTruncated      bool   `json:"turn_state_truncated,omitempty"`
 	TurnStateOverride       string `json:"turn_state_override,omitempty"`
 	TurnStateInjectedLength int    `json:"turn_state_injected_length,omitempty"`
+	TurnStateOriginalLength *int   `json:"turn_state_original_length,omitempty"`
+	TurnStateResponseOriginalLength *int `json:"turn_state_response_original_length,omitempty"`
+	TurnStateResponseInjectedLength int `json:"turn_state_response_injected_length,omitempty"`
 	DegradedRejected        bool   `json:"degraded_rejected,omitempty"`
 }
 
@@ -213,12 +222,16 @@ func intercept(raw []byte) (interceptResponse, error) {
 	if req.ToFormat != "codex" {
 		return interceptResponse{}, nil
 	}
+	scope := selectedAccount(req.Metadata, req.Headers)
+	authID, _ := req.Metadata["selected_auth_id"].(string)
 	// Degraded-model rejection: when the switch is on and the request targets
 	// a model with business degradation evidence, or probe evidence without
 	// a usable baseline, terminate with 403. A failing prefetch must not
 	// interrupt traffic still protected by the active or successor value.
-	if message := degradedRejectMessage(req.Model, req.RequestedModel); message != "" {
+	if message := scopedRejectMessage(scope, req.Model, req.RequestedModel); message != "" {
 		history.record(auditRecord{
+			AccountScope: scope, AuthBinding: accountScope(authID),
+			Account:   targetAccount(scopedTarget(scope, req.Model)),
 			RequestID: req.RequestID, TraceID: req.TraceID,
 			Model: req.Model, RequestedModel: req.RequestedModel,
 			Time:             time.Now().UTC().Format(time.RFC3339Nano),
@@ -247,16 +260,20 @@ func intercept(raw []byte) (interceptResponse, error) {
 			ResponseHeaders: http.Header{"Content-Type": {"application/json"}}, ResponseBody: payload,
 		}, nil
 	}
-	overrideHeaders, overrideStatus := applyTurnStateOverride(req.Model, req.RequestedModel, req.Headers)
+	originalLength := len(headerValue(req.Headers, turnStateHeader))
+	overrideHeaders, overrideStatus := applyScopedOverride(scope, req.Model, req.RequestedModel, req.Headers)
 	injectedLength := 0
 	if overrideHeaders != nil {
 		injectedLength = len(overrideHeaders.Get(turnStateHeader))
 	}
 	history.record(auditRecord{
-		conversion: result, RequestID: req.RequestID, TraceID: req.TraceID,
+		AccountScope: scope, AuthBinding: accountScope(authID),
+		conversion: result, Account: targetAccount(scopedTarget(scope, req.Model)),
+		RequestID: req.RequestID, TraceID: req.TraceID,
 		Model: req.Model, RequestedModel: req.RequestedModel,
 		Time:              time.Now().UTC().Format(time.RFC3339Nano),
 		TurnStateOverride: overrideStatus, TurnStateInjectedLength: injectedLength,
+		TurnStateOriginalLength: &originalLength,
 	})
 	history.observeTurnState(req.RequestID, headerValue(req.Headers, turnStateHeader), "request")
 	response := interceptResponse{}
@@ -264,6 +281,13 @@ func intercept(raw []byte) (interceptResponse, error) {
 		response.Body = body
 	}
 	response.Headers = overrideHeaders
+	if overrideHeaders == nil && overrideStatus != "" && headerValue(req.Headers, turnStateHeader) != "" {
+		response.ClearHeaders = []string{turnStateHeader}
+		// CPA 7.3.6 merges the plugin chain into a full header map but drops
+		// ClearHeaders on return. Keep an explicit empty replacement so its
+		// second merge cannot resurrect the client's previous-account ticket.
+		response.Headers = http.Header{turnStateHeader: {""}}
+	}
 	return response, nil
 }
 
@@ -277,14 +301,21 @@ func (s *auditState) record(record auditRecord) {
 				continue
 			}
 			existing := &s.records[i]
+			if record.TurnStateOriginalLength != nil {
+				existing.TurnStateResponseOriginalLength = nil
+				existing.TurnStateResponseInjectedLength = 0
+			}
+			if record.AccountScope != existing.AccountScope || record.AuthBinding != existing.AuthBinding {
+				*existing = record // A retry selected another account: do not retain prior account evidence.
+				return
+			}
 			// Observed fields (upstream model, turn-state view, override status)
 			// stay untouched unless the retry re-applied them; only the
 			// request-level view is refreshed so a retry never resets it.
 			if record.TurnStateOverride != "" {
 				existing.TurnStateOverride = record.TurnStateOverride
-				if record.TurnStateInjectedLength > 0 {
-					existing.TurnStateInjectedLength = record.TurnStateInjectedLength
-				}
+				existing.TurnStateOriginalLength = record.TurnStateOriginalLength
+				existing.TurnStateInjectedLength = record.TurnStateInjectedLength
 			}
 			if record.Action != "" || len(record.Original) > 0 || record.Model != "" {
 				existing.conversion = record.conversion
@@ -323,6 +354,13 @@ func (s *auditState) record(record auditRecord) {
 }
 
 func (s *auditState) snapshot() map[string]any {
+	probeTrack.syncProbeAccounts()
+	probeTrack.mu.Lock()
+	emails := make(map[string]string, len(probeTrack.accounts))
+	for scope, entry := range probeTrack.accounts {
+		emails[scope] = entry.Email
+	}
+	probeTrack.mu.Unlock()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	records := make([]auditRecord, len(s.records))
@@ -330,6 +368,7 @@ func (s *auditState) snapshot() map[string]any {
 	overridden := 0
 	for i := range s.records {
 		record := s.records[i]
+		record.AccountEmail = emails[record.AccountScope]
 		// Preserve the historic observations, but publish today's policy even
 		// for records restored from snapshots predating model exemptions.
 		record.DetectionExempt = !degradationDetectionEnabled(record.Model, record.RequestedModel)
@@ -413,16 +452,18 @@ func management(raw []byte) (managementResponse, error) {
 func probeControl(body []byte) (managementResponse, error) {
 	skipped := false
 	var req struct {
-		Model   string `json:"model"`
-		Proxy   string `json:"proxy"`
-		ID      string `json:"id"`
-		Action  string `json:"action"`
-		Enabled *bool  `json:"enabled"`
-		Minutes *int   `json:"minutes"`
-		Seconds *int   `json:"seconds"`
-		StartHour *int `json:"start_hour"`
-		EndHour *int   `json:"end_hour"`
-		Exit    *exitEdit `json:"exit"`
+		Model     string    `json:"model"`
+		Target    string    `json:"target"`
+		Proxy     string    `json:"proxy"`
+		ID        string    `json:"id"`
+		Action    string    `json:"action"`
+		Enabled   *bool     `json:"enabled"`
+		Minutes   *int      `json:"minutes"`
+		Seconds   *int      `json:"seconds"`
+		Timezone  *string   `json:"timezone"`
+		StartHour *int      `json:"start_hour"`
+		EndHour   *int      `json:"end_hour"`
+		Exit      *exitEdit `json:"exit"`
 	}
 	if len(body) > 0 {
 		if err := json.Unmarshal(body, &req); err != nil {
@@ -430,6 +471,13 @@ func probeControl(body []byte) (managementResponse, error) {
 		}
 	}
 	switch action := strings.ToLower(strings.TrimSpace(req.Action)); action {
+	case "target-timezone":
+		if req.Timezone == nil {
+			return jsonErrorResponse(http.StatusBadRequest, "缺少 timezone 字段"), nil
+		}
+		if err := probeTrack.setTargetTimezone(*req.Timezone); err != nil {
+			return settingsErrorResponse(err)
+		}
 	case "sleep-hours":
 		if req.StartHour == nil || req.EndHour == nil {
 			return jsonErrorResponse(http.StatusBadRequest, "缺少 start_hour 或 end_hour 字段"), nil
@@ -467,8 +515,14 @@ func probeControl(body []byte) (managementResponse, error) {
 			skipped = true
 			break
 		}
-		if !probeTrack.setModelPaused(model, action == "pause") {
-			return jsonErrorResponse(http.StatusConflict, "正在停止，或该模型已有探测任务，请等待状态刷新"), nil
+		targets, err := probeTrack.resolveTargets(model, req.Target)
+		if err != nil {
+			return jsonErrorResponse(http.StatusConflict, err.Error()), nil
+		}
+		for _, target := range targets {
+			if !probeTrack.setModelPaused(target, action == "pause") {
+				return jsonErrorResponse(http.StatusConflict, "正在停止，或该模型已有探测任务，请等待状态刷新"), nil
+			}
 		}
 	case "probe-model":
 		model := strings.TrimSpace(req.Model)
@@ -479,8 +533,14 @@ func probeControl(body []byte) (managementResponse, error) {
 			skipped = true
 			break
 		}
-		if !probeTrack.probeModelAsync(model) {
-			return jsonErrorResponse(http.StatusConflict, "探测未就绪，或该模型已暂停/已有任务，请检查当前状态"), nil
+		targets, err := probeTrack.resolveTargets(model, req.Target)
+		if err != nil {
+			return jsonErrorResponse(http.StatusConflict, err.Error()), nil
+		}
+		for _, target := range targets {
+			if !probeTrack.probeModelAsync(target) {
+				return jsonErrorResponse(http.StatusConflict, "探测未就绪，或该模型已暂停/已有任务，请检查当前状态"), nil
+			}
 		}
 	case "reject-degraded":
 		if req.Enabled == nil {

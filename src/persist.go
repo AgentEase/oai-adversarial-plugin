@@ -34,21 +34,23 @@ const (
 // persistedState is the on-disk snapshot. Optional fields use omitempty so a
 // minimal snapshot (only the switch) stays tiny.
 type persistedState struct {
-	StateVersion   int                   `json:"state_version"`
-	SavedAt        string                `json:"saved_at,omitempty"`
-	RejectDegraded *bool                 `json:"reject_degraded,omitempty"`
-	Halted         *bool                 `json:"halted,omitempty"`
-	Paused         []string              `json:"paused,omitempty"`
-	Values         []stateEntry          `json:"values,omitempty"`
-	Candidates     []stateEntry          `json:"candidates,omitempty"`
-	Failures       []probeFailure        `json:"failures,omitempty"`
-	Suspects       []probeSuspicion      `json:"suspects,omitempty"`
-	Business       []businessDegradation `json:"business,omitempty"`
-	ExitPenalties  []exitPenalty         `json:"exit_penalties,omitempty"`
-	DisabledExits  []string              `json:"disabled_exits,omitempty"`
-	ProbesTotal    uint64                `json:"probes_total,omitempty"`
-	ProbesOK       uint64                `json:"probes_ok,omitempty"`
-	ProbeHistory   []probeRecord         `json:"probe_history,omitempty"`
+	StateVersion      int                   `json:"state_version"`
+	SavedAt           string                `json:"saved_at,omitempty"`
+	RejectDegraded    *bool                 `json:"reject_degraded,omitempty"`
+	Halted            *bool                 `json:"halted,omitempty"`
+	Paused            []string              `json:"paused,omitempty"`
+	Values            []stateEntry          `json:"values,omitempty"`
+	Candidates        []stateEntry          `json:"candidates,omitempty"`
+	Failures          []probeFailure        `json:"failures,omitempty"`
+	Suspects          []probeSuspicion      `json:"suspects,omitempty"`
+	Business          []businessDegradation `json:"business,omitempty"`
+	ExitPenalties     []exitPenalty         `json:"exit_penalties,omitempty"`
+	DisabledExits     []string              `json:"disabled_exits,omitempty"`
+	ProbesTotal       uint64                `json:"probes_total,omitempty"`
+	ProbesOK          uint64                `json:"probes_ok,omitempty"`
+	ExitSuccessCounts map[string]uint64     `json:"exit_success_counts,omitempty"`
+	ExitSuccessSince  string                `json:"exit_success_since,omitempty"`
+	ProbeHistory      []probeRecord         `json:"probe_history,omitempty"`
 	// Keep an explicit empty array to distinguish new snapshots from legacy ones.
 	ProbeSuccessHistory []probeRecord        `json:"probe_success_history"`
 	Records             []auditRecord        `json:"records,omitempty"`
@@ -136,7 +138,7 @@ func flushStateNow() {
 // may be milliseconds apart, which is fine for a dashboard snapshot.
 func collectState() persistedState {
 	state := persistedState{
-		StateVersion: 1,
+		StateVersion: 2,
 		SavedAt:      time.Now().UTC().Format(time.RFC3339Nano),
 	}
 	probeTrack.mu.Lock()
@@ -172,6 +174,11 @@ func collectState() persistedState {
 	}
 	state.ProbesTotal = probeTrack.probesTotal
 	state.ProbesOK = probeTrack.probesOK
+	state.ExitSuccessSince = probeTrack.exitSuccessSince
+	state.ExitSuccessCounts = make(map[string]uint64, len(probeTrack.exitSuccessCounts))
+	for id, count := range probeTrack.exitSuccessCounts {
+		state.ExitSuccessCounts[id] = count
+	}
 	historyCopy := make([]probeRecord, len(probeTrack.history))
 	copy(historyCopy, probeTrack.history)
 	state.ProbeHistory = historyCopy
@@ -336,6 +343,11 @@ func applyPersistedState(state persistedState) {
 	}
 	probeTrack.probesTotal = state.ProbesTotal
 	probeTrack.probesOK = state.ProbesOK
+	probeTrack.exitSuccessSince = state.ExitSuccessSince
+	probeTrack.exitSuccessCounts = make(map[string]uint64, len(state.ExitSuccessCounts))
+	for id, count := range state.ExitSuccessCounts {
+		probeTrack.exitSuccessCounts[id] = count
+	}
 	if state.ProbesTotal > probeTrack.probesTotal {
 		probeTrack.probesTotal = state.ProbesTotal
 	}
@@ -396,10 +408,8 @@ func applyPersistedState(state persistedState) {
 	}
 	history.mu.Unlock()
 
-	// Account routing evidence is short-lived operational state. Restore
-	// healthy observations for at most one hour; degraded/auth-error entries
-	// survive only while their explicit cooldown remains active. This avoids a
-	// stale snapshot pinning or blocking a credential after it is refreshed.
+	// Restore only fresh positive evidence. Legacy account cooldown fields are
+	// ignored and cannot prevent probes or alter host account availability.
 	now := time.Now().UTC()
 	accountRouter.mu.Lock()
 	if accountRouter.health == nil {
@@ -413,7 +423,7 @@ func applyPersistedState(state persistedState) {
 			if !entry.healthyAt(now) {
 				continue
 			}
-		} else if entry.CooldownUntil.IsZero() || !now.Before(entry.CooldownUntil) {
+		} else {
 			continue
 		}
 		entry.Account = publicAccountID(entry.AuthID)

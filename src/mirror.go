@@ -33,7 +33,7 @@ func (e *probeEngine) mirrorState(now time.Time) statemirror.State {
 		}
 	}
 	noDetection := len(cfg.Models) > 0 && s.PriorityModel == ""
-	ready := cfg.Enabled && e.cfg.Error == "" && !noDetection
+	ready := cfg.Enabled && e.cfg.Error == "" && !noDetection && (cfg.AccountMode == "" || len(e.probeTargetsLocked(cfg)) > 0)
 	auto := ready && cfg.Prefetch > 0 && !e.halted && s.PriorityModel != ""
 	switch {
 	case e.shuttingDown:
@@ -65,19 +65,19 @@ func (e *probeEngine) mirrorState(now time.Time) statemirror.State {
 	if threshold <= 0 {
 		threshold = probeDefaultsSuspectThreshold
 	}
-	for _, name := range cfg.Models {
+	for _, name := range e.probeTargetsLocked(cfg) {
 		m := statemirror.Model{Name: name, Detection: degradationDetectionEnabled(name, ""), Activity: "unchecked", Evidence: "none"}
 		if m.Detection {
 			switch {
-			case (e.probing[name] || queued[name]) && (e.stopping || e.paused[name]):
+			case (e.probing[name] || queued[name]) && (e.stopping || e.targetPausedLocked(name)):
 				m.Activity = "stopping"
-			case s.Status == "sleeping" && !e.paused[name] && (!e.halted || e.probing[name] || queued[name]):
+			case s.Status == "sleeping" && !e.targetPausedLocked(name) && (!e.halted || e.probing[name] || queued[name]):
 				m.Activity = "sleeping"
 			case queued[name]:
 				m.Activity = "queued"
 			case e.probing[name]:
 				m.Activity = "probing"
-			case e.paused[name]:
+			case e.targetPausedLocked(name):
 				m.Activity = "paused"
 			case !ready || e.shuttingDown:
 				m.Activity = "unavailable"
@@ -109,6 +109,9 @@ func (e *probeEngine) mirrorState(now time.Time) statemirror.State {
 			}
 		}
 		s.Models = append(s.Models, m)
+	}
+	if cfg.AccountMode != "" {
+		s.Models = aggregateAccountMirror(s.Models, cfg.Models, now)
 	}
 	return s
 }

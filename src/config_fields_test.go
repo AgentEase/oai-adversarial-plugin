@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestPanelSchemaAndAliases(t *testing.T) {
@@ -17,7 +16,7 @@ func TestPanelSchemaAndAliases(t *testing.T) {
 		}
 		seen[name] = true
 	}
-	if !seen["accepted-state-lengths"] || !seen["timezone"] || len(seen) != 25 {
+	if !seen["accepted-state-lengths"] || !seen["timezone"] || len(seen) != 22 {
 		t.Fatal("missing fields")
 	}
 	b, err := normalizePanelConfig([]byte("operation-mode: business-only\noverride-policy: always\noverride-models: [gpt-6-astra]\nprobe-interval-seconds: 10\nturn-state-override:\n  value: preserved\n  probe:\n    enabled: true\n    prefetch-minutes: 3\n"))
@@ -48,7 +47,7 @@ func TestHighestPriorityPanelConfig(t *testing.T) {
 		t.Fatal("decode")
 	}
 	cfg := parseProbeConfig(root.Config.Probe)
-	if !cfg.Enabled || cfg.AccountMode != "highest-priority" || cfg.CandidateLimit != 4 || cfg.AuthCooldown != 30*time.Minute || root.Config.Probe.CredFile != "" {
+	if !cfg.Enabled || cfg.AccountMode != "highest-priority" || cfg.CandidateLimit != 4 || root.Config.Probe.CredFile != "" {
 		t.Fatal("automatic mode not applied")
 	}
 }

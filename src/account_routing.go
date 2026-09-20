@@ -22,8 +22,6 @@ import (
 // reaches across priority tiers.
 type accountRoutingConfig struct {
 	Enabled          bool
-	DegradedCooldown time.Duration
-	FailureCooldown  time.Duration
 	FailureThreshold int
 }
 
@@ -43,7 +41,6 @@ type accountModelHealth struct {
 	LastReason          string    `json:"last_reason,omitempty"`
 	ObservedAt          time.Time `json:"observed_at"`
 	HealthyAt           time.Time `json:"healthy_at,omitempty"`
-	CooldownUntil       time.Time `json:"cooldown_until,omitempty"`
 }
 
 const accountHealthMaxAge = time.Hour
@@ -58,7 +55,6 @@ type schedulerCandidateDiagnostic struct {
 	Provider string `json:"provider,omitempty"`
 	Status   string `json:"status,omitempty"`
 	Health   string `json:"health"`
-	Cooling  bool   `json:"cooling,omitempty"`
 }
 
 type schedulerRoutingDiagnostic struct {
@@ -91,8 +87,6 @@ var accountRouter = &accountRoutingManager{
 
 func defaultAccountRoutingConfig() accountRoutingConfig {
 	return accountRoutingConfig{
-		DegradedCooldown: 180 * time.Minute,
-		FailureCooldown:  10 * time.Minute,
 		FailureThreshold: 2,
 	}
 }
@@ -111,14 +105,10 @@ func configureAccountRouting(configYAML []byte) error {
 	}
 	var root struct {
 		ExperimentalEnabled *bool `yaml:"experimental-account-routing"`
-		DegradedMinutes     *int  `yaml:"account-degraded-cooldown-minutes"`
-		FailureMinutes      *int  `yaml:"account-failure-cooldown-minutes"`
 		FailureThreshold    *int  `yaml:"account-failure-threshold"`
 		AccountRouting      struct {
-			Enabled                 *bool `yaml:"enabled"`
-			DegradedCooldownMinutes *int  `yaml:"degraded-cooldown-minutes"`
-			FailureCooldownMinutes  *int  `yaml:"failure-cooldown-minutes"`
-			FailureThreshold        *int  `yaml:"failure-threshold"`
+			Enabled          *bool `yaml:"enabled"`
+			FailureThreshold *int  `yaml:"failure-threshold"`
 		} `yaml:"account-routing"`
 	}
 	if err := yaml.Unmarshal(normalized, &root); err != nil {
@@ -132,29 +122,9 @@ func configureAccountRouting(configYAML []byte) error {
 	if root.ExperimentalEnabled != nil {
 		cfg.Enabled = *root.ExperimentalEnabled
 	}
-	degraded := root.AccountRouting.DegradedCooldownMinutes
-	if root.DegradedMinutes != nil {
-		degraded = root.DegradedMinutes
-	}
-	failure := root.AccountRouting.FailureCooldownMinutes
-	if root.FailureMinutes != nil {
-		failure = root.FailureMinutes
-	}
 	threshold := root.AccountRouting.FailureThreshold
 	if root.FailureThreshold != nil {
 		threshold = root.FailureThreshold
-	}
-	if degraded != nil {
-		if *degraded < 1 || *degraded > 1440 {
-			return accountRouter.configError(cfg, "account degraded cooldown must be 1-1440 minutes")
-		}
-		cfg.DegradedCooldown = time.Duration(*degraded) * time.Minute
-	}
-	if failure != nil {
-		if *failure < 1 || *failure > 120 {
-			return accountRouter.configError(cfg, "account failure cooldown must be 1-120 minutes")
-		}
-		cfg.FailureCooldown = time.Duration(*failure) * time.Minute
 	}
 	if threshold != nil {
 		if *threshold < 1 || *threshold > 10 {
@@ -230,8 +200,6 @@ func (m *accountRoutingManager) pick(req schedulerPickRequest, now time.Time) sc
 	}
 	all := make([]schedulerAuthCandidate, 0, len(req.Candidates))
 	healthy := make([]schedulerAuthCandidate, 0, len(req.Candidates))
-	unknown := make([]schedulerAuthCandidate, 0, len(req.Candidates))
-	blocked := 0
 	for _, candidate := range req.Candidates {
 		// Some CPA releases leave the per-candidate provider empty after the
 		// request provider has already selected the Codex scheduler. Accept that
@@ -250,17 +218,9 @@ func (m *accountRoutingManager) pick(req schedulerPickRequest, now time.Time) sc
 		if ok && entry.State != "" && (entry.State != "healthy" || freshHealthy) {
 			candidateDiagnostic.Health = entry.State
 		}
-		if ok && !entry.CooldownUntil.IsZero() && now.Before(entry.CooldownUntil) {
-			candidateDiagnostic.Cooling = true
-			diagnostic.Candidates = append(diagnostic.Candidates, candidateDiagnostic)
-			blocked++
-			continue
-		}
 		diagnostic.Candidates = append(diagnostic.Candidates, candidateDiagnostic)
 		if ok && freshHealthy {
 			healthy = append(healthy, candidate)
-		} else {
-			unknown = append(unknown, candidate)
 		}
 	}
 	diagnostic.EligibleCount = len(all)
@@ -269,23 +229,12 @@ func (m *accountRoutingManager) pick(req schedulerPickRequest, now time.Time) sc
 		m.lastScheduler = diagnostic
 		return schedulerPickResponse{}
 	}
-	var pool []schedulerAuthCandidate
-	switch {
-	case len(healthy) > 0:
-		pool = healthy
-	case blocked > 0 && len(unknown) > 0:
-		pool = unknown
-	default:
-		// Preserve CPA's configured scheduler when every candidate is unknown
-		// or every candidate is cooling down.
-		if blocked == len(all) {
-			diagnostic.Outcome = "all_cooling"
-		} else {
-			diagnostic.Outcome = "all_unknown"
-		}
+	if len(healthy) == 0 {
+		diagnostic.Outcome = "all_unknown"
 		m.lastScheduler = diagnostic
 		return schedulerPickResponse{}
 	}
+	pool := healthy
 	sort.Slice(pool, func(i, j int) bool { return pool[i].ID < pool[j].ID })
 	selected := pool[int(m.roundRobin%uint64(len(pool)))]
 	m.roundRobin++
@@ -314,6 +263,8 @@ func providerLooksCodex(provider string) bool {
 }
 
 type usageRecord struct {
+	ResponseModel   string
+	Alias           string
 	Provider        string
 	Model           string
 	AuthID          string
@@ -335,6 +286,8 @@ func observeAccountUsage(raw []byte) error {
 		return fmt.Errorf("decode usage record: %w", err)
 	}
 	accountRouter.observe(record, time.Now().UTC())
+	// Usage has no request binding. AuthID alone may refer to a replaced file;
+	// ticket capture belongs to the bound HTTP/stream response callbacks.
 	return nil
 }
 
@@ -379,23 +332,19 @@ func (m *accountRoutingManager) observe(record usageRecord, now time.Time) {
 		entry.HealthyAt = now
 		entry.ConsecutiveFailures = 0
 		entry.LastReason = "healthy_state"
-		entry.CooldownUntil = time.Time{}
 	case stateLength > 0 && !isAcceptedStateLength(stateLength):
 		entry.State = "degraded"
 		entry.ConsecutiveFailures++
 		entry.LastReason = fmt.Sprintf("state_length_%d", stateLength)
-		entry.CooldownUntil = now.Add(m.config.Config.DegradedCooldown)
 	case record.Failed && (record.Failure.StatusCode == http.StatusUnauthorized || record.Failure.StatusCode == http.StatusForbidden):
 		entry.State = "auth_error"
 		entry.ConsecutiveFailures++
 		entry.LastReason = fmt.Sprintf("http_%d", record.Failure.StatusCode)
-		entry.CooldownUntil = now.Add(m.config.Config.DegradedCooldown)
 	case record.Failed:
 		entry.ConsecutiveFailures++
 		entry.LastReason = classifyUsageFailure(record.Failure)
 		if entry.ConsecutiveFailures >= m.config.Config.FailureThreshold {
 			entry.State = "transient_failure"
-			entry.CooldownUntil = now.Add(m.config.Config.FailureCooldown)
 		}
 	default:
 		if entry.State == "" {
@@ -435,22 +384,18 @@ func (m *accountRoutingManager) observeProbe(authID, requestedModel string, reco
 		entry.HealthyAt = now
 		entry.ConsecutiveFailures = 0
 		entry.LastReason = "probe_healthy"
-		entry.CooldownUntil = time.Time{}
 	case record.StatusCode == http.StatusUnauthorized || record.StatusCode == http.StatusForbidden:
 		entry.State = "auth_error"
 		entry.ConsecutiveFailures++
 		entry.LastReason = fmt.Sprintf("probe_http_%d", record.StatusCode)
-		entry.CooldownUntil = now.Add(m.config.Config.DegradedCooldown)
 	case record.StateLength > 0 && !isAcceptedStateLength(record.StateLength):
 		entry.State = "degraded"
 		entry.ConsecutiveFailures++
 		entry.LastReason = fmt.Sprintf("probe_state_length_%d", record.StateLength)
-		entry.CooldownUntil = now.Add(m.config.Config.DegradedCooldown)
 	case record.ObservedModel != "" && !probeModelConsistent(requestedModel, record.ObservedModel):
 		entry.State = "degraded"
 		entry.ConsecutiveFailures++
 		entry.LastReason = "probe_model_mismatch"
-		entry.CooldownUntil = now.Add(m.config.Config.DegradedCooldown)
 	default:
 		// Connection and proxy failures are not account-quality evidence. The
 		// probe engine keeps those diagnostics and exit cooldowns separately.
@@ -540,16 +485,14 @@ func accountRoutingSummary() map[string]any {
 		return entries[i].ObservedAt.After(entries[j].ObservedAt)
 	})
 	return map[string]any{
-		"enabled":                   accountRouter.config.Config.Enabled,
-		"monitoring":                true,
-		"error":                     accountRouter.config.Error,
-		"degraded_cooldown_minutes": int(accountRouter.config.Config.DegradedCooldown / time.Minute),
-		"failure_cooldown_minutes":  int(accountRouter.config.Config.FailureCooldown / time.Minute),
-		"failure_threshold":         accountRouter.config.Config.FailureThreshold,
-		"usage_observed":            accountRouter.usageObserved,
-		"scheduler_calls":           accountRouter.schedulerCalls,
-		"routing_handled":           accountRouter.routingHandled,
-		"last_scheduler":            accountRouter.lastScheduler,
-		"accounts":                  entries,
+		"enabled":           accountRouter.config.Config.Enabled,
+		"monitoring":        true,
+		"error":             accountRouter.config.Error,
+		"failure_threshold": accountRouter.config.Config.FailureThreshold,
+		"usage_observed":    accountRouter.usageObserved,
+		"scheduler_calls":   accountRouter.schedulerCalls,
+		"routing_handled":   accountRouter.routingHandled,
+		"last_scheduler":    accountRouter.lastScheduler,
+		"accounts":          entries,
 	}
 }

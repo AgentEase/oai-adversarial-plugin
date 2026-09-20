@@ -66,7 +66,6 @@ type probeConfig struct {
 	CredFile              string
 	AccountMode           string
 	CandidateLimit        int
-	AuthCooldown          time.Duration
 	Proxies               []string
 	TTL                   time.Duration
 	Window                time.Duration
@@ -78,21 +77,21 @@ type probeConfig struct {
 	ExitCooldown          time.Duration
 	ExitFailThreshold     int
 	ExitPoolFailThreshold int
-	ExitMinActive       int
-	ExitSuccessCooldown time.Duration
-	PoolAttempts        int
-	Prefetch            time.Duration
-	SleepHours          probeSleepHours
-	SuspectThreshold    int
-	Timeout             time.Duration
-	Prompt              string
-	UpstreamURL         string
-	SecretsFile         string
-	ProxyPools          map[string]bool
-	ProxyLabels         map[string]string
-	ProxyIDs            map[string]string
-	ProxyAttempts       map[string]int
-	ProxyMultipliers    map[string]float64
+	ExitMinActive         int
+	ExitSuccessCooldown   time.Duration
+	PoolAttempts          int
+	Prefetch              time.Duration
+	SleepHours            probeSleepHours
+	SuspectThreshold      int
+	Timeout               time.Duration
+	Prompt                string
+	UpstreamURL           string
+	SecretsFile           string
+	ProxyPools            map[string]bool
+	ProxyLabels           map[string]string
+	ProxyIDs              map[string]string
+	ProxyAttempts         map[string]int
+	ProxyMultipliers      map[string]float64
 }
 
 // probeConfigYAML mirrors the YAML keys accepted under turn-state-override.probe.
@@ -102,7 +101,6 @@ type probeConfigYAML struct {
 	CredFile                   string   `yaml:"cred-file"`
 	AccountMode                string   `yaml:"account-mode"`
 	CandidateLimit             *int     `yaml:"candidate-limit"`
-	AuthCooldownMinutes        *int     `yaml:"auth-cooldown-minutes"`
 	Proxies                    []string `yaml:"proxies"`
 	ProxiesFile                string   `yaml:"proxies-file"`
 	TTLMinutes                 *int     `yaml:"ttl-minutes"`
@@ -145,6 +143,8 @@ type stateEntry struct {
 
 // probeRecord is one probe attempt for the audit trail.
 type probeRecord struct {
+	Account       string `json:"account,omitempty"`
+	AccountEmail  string `json:"account_email,omitempty"`
 	Time          string `json:"time"`
 	Model         string `json:"model"`
 	Proxy         string `json:"proxy"`
@@ -212,47 +212,52 @@ type exitPenalty struct {
 }
 
 type probeEngine struct {
-	mu             sync.Mutex
-	cfg            probeConfigState
-	baseCfg        *probeConfigState
-	settings       runtimeSettings
-	settingsError  string
-	configRevision uint64
-	values         map[string]stateEntry
-	failures       map[string]probeFailure
-	suspects       map[string]probeSuspicion
-	business       map[string]businessDegradation
-	exitPenalties  map[string]exitPenalty
-	candidates     map[string]stateEntry
-	prefetchGate   map[string]time.Time
-	prefetchStop   chan struct{}
-	lastAttempt    map[string]time.Time
-	paused         map[string]bool
-	probing        map[string]bool
-	abortCh        chan struct{}
-	halted         bool
-	stopping       bool
-	shuttingDown   bool
-	queue          []probeTask
-	queueActive    bool
-	disabledExits  map[string]bool
-	authCooldowns  map[string]time.Time
-	autoAuthSeen   bool
-	lastAutoAuth   string
-	rejectDegraded bool
-	history        []probeRecord
-	successHistory []probeRecord
-	proxyIndex     int
-	consecutive    int
-	lastActivity   string
-	running        bool
-	runNote        string
-	runStartedAt   string
-	runFinishedAt  string
-	seeded         int
-	probesTotal    uint64
-	probesOK       uint64
-	lastError      string
+	accounts          map[string]hostAuthEntry
+	accountError      string
+	mu                sync.Mutex
+	cfg               probeConfigState
+	baseCfg           *probeConfigState
+	settings          runtimeSettings
+	settingsError     string
+	configRevision    uint64
+	values            map[string]stateEntry
+	failures          map[string]probeFailure
+	suspects          map[string]probeSuspicion
+	business          map[string]businessDegradation
+	exitPenalties     map[string]exitPenalty
+	candidates        map[string]stateEntry
+	prefetchGate      map[string]time.Time
+	prefetchStop      chan struct{}
+	lastAttempt       map[string]time.Time
+	paused            map[string]bool
+	probing           map[string]bool
+	abortCh           chan struct{}
+	halted            bool
+	stopping          bool
+	shuttingDown      bool
+	queue             []probeTask
+	queueActive       bool
+	disabledExits     map[string]bool
+	autoAuthSeen      bool
+	lastAutoAuth      string
+	lastAutoScope     string
+	accountBindings   map[string]string
+	rejectDegraded    bool
+	history           []probeRecord
+	successHistory    []probeRecord
+	exitSuccessCounts map[string]uint64
+	exitSuccessSince  string
+	proxyIndex        int
+	consecutive       int
+	lastActivity      string
+	running           bool
+	runNote           string
+	runStartedAt      string
+	runFinishedAt     string
+	seeded            int
+	probesTotal       uint64
+	probesOK          uint64
+	lastError         string
 }
 
 var probeTrack = &probeEngine{
@@ -266,7 +271,6 @@ var probeTrack = &probeEngine{
 	lastAttempt:    map[string]time.Time{},
 	paused:         map[string]bool{},
 	probing:        map[string]bool{},
-	authCooldowns:  map[string]time.Time{},
 	rejectDegraded: true,
 }
 
@@ -280,7 +284,6 @@ func parseProbeConfig(block probeConfigYAML) probeConfig {
 		CredFile:              strings.TrimSpace(block.CredFile),
 		AccountMode:           strings.TrimSpace(block.AccountMode),
 		CandidateLimit:        5,
-		AuthCooldown:          60 * time.Minute,
 		Proxies:               append([]string(nil), block.Proxies...),
 		TTL:                   time.Duration(probeDefaultsTTLMinutes) * time.Minute,
 		Window:                time.Duration(probeDefaultsWindowMinutes) * time.Minute,
@@ -315,9 +318,6 @@ func parseProbeConfig(block probeConfigYAML) probeConfig {
 	}
 	if block.CandidateLimit != nil && *block.CandidateLimit > 0 {
 		cfg.CandidateLimit = *block.CandidateLimit
-	}
-	if block.AuthCooldownMinutes != nil && *block.AuthCooldownMinutes > 0 {
-		cfg.AuthCooldown = time.Duration(*block.AuthCooldownMinutes) * time.Minute
 	}
 	if block.TTLMinutes != nil && *block.TTLMinutes > 0 {
 		cfg.TTL = time.Duration(*block.TTLMinutes) * time.Minute
@@ -457,6 +457,7 @@ func configureProbeTrack(block probeConfigYAML) error {
 		cfgErr = err.Error()
 	}
 	probeTrack.cfg = probeConfigState{Config: cfg, Error: cfgErr}
+	probeTrack.ensureExitSuccessStatsLocked()
 	probeTrack.configRevision++
 	// Policy migration: plain exits whose accumulated failures are below the
 	// (possibly raised) threshold are released at once. Rotating pools are
@@ -485,6 +486,7 @@ func configureProbeTrack(block probeConfigYAML) error {
 	// final hand-off window (prefetch-minutes) does the watcher attempt one
 	// probe to park a successor token for a seamless takeover.
 	ensurePersistence()
+	probeTrack.syncProbeAccounts()
 	probeTrack.ensurePrefetchWatcher()
 	return nil
 }
@@ -518,6 +520,7 @@ type probeProgress struct {
 }
 
 func (e *probeEngine) start() bool {
+	e.syncProbeAccounts()
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	cfg := e.cfg.Config
@@ -525,6 +528,10 @@ func (e *probeEngine) start() bool {
 		if !cfg.Enabled {
 			e.runNote = "探测轨未启用（probe.enabled=false）"
 		}
+		return false
+	}
+	if cfg.AccountMode != "" && len(e.probeTargetsLocked(cfg)) == 0 {
+		e.runNote = "没有可用的账号绑定，请检查 CPA 认证接口和账号模式"
 		return false
 	}
 	// An explicit start re-ignites the engine: the automatic hand-off watcher
@@ -538,8 +545,8 @@ func (e *probeEngine) start() bool {
 	e.runStartedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	e.runFinishedAt = ""
 	skipped := 0
-	for _, model := range cfg.Models {
-		if e.paused[model] || !degradationDetectionEnabled(model, "") {
+	for _, model := range e.probeTargetsLocked(cfg) {
+		if e.targetPausedLocked(model) || !degradationDetectionEnabled(model, "") {
 			continue
 		}
 		if e.settledBaselineLocked(model, cfg, time.Now().UTC()) {
@@ -636,7 +643,7 @@ func (e *probeEngine) enqueueTask(model string, force bool) bool {
 
 func (e *probeEngine) enqueueTaskLocked(model string, force bool) bool {
 	model = strings.TrimSpace(model)
-	if model == "" || !degradationDetectionEnabled(model, "") || !e.cfg.Config.Enabled || e.cfg.Error != "" || e.stopping || e.shuttingDown || e.paused[model] || (!force && e.halted) {
+	if model == "" || !degradationDetectionEnabled(model, "") || !e.cfg.Config.Enabled || e.cfg.Error != "" || e.stopping || e.shuttingDown || e.targetPausedLocked(model) || (!force && e.halted) {
 		return false
 	}
 	if e.queue == nil {
@@ -683,7 +690,7 @@ func (e *probeEngine) insertTaskLocked(task probeTask, resumed bool) {
 
 // Called at an attempt boundary with e.mu held, never during a request.
 func (e *probeEngine) yieldProbeTaskLocked(task probeTask, progress probeProgress, stop, brake <-chan struct{}) bool {
-	if !e.queueActive || e.stopping || e.shuttingDown || e.paused[task.Model] {
+	if !e.queueActive || e.stopping || e.shuttingDown || e.targetPausedLocked(task.Model) {
 		return false
 	}
 	select {
@@ -695,7 +702,7 @@ func (e *probeEngine) yieldProbeTaskLocked(task probeTask, progress probeProgres
 	}
 	for _, queued := range e.queue {
 		if modelPriority(e.cfg.Config, queued.Model) < modelPriority(e.cfg.Config, task.Model) &&
-			!e.paused[queued.Model] && (queued.Force || !e.halted) {
+			!e.targetPausedLocked(queued.Model) && (queued.Force || !e.halted) {
 			task.Progress = &progress
 			e.insertTaskLocked(task, true)
 			return true
@@ -708,7 +715,7 @@ func (e *probeEngine) yieldProbeTaskLocked(task probeTask, progress probeProgres
 func (e *probeEngine) modelPaused(model string) bool {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	return e.paused[model]
+	return e.targetPausedLocked(model)
 }
 
 // queueLoop is the single executor: it takes the highest-priority waiting
@@ -738,7 +745,7 @@ func (e *probeEngine) queueLoop() {
 			e.abortCh = make(chan struct{})
 			brake = e.abortCh
 		}
-		paused := e.paused[task.Model]
+		paused := e.targetPausedLocked(task.Model)
 		halted := e.halted
 		e.mu.Unlock()
 		// Re-evaluate at dequeue time: a task may have become obsolete while
@@ -764,6 +771,7 @@ func (e *probeEngine) queueLoop() {
 // shown by the dashboard therefore cuts ahead of lower-priority waiting work.
 // Unknown models remain valid but run after configured models.
 func modelPriority(cfg probeConfig, model string) int {
+	model = targetModel(model)
 	for i, candidate := range cfg.Models {
 		if candidate == model {
 			return i
@@ -798,7 +806,7 @@ func (e *probeEngine) waitProbeInterval(interval time.Duration, stop, brake <-ch
 func (e *probeEngine) probeSuppressed(model string) bool {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if e.paused[model] || e.probing[model] {
+	if e.targetPausedLocked(model) || e.probing[model] {
 		return true
 	}
 	for _, task := range e.queue {
@@ -863,7 +871,7 @@ func (e *probeEngine) setModelPaused(model string, paused bool) bool {
 		e.paused[model] = true
 		pending := e.queue[:0]
 		for _, task := range e.queue {
-			if task.Model != model {
+			if task.Model != model && (targetModel(model) != model || targetModel(task.Model) != model) {
 				pending = append(pending, task)
 			}
 		}
@@ -871,6 +879,14 @@ func (e *probeEngine) setModelPaused(model string, paused bool) bool {
 		delete(e.suspects, model)
 		delete(e.prefetchGate, model)
 	} else {
+		if scope, bare := splitTarget(model); scope != "" && e.paused[bare] {
+			for _, target := range e.displayTargetsLocked(e.cfg.Config) {
+				if targetModel(target) == bare && target != model {
+					e.paused[target] = true
+				}
+			}
+			delete(e.paused, bare)
+		}
 		delete(e.paused, model)
 		delete(e.failures, model)
 	}
@@ -943,7 +959,16 @@ func (e *probeEngine) prefetchWatchLoop(stop <-chan struct{}) {
 
 func (e *probeEngine) prefetchScan() {
 	e.mu.Lock()
+	initial := e.cfg.Config
+	skip := !initial.Enabled || initial.Prefetch <= 0 || e.halted || e.stopping || e.shuttingDown || !initial.SleepHours.until(time.Now()).IsZero()
+	e.mu.Unlock()
+	if skip {
+		return
+	}
+	e.syncProbeAccounts()
+	e.mu.Lock()
 	cfg := e.cfg.Config
+	targets := e.probeTargetsLocked(cfg)
 	suppressed := !cfg.Enabled || e.cfg.Error != "" || cfg.Prefetch <= 0 || e.halted || e.stopping || e.shuttingDown || !cfg.SleepHours.until(time.Now()).IsZero()
 	e.mu.Unlock()
 	if suppressed {
@@ -952,20 +977,33 @@ func (e *probeEngine) prefetchScan() {
 		return
 	}
 	now := time.Now().UTC()
-	for _, model := range cfg.Models {
+	for _, model := range targets {
 		if !degradationDetectionEnabled(model, "") {
 			continue
 		}
 		e.mu.Lock()
+		cfg = e.cfg.Config
+		if !cfg.Enabled || cfg.Prefetch <= 0 || e.halted || e.stopping || e.shuttingDown || !cfg.SleepHours.until(time.Now()).IsZero() {
+			e.mu.Unlock()
+			return
+		}
 		if e.promoteCandidateLocked(model, cfg, now) {
 			markStateDirty()
 		}
-		if e.paused[model] || e.probing[model] {
+		if e.targetPausedLocked(model) || e.probing[model] {
 			e.mu.Unlock()
 			continue
 		}
 		active, has := e.values[model]
 		if !has || !stateEntryAccepted(active) {
+			if cfg.AccountMode == "all-accounts" && now.Sub(e.prefetchGate[model]) >= prefetchRetryWindow {
+				if e.prefetchGate == nil {
+					e.prefetchGate = map[string]time.Time{}
+				}
+				if e.enqueueTaskLocked(model, false) {
+					e.prefetchGate[model] = now
+				}
+			}
 			e.mu.Unlock()
 			continue
 		}
@@ -1086,11 +1124,12 @@ func (e *probeEngine) pausedModels() []string {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	models := make([]string, 0, len(e.paused))
-	for _, model := range e.cfg.Config.Models {
-		if e.paused[model] {
+	for model, paused := range e.paused {
+		if paused {
 			models = append(models, model)
 		}
 	}
+	sort.Strings(models)
 	return models
 }
 
@@ -1176,9 +1215,9 @@ func (e *probeEngine) degradedRejectReasonFor(model string, servingModels []stri
 	if !e.rejectDegraded {
 		return ""
 	}
-	candidate := strings.ToLower(strings.TrimSpace(model))
+	candidate := strings.TrimSpace(model)
 	for key, mark := range e.business {
-		if !degradationDetectionEnabled(key, "") || !strings.HasPrefix(candidate, strings.ToLower(key)) {
+		if !degradationDetectionEnabled(key, "") || !sameTargetModel(candidate, key) {
 			continue
 		}
 		if mark.Reason != "" {
@@ -1202,7 +1241,7 @@ func (e *probeEngine) degradedRejectReasonFor(model string, servingModels []stri
 		}
 	}
 	for key, failure := range e.failures {
-		if !degradationDetectionEnabled(key, "") || !strings.HasPrefix(candidate, strings.ToLower(key)) {
+		if !degradationDetectionEnabled(key, "") || !sameTargetModel(candidate, key) {
 			continue
 		}
 		if reason := degradationEvidence(failure.LastError); reason != "" {
@@ -1210,7 +1249,7 @@ func (e *probeEngine) degradedRejectReasonFor(model string, servingModels []stri
 		}
 	}
 	for key, suspicion := range e.suspects {
-		if !degradationDetectionEnabled(key, "") || !strings.HasPrefix(candidate, strings.ToLower(key)) {
+		if !degradationDetectionEnabled(key, "") || !sameTargetModel(candidate, key) {
 			continue
 		}
 		threshold := e.cfg.Config.SuspectThreshold
@@ -1236,7 +1275,7 @@ func degradedRejectMessage(models ...string) string {
 			continue
 		}
 		if reason := probeTrack.degradedRejectReasonFor(candidate, models); reason != "" {
-			return fmt.Sprintf("模型 %s 当前处于风控降智状态：%s。请求已被 O/对抗插件拦截，请稍后重试或切换模型。", candidate, reason)
+			return fmt.Sprintf("模型 %s 当前处于风控降智状态：%s。请求已被 O/对抗插件拦截，请稍后重试或切换模型。", targetModel(candidate), reason)
 		}
 	}
 	return ""
@@ -1631,7 +1670,7 @@ func (e *probeEngine) runProbeTask(task probeTask, cfg probeConfig, stop <-chan 
 		// a failure annotation - pausing is a deliberate act, not a probe
 		// outcome (v1.5.20).
 		e.mu.Lock()
-		pausedMidRound := e.paused[model]
+		pausedMidRound := e.targetPausedLocked(model)
 		if revision != e.configRevision {
 			cfg = e.cfg.Config
 			revision = e.configRevision
@@ -1681,6 +1720,9 @@ func (e *probeEngine) runProbeTask(task probeTask, cfg probeConfig, stop <-chan 
 		intervalWaited = false
 		record, value := e.probeOnce(model, proxySpec, cfg)
 		e.appendRecord(record)
+		if record.Account != "" && strings.HasPrefix(record.Error, "read cred:") {
+			return
+		}
 		if value != "" {
 			e.noteExitOutcome(proxySpec, true, "")
 			e.storeValue(model, value, "probe", proxySpec, cfg)
@@ -1738,8 +1780,11 @@ func (e *probeEngine) runProbeTask(task probeTask, cfg probeConfig, stop <-chan 
 // probeOnce sends one minimal upstream request through the given egress and
 // returns its record plus the captured state (empty on failure).
 func (e *probeEngine) probeOnce(model, proxySpec string, cfg probeConfig) (probeRecord, string) {
+	target := model
+	model = targetModel(target)
 	started := time.Now()
 	record := probeRecord{
+		Account: targetAccount(target),
 		Time:    started.UTC().Format(time.RFC3339Nano),
 		Model:   model,
 		Proxy:   proxySpec,
@@ -1750,7 +1795,7 @@ func (e *probeEngine) probeOnce(model, proxySpec string, cfg probeConfig) (probe
 	defer func() {
 		fmt.Fprint(os.Stderr, probeEgressLog(record, exitID(cfg, proxySpec), proxySpec, binder, stage))
 	}()
-	cred, err := e.resolveProbeCredential(cfg)
+	cred, err := e.credentialForTarget(target, cfg)
 	if err != nil {
 		record.DurationMS = time.Since(started).Milliseconds()
 		record.Error = fmt.Sprintf("read cred: %v", err)
@@ -1823,11 +1868,6 @@ func (e *probeEngine) probeOnce(model, proxySpec string, cfg probeConfig) (probe
 		// Read a bounded snippet for diagnostics.
 		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 		record.Error = fmt.Sprintf("status %d: %s", resp.StatusCode, strings.TrimSpace(string(snippet)))
-		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-			e.cooldownProbeAccount(cred.AuthIndex, cfg.AuthCooldown)
-		} else if resp.StatusCode == http.StatusTooManyRequests {
-			e.cooldownProbeAccount(cred.AuthIndex, 5*time.Minute)
-		}
 		e.noteError(record.Error)
 		return record, ""
 	}
@@ -1864,7 +1904,6 @@ func (e *probeEngine) probeOnce(model, proxySpec string, cfg probeConfig) (probe
 	if !probeModelConsistent(model, observedModel) {
 		record.Error = fmt.Sprintf("model mismatch: requested %s got %s", model, observedModel)
 		record.ObservedModel = observedModel
-		e.cooldownProbeAccount(cred.AuthIndex, 90*time.Second)
 		e.noteError(record.Error)
 		return record, ""
 	}
@@ -1874,7 +1913,6 @@ func (e *probeEngine) probeOnce(model, proxySpec string, cfg probeConfig) (probe
 		record.Error = fmt.Sprintf("state length %d not in configured lengths %v (suspected degraded)", len(state), acceptedStateLengths())
 		record.ObservedModel = observedModel
 		record.StateLength = len(state)
-		e.cooldownProbeAccount(cred.AuthIndex, 90*time.Second)
 		e.noteError(record.Error)
 		return record, ""
 	}
@@ -1889,6 +1927,11 @@ func (e *probeEngine) probeOnce(model, proxySpec string, cfg probeConfig) (probe
 	e.mu.Lock()
 	e.probesTotal++
 	e.probesOK++
+	e.ensureExitSuccessStatsLocked()
+	// cfg is the attempt's snapshot: edits during a request cannot move its
+	// result to a different exit. Stable IDs survive managed address changes.
+	e.exitSuccessCounts[exitID(cfg, proxySpec)]++
+	markStateDirty()
 	e.lastError = ""
 	e.lastActivity = fmt.Sprintf("%s via %s", model, publicProxyURL(proxySpec))
 	e.mu.Unlock()
@@ -2112,6 +2155,18 @@ func (e *probeEngine) seedBaselinesFromAudit() {
 	}
 }
 
+// Caller holds e.mu. Legacy history is bounded, so start a new, explicit
+// counting epoch rather than presenting partial history as lifetime totals.
+func (e *probeEngine) ensureExitSuccessStatsLocked() {
+	if e.exitSuccessCounts == nil {
+		e.exitSuccessCounts = make(map[string]uint64)
+	}
+	if e.exitSuccessSince == "" {
+		e.exitSuccessSince = time.Now().UTC().Format(time.RFC3339Nano)
+		markStateDirty()
+	}
+}
+
 func (e *probeEngine) appendRecord(record probeRecord) {
 	defer markStateDirty()
 	e.mu.Lock()
@@ -2180,9 +2235,13 @@ func readProbeCredential(path string) (probeCredential, error) {
 	if err != nil {
 		return probeCredential{}, err
 	}
+	return decodeProbeCredential(raw)
+}
+
+func decodeProbeCredential(raw []byte) (probeCredential, error) {
 	var cred probeCredential
 	if err := json.Unmarshal(raw, &cred); err != nil {
-		return probeCredential{}, err
+		return probeCredential{}, fmt.Errorf("invalid credential JSON")
 	}
 	if strings.TrimSpace(cred.AccessToken) == "" {
 		return probeCredential{}, fmt.Errorf("access_token empty")
@@ -2194,7 +2253,7 @@ func readProbeCredential(path string) (probeCredential, error) {
 // requested model. Matching is case-insensitive and accepts suffix variants
 // (for example "gpt-6-astra" vs "gpt-6-astra-preview").
 func probeModelConsistent(requested, observed string) bool {
-	requested = strings.ToLower(strings.TrimSpace(requested))
+	requested = strings.ToLower(strings.TrimSpace(targetModel(requested)))
 	observed = strings.ToLower(strings.TrimSpace(observed))
 	if requested == "" || observed == "" {
 		return false
@@ -2293,9 +2352,11 @@ func buildProbeTransport(spec string) (*http.Transport, *socksBind, error) {
 
 // probeSummary describes the probe engine state for the management API.
 func probeSummary() map[string]any {
+	probeTrack.syncProbeAccounts()
 	probeTrack.mu.Lock()
 	cfgState := probeTrack.cfg
 	cfg := cfgState.Config
+	targets := probeTrack.displayTargetsLocked(cfg)
 	now := time.Now().UTC()
 	// Each value carries the real validity window derived from the token's own
 	// embedded timestamp (issue time) plus the configured validity duration:
@@ -2303,9 +2364,9 @@ func probeSummary() map[string]any {
 	// on every summary so the dashboard never relies on a stale estimate.
 	values := make([]map[string]any, 0, len(cfg.Models))
 	detectionModels := make([]string, 0, len(cfg.Models))
-	for _, model := range cfg.Models {
+	for _, model := range targets {
 		if !degradationDetectionEnabled(model, "") {
-			values = append(values, map[string]any{"model": model, "detection_enabled": false})
+			values = append(values, map[string]any{"model": targetModel(model), "target": model, "account": targetAccount(model), "account_email": probeTrack.accounts[strings.SplitN(model, "/", 2)[0]].Email, "detection_enabled": false})
 			continue
 		}
 		detectionModels = append(detectionModels, model)
@@ -2317,13 +2378,21 @@ func probeSummary() map[string]any {
 			entry = stateEntry{Model: model}
 		}
 		item := map[string]any{
-			"model":             entry.Model,
+			"model":             targetModel(model),
+			"target":            model,
+			"account":           targetAccount(model),
+			"account_available": probeTrack.targetAllowedLocked(model),
 			"detection_enabled": true,
 			"value_length":      entry.ValueLength,
 			"source":            entry.Source,
 			"proxy":             publicProxyURL(entry.Proxy),
 			"captured_at":       entry.CapturedAt,
 			"valid":             stateEntryAccepted(entry),
+		}
+		scope, _ := splitTarget(model)
+		if account, exists := probeTrack.accounts[scope]; exists {
+			item["account_email"] = account.Email
+			item["account_identity_changed"] = probeTrack.accountBindings[account.ID] == ""
 		}
 		if entry.Value != "" {
 			item["value_preview"] = previewValue(entry.Value, turnStatePreviewLength)
@@ -2335,8 +2404,9 @@ func probeSummary() map[string]any {
 		// hand-off scan), so a stale "预备就绪（00m 00s）" badge must not stick.
 		if candidate, ok := probeTrack.candidates[model]; ok && stateEntryAccepted(candidate) {
 			citem := map[string]any{
-				"source":      candidate.Source,
-				"captured_at": candidate.CapturedAt,
+				"value_length": len(candidate.Value),
+				"source":       candidate.Source,
+				"captured_at":  candidate.CapturedAt,
 			}
 			show := true
 			if ts, okTime := parseTurnStateTimestamp(candidate.Value); okTime {
@@ -2375,6 +2445,12 @@ func probeSummary() map[string]any {
 	publicHistory := func(records []probeRecord) []probeRecord {
 		result := make([]probeRecord, len(records))
 		for i, record := range records {
+			for scope, entry := range probeTrack.accounts {
+				if targetAccount(scopedTarget(scope, record.Model)) == record.Account {
+					record.AccountEmail = entry.Email
+					break
+				}
+			}
 			// Resolve before redaction: different credentials may share an endpoint.
 			record.ProxyLabel = cfg.ProxyLabels[record.Proxy]
 			record.Proxy = publicProxyURL(record.Proxy)
@@ -2386,15 +2462,15 @@ func probeSummary() map[string]any {
 	history := publicHistory(probeTrack.history)
 	successHistory := publicHistory(probeTrack.successHistory)
 	failures := make([]probeFailure, 0, len(cfg.Models))
-	for _, model := range cfg.Models {
+	for _, model := range targets {
 		if failure, ok := probeTrack.failures[model]; ok && degradationDetectionEnabled(model, "") {
 			failure.LastError = redactProxyText(failure.LastError)
 			failures = append(failures, failure)
 		}
 	}
 	paused := make([]string, 0, len(cfg.Models))
-	for _, model := range cfg.Models {
-		if probeTrack.paused[model] {
+	for _, model := range targets {
+		if probeTrack.targetPausedLocked(model) {
 			paused = append(paused, model)
 		}
 	}
@@ -2403,14 +2479,14 @@ func probeSummary() map[string]any {
 	if threshold <= 0 {
 		threshold = probeDefaultsSuspectThreshold
 	}
-	for _, model := range cfg.Models {
+	for _, model := range targets {
 		if suspicion, ok := probeTrack.suspects[model]; ok && degradationDetectionEnabled(model, "") && suspicion.Failures >= threshold {
 			suspicion.LastError = redactProxyText(suspicion.LastError)
 			suspects = append(suspects, suspicion)
 		}
 	}
 	businessMarks := make([]businessDegradation, 0, len(cfg.Models))
-	for _, model := range cfg.Models {
+	for _, model := range targets {
 		if mark, ok := probeTrack.business[model]; ok && degradationDetectionEnabled(model, "") {
 			businessMarks = append(businessMarks, mark)
 		}
@@ -2428,7 +2504,8 @@ func probeSummary() map[string]any {
 		}
 		parsed, _ := url.Parse(spec)
 		item := map[string]any{"id": exitID(cfg, spec), "proxy": publicProxyURL(spec), "active": true,
-			"disabled": probeTrack.disabledExits[spec], "attempts": cfg.ProxyAttempts[spec],
+			"success_count": fmt.Sprint(probeTrack.exitSuccessCounts[exitID(cfg, spec)]),
+			"disabled":      probeTrack.disabledExits[spec], "attempts": cfg.ProxyAttempts[spec],
 			"multiplier": multiplier, "budget": exitBudget(cfg, spec), "has_auth": parsed != nil && parsed.User != nil}
 		if cfg.ProxyPools[spec] {
 			item["pool"] = true
@@ -2473,6 +2550,9 @@ func probeSummary() map[string]any {
 		"enabled":                       cfg.Enabled,
 		"error":                         cfgState.Error,
 		"models":                        append([]string(nil), cfg.Models...),
+		"account_mode":                  cfg.AccountMode,
+		"account_error":                 probeTrack.accountError,
+		"account_binding_ready":         probeTrack.accountError == "" && len(probeTrack.accounts) > 0,
 		"detection_models":              detectionModels,
 		"proxies":                       publicProxyList(cfg.Proxies),
 		"proxies_state":                 pool,
@@ -2483,49 +2563,50 @@ func probeSummary() map[string]any {
 		"exit_pool_fail_threshold":      cfg.ExitPoolFailThreshold,
 		"exit_cooldown_minutes":         int(cfg.ExitCooldown / time.Minute),
 		"exit_success_cooldown_minutes": int(cfg.ExitSuccessCooldown / time.Minute),
-		"exit_min_active":       cfg.ExitMinActive,
-		"prefetch_minutes":      int(cfg.Prefetch / time.Minute),
-		"prefetch_override":     probeTrack.settings.PrefetchMinutes != nil,
-		"sleep_start_hour":      cfg.SleepHours.Start,
-		"sleep_end_hour":        cfg.SleepHours.End,
-		"sleeping":              cfg.Enabled && !cfg.SleepHours.until(poolNow).IsZero(),
-		"sleep_until":           sleepUntilText(cfg.SleepHours, poolNow),
-		"settings_error":        probeTrack.settingsError,
-		"proxy_index":  probeTrack.proxyIndex,
-		"ttl_minutes":      int(cfg.TTL / time.Minute),
-		"window_minutes":   int(cfg.Window / time.Minute),
-		"scan_seconds": int(cfg.ScanInterval / time.Second),
-		"interval_seconds": int(cfg.ProbeInterval / time.Second),
-		"interval_override": probeTrack.settings.IntervalSeconds != nil,
-		"attempts_per_proxy": cfg.AttemptsPerHop,
-		"pool_attempts": poolAttemptsFor(cfg),
-		"max_attempts_per_round": effectiveMaxAttempts(cfg, cfg.Proxies),
-		"max_attempts_explicit": cfg.MaxAttemptsPerRound > 0,
-		"cooldown_minutes": int(cfg.Cooldown / time.Minute),
-		"business":        businessMarks,
-		"suspect_threshold": cfg.SuspectThreshold,
-		"suspects":        suspects,
-		"paused":           paused,
-		"reject_degraded":  probeTrack.rejectDegraded,
-		"running":      probeTrack.running,
-		"halted":       probeTrack.halted,
-		"stopping":     probeTrack.stopping,
-		"prefetch_enabled": cfg.Enabled && cfgState.Error == "" && cfg.Prefetch > 0 && !probeTrack.halted && len(detectionModels) > 0,
-		"queue_length": len(probeTrack.queue),
-		"queue_models": queueModels(probeTrack.queue),
-		"active_models": activeModels(probeTrack.probing, probeTrack.queue),
-		"run_started_at":  probeTrack.runStartedAt,
-		"run_finished_at": probeTrack.runFinishedAt,
-		"run_note":        probeTrack.runNote,
-		"seeded":       probeTrack.seeded,
-		"probes_total": probeTrack.probesTotal,
-		"probes_ok":    probeTrack.probesOK,
-		"last_error":   redactProxyText(probeTrack.lastError),
-		"last_activity": redactProxyText(probeTrack.lastActivity),
-		"values":       values,
-		"failures":     failures,
-		"history":      history,
-		"success_history": successHistory,
+		"exit_min_active":               cfg.ExitMinActive,
+		"prefetch_minutes":              int(cfg.Prefetch / time.Minute),
+		"prefetch_override":             probeTrack.settings.PrefetchMinutes != nil,
+		"sleep_start_hour":              cfg.SleepHours.Start,
+		"sleep_end_hour":                cfg.SleepHours.End,
+		"sleeping":                      cfg.Enabled && !cfg.SleepHours.until(poolNow).IsZero(),
+		"sleep_until":                   sleepUntilText(cfg.SleepHours, poolNow),
+		"settings_error":                probeTrack.settingsError,
+		"proxy_index":                   probeTrack.proxyIndex,
+		"ttl_minutes":                   int(cfg.TTL / time.Minute),
+		"window_minutes":                int(cfg.Window / time.Minute),
+		"scan_seconds":                  int(cfg.ScanInterval / time.Second),
+		"interval_seconds":              int(cfg.ProbeInterval / time.Second),
+		"interval_override":             probeTrack.settings.IntervalSeconds != nil,
+		"attempts_per_proxy":            cfg.AttemptsPerHop,
+		"pool_attempts":                 poolAttemptsFor(cfg),
+		"max_attempts_per_round":        effectiveMaxAttempts(cfg, cfg.Proxies),
+		"max_attempts_explicit":         cfg.MaxAttemptsPerRound > 0,
+		"cooldown_minutes":              int(cfg.Cooldown / time.Minute),
+		"business":                      businessMarks,
+		"suspect_threshold":             cfg.SuspectThreshold,
+		"suspects":                      suspects,
+		"paused":                        paused,
+		"reject_degraded":               probeTrack.rejectDegraded,
+		"running":                       probeTrack.running,
+		"halted":                        probeTrack.halted,
+		"stopping":                      probeTrack.stopping,
+		"prefetch_enabled":              cfg.Enabled && cfgState.Error == "" && cfg.Prefetch > 0 && !probeTrack.halted && len(detectionModels) > 0,
+		"queue_length":                  len(probeTrack.queue),
+		"queue_models":                  queueModels(probeTrack.queue),
+		"active_models":                 activeModels(probeTrack.probing, probeTrack.queue),
+		"run_started_at":                probeTrack.runStartedAt,
+		"run_finished_at":               probeTrack.runFinishedAt,
+		"run_note":                      probeTrack.runNote,
+		"seeded":                        probeTrack.seeded,
+		"probes_total":                  probeTrack.probesTotal,
+		"probes_ok":                     probeTrack.probesOK,
+		"exit_success_since":            probeTrack.exitSuccessSince,
+		"last_error":                    redactProxyText(probeTrack.lastError),
+		"last_activity":                 redactProxyText(probeTrack.lastActivity),
+		"values":                        values,
+		"failures":                      failures,
+		"history":                       history,
+		"success_history":               successHistory,
 	}
 	probeTrack.mu.Unlock()
 	return summary
