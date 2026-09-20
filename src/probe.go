@@ -24,7 +24,7 @@ import (
 // and captures a fresh X-Codex-Turn-State through the rotating egress pool.
 // Round attempts skip models whose current baseline is still comfortably
 // valid - one healthy capture is enough until the final hand-off window.
-// Accepted captures (model-consistent, 292 bytes) replace the model's healthy
+// Accepted captures (model-consistent, 332 bytes) replace the model's healthy
 // baseline, which the rewrite engine serves to business requests. Nothing is
 // scheduled automatically except the hand-off (prefetch) watcher at the end
 // of this file, and that watcher only acts once a value approaches expiry: no
@@ -34,88 +34,95 @@ import (
 // material, and is gated by probe.enabled.
 
 const (
-	probeDefaultsTTLMinutes      = 55
-	probeDefaultsWindowMinutes   = 5
-	probeDefaultsScanSeconds     = 30
-	probeDefaultsIntervalSeconds = 5
-	probeDefaultsAttemptsPerHop  = 3
-	probeDefaultsMaxAttempts     = 30
-	probeDefaultsCooldownMinutes = 20
-	probeDefaultsSuspectThreshold = 3
-	probeDefaultsExitCooldownMinutes = 180
-	probeDefaultsExitFailThreshold = 3
-	probeDefaultsExitPoolFailThreshold = 10
-	probeDefaultsExitMinActive = 1
+	probeDefaultsTTLMinutes                 = 55
+	probeDefaultsWindowMinutes              = 5
+	probeDefaultsScanSeconds                = 30
+	probeDefaultsIntervalSeconds            = 5
+	probeDefaultsAttemptsPerHop             = 3
+	probeDefaultsMaxAttempts                = 30
+	probeDefaultsCooldownMinutes            = 20
+	probeDefaultsSuspectThreshold           = 3
+	probeDefaultsExitCooldownMinutes        = 180
+	probeDefaultsExitFailThreshold          = 3
+	probeDefaultsExitPoolFailThreshold      = 10
+	probeDefaultsExitMinActive              = 1
 	probeDefaultsExitSuccessCooldownMinutes = 30
-	probeDefaultsPoolAttempts = 100
-	probeDefaultsPrefetchMinutes = 3
-	prefetchRetryWindow = 90 * time.Second
-	probeDefaultsTimeoutSeconds  = 60
-	probeRequiredStateLength     = 292
-	probeDefaultsPrompt          = "hi"
-	probeDefaultsUpstreamURL     = "https://chatgpt.com/backend-api/codex/responses"
-	probeDefaultsCredFile        = "/root/.cli-proxy-api/your-codex-auth.json"
-	probeHistoryLimit            = 200
-	probeSuccessHistoryLimit     = 50
+	probeDefaultsPoolAttempts               = 100
+	probeDefaultsPrefetchMinutes            = 3
+	prefetchRetryWindow                     = 90 * time.Second
+	probeDefaultsTimeoutSeconds             = 60
+	probeRequiredStateLength                = 332
+	probeDefaultsPrompt                     = "hi"
+	probeDefaultsUpstreamURL                = "https://chatgpt.com/backend-api/codex/responses"
+	probeDefaultsCredFile                   = "/root/.cli-proxy-api/your-codex-auth.json"
+	probeHistoryLimit                       = 200
+	probeSuccessHistoryLimit                = 50
 )
 
 // probeConfig is the parsed probe-track configuration block.
 type probeConfig struct {
-	Enabled             bool
-	Models              []string
-	CredFile            string
-	Proxies             []string
-	TTL                 time.Duration
-	Window              time.Duration
-	ScanInterval        time.Duration
-	ProbeInterval       time.Duration
-	AttemptsPerHop      int
-	MaxAttemptsPerRound int
-	Cooldown            time.Duration
-	ExitCooldown        time.Duration
-	ExitFailThreshold   int
+	Enabled               bool
+	Models                []string
+	CredFile              string
+	AccountMode           string
+	TargetAuthID          string // Per-task renewal target; never a global fixed account.
+	CandidateLimit        int
+	AuthCooldown          time.Duration
+	Proxies               []string
+	TTL                   time.Duration
+	Window                time.Duration
+	ScanInterval          time.Duration
+	ProbeInterval         time.Duration
+	AttemptsPerHop        int
+	MaxAttemptsPerRound   int
+	Cooldown              time.Duration
+	ExitCooldown          time.Duration
+	ExitFailThreshold     int
 	ExitPoolFailThreshold int
-	ExitMinActive       int
-	ExitSuccessCooldown time.Duration
-	PoolAttempts        int
-	Prefetch            time.Duration
-	SuspectThreshold    int
-	Timeout             time.Duration
-	Prompt              string
-	UpstreamURL         string
-	SecretsFile         string
-	ProxyPools          map[string]bool
-	ProxyLabels         map[string]string
-	ProxyIDs            map[string]string
-	ProxyAttempts       map[string]int
-	ProxyMultipliers    map[string]float64
+	ExitMinActive         int
+	ExitSuccessCooldown   time.Duration
+	PoolAttempts          int
+	Prefetch              time.Duration
+	SuspectThreshold      int
+	Timeout               time.Duration
+	Prompt                string
+	UpstreamURL           string
+	SecretsFile           string
+	ProxyPools            map[string]bool
+	ProxyLabels           map[string]string
+	ProxyIDs              map[string]string
+	ProxyAttempts         map[string]int
+	ProxyMultipliers      map[string]float64
 }
 
 // probeConfigYAML mirrors the YAML keys accepted under turn-state-override.probe.
 type probeConfigYAML struct {
-	Enabled          *bool    `yaml:"enabled"`
-	Models           []string `yaml:"models"`
-	CredFile         string   `yaml:"cred-file"`
-	Proxies          []string `yaml:"proxies"`
-	ProxiesFile      string   `yaml:"proxies-file"`
-	TTLMinutes       *int     `yaml:"ttl-minutes"`
-	WindowMinutes    *int     `yaml:"probe-window-minutes"`
-	ScanSeconds      *int     `yaml:"scan-interval-seconds"`
-	IntervalSeconds  *int     `yaml:"probe-interval-seconds"`
-	AttemptsPerHop   *int     `yaml:"attempts-per-proxy"`
-	MaxAttemptsRound *int     `yaml:"max-attempts-per-round"`
-	CooldownMinutes  *int     `yaml:"cooldown-minutes"`
-	ExitCooldownMinutes *int  `yaml:"exit-cooldown-minutes"`
-	ExitFailThreshold   *int  `yaml:"exit-fail-threshold"`
-	ExitPoolFailThreshold *int `yaml:"exit-pool-fail-threshold"`
-	ExitMinActive       *int  `yaml:"exit-min-active"`
-	ExitSuccessCooldownMinutes *int `yaml:"exit-success-cooldown-minutes"`
-	PoolAttempts        *int  `yaml:"pool-attempts"`
-	PrefetchMinutes     *int  `yaml:"prefetch-minutes"`
-	SuspectThreshold *int     `yaml:"suspect-threshold"`
-	TimeoutSeconds   *int     `yaml:"timeout-seconds"`
-	Prompt           string   `yaml:"prompt"`
-	UpstreamURL      string   `yaml:"upstream-url"`
+	Enabled                    *bool    `yaml:"enabled"`
+	Models                     []string `yaml:"models"`
+	CredFile                   string   `yaml:"cred-file"`
+	AccountMode                string   `yaml:"account-mode"`
+	CandidateLimit             *int     `yaml:"candidate-limit"`
+	AuthCooldownMinutes        *int     `yaml:"auth-cooldown-minutes"`
+	Proxies                    []string `yaml:"proxies"`
+	ProxiesFile                string   `yaml:"proxies-file"`
+	TTLMinutes                 *int     `yaml:"ttl-minutes"`
+	WindowMinutes              *int     `yaml:"probe-window-minutes"`
+	ScanSeconds                *int     `yaml:"scan-interval-seconds"`
+	IntervalSeconds            *int     `yaml:"probe-interval-seconds"`
+	AttemptsPerHop             *int     `yaml:"attempts-per-proxy"`
+	MaxAttemptsRound           *int     `yaml:"max-attempts-per-round"`
+	CooldownMinutes            *int     `yaml:"cooldown-minutes"`
+	ExitCooldownMinutes        *int     `yaml:"exit-cooldown-minutes"`
+	ExitFailThreshold          *int     `yaml:"exit-fail-threshold"`
+	ExitPoolFailThreshold      *int     `yaml:"exit-pool-fail-threshold"`
+	ExitMinActive              *int     `yaml:"exit-min-active"`
+	ExitSuccessCooldownMinutes *int     `yaml:"exit-success-cooldown-minutes"`
+	PoolAttempts               *int     `yaml:"pool-attempts"`
+	PrefetchMinutes            *int     `yaml:"prefetch-minutes"`
+	SuspectThreshold           *int     `yaml:"suspect-threshold"`
+	TimeoutSeconds             *int     `yaml:"timeout-seconds"`
+	Prompt                     string   `yaml:"prompt"`
+	UpstreamURL                string   `yaml:"upstream-url"`
 }
 
 type probeConfigState struct {
@@ -138,29 +145,33 @@ type stateEntry struct {
 
 // probeRecord is one probe attempt for the audit trail.
 type probeRecord struct {
-	Time          string `json:"time"`
-	Model         string `json:"model"`
-	Proxy         string `json:"proxy"`
-	ProxyLabel    string `json:"proxy_label,omitempty"`
-	Success       bool   `json:"success"`
-	StatusCode    int    `json:"status_code,omitempty"`
-	DurationMS    int64  `json:"duration_ms"`
-	EgressAddr    string `json:"egress_addr,omitempty"`
-	StateLength   int    `json:"state_length,omitempty"`
-	ObservedModel string `json:"observed_model,omitempty"`
-	Error         string `json:"error,omitempty"`
+	ReasonCode    string    `json:"reason_code,omitempty"`
+	RetryAt       time.Time `json:"retry_at,omitempty"`
+	Time          string    `json:"time"`
+	Model         string    `json:"model"`
+	Proxy         string    `json:"proxy"`
+	ProxyLabel    string    `json:"proxy_label,omitempty"`
+	Success       bool      `json:"success"`
+	StatusCode    int       `json:"status_code,omitempty"`
+	DurationMS    int64     `json:"duration_ms"`
+	EgressAddr    string    `json:"egress_addr,omitempty"`
+	StateLength   int       `json:"state_length,omitempty"`
+	ObservedModel string    `json:"observed_model,omitempty"`
+	AuthLabel     string    `json:"auth_label,omitempty"`
+	AuthPriority  int       `json:"auth_priority,omitempty"`
+	Error         string    `json:"error,omitempty"`
 }
 
 // probeFailure marks a model whose latest probe round exhausted all retries
-// without obtaining an acceptable (292-byte, consistent) state. CooldownUntil
+// without obtaining an acceptable (292/332-byte, consistent) state. CooldownUntil
 // is the end of the quiet period; new rounds are suppressed until it passes.
 type probeFailure struct {
-	Model      string `json:"model"`
-	Attempts   int    `json:"attempts"`
-	Rounds     int    `json:"rounds"`
-	LastError  string `json:"last_error,omitempty"`
-	LastLength int    `json:"last_length,omitempty"`
-	FailedAt   string `json:"failed_at"`
+	Model         string `json:"model"`
+	Attempts      int    `json:"attempts"`
+	Rounds        int    `json:"rounds"`
+	LastError     string `json:"last_error,omitempty"`
+	LastLength    int    `json:"last_length,omitempty"`
+	FailedAt      string `json:"failed_at"`
 	CooldownUntil string `json:"cooldown_until,omitempty"`
 }
 
@@ -203,6 +214,7 @@ type exitPenalty struct {
 }
 
 type probeEngine struct {
+	activeTask     *probeTask
 	mu             sync.Mutex
 	cfg            probeConfigState
 	baseCfg        *probeConfigState
@@ -228,6 +240,9 @@ type probeEngine struct {
 	queue          []probeTask
 	queueActive    bool
 	disabledExits  map[string]bool
+	authCooldowns  map[string]time.Time
+	autoAuthSeen   bool
+	lastAutoAuth   string
 	rejectDegraded bool
 	history        []probeRecord
 	successHistory []probeRecord
@@ -244,18 +259,18 @@ type probeEngine struct {
 	lastError      string
 }
 
-
 var probeTrack = &probeEngine{
-	values:        map[string]stateEntry{},
-	failures:      map[string]probeFailure{},
-	suspects:      map[string]probeSuspicion{},
-	business:      map[string]businessDegradation{},
-	exitPenalties: map[string]exitPenalty{},
-	candidates:    map[string]stateEntry{},
-	prefetchGate:  map[string]time.Time{},
-	lastAttempt:   map[string]time.Time{},
-	paused:        map[string]bool{},
-	probing:       map[string]bool{},
+	values:         map[string]stateEntry{},
+	failures:       map[string]probeFailure{},
+	suspects:       map[string]probeSuspicion{},
+	business:       map[string]businessDegradation{},
+	exitPenalties:  map[string]exitPenalty{},
+	candidates:     map[string]stateEntry{},
+	prefetchGate:   map[string]time.Time{},
+	lastAttempt:    map[string]time.Time{},
+	paused:         map[string]bool{},
+	probing:        map[string]bool{},
+	authCooldowns:  map[string]time.Time{},
 	rejectDegraded: true,
 }
 
@@ -264,37 +279,49 @@ var probeTrack = &probeEngine{
 
 func parseProbeConfig(block probeConfigYAML) probeConfig {
 	cfg := probeConfig{
-		Enabled:             block.Enabled != nil && *block.Enabled,
-		Models:              append([]string(nil), block.Models...),
-		CredFile:            strings.TrimSpace(block.CredFile),
-		Proxies:             append([]string(nil), block.Proxies...),
-		TTL:                 time.Duration(probeDefaultsTTLMinutes) * time.Minute,
-		Window:              time.Duration(probeDefaultsWindowMinutes) * time.Minute,
-		ScanInterval:        time.Duration(probeDefaultsScanSeconds) * time.Second,
-		ProbeInterval:       time.Duration(probeDefaultsIntervalSeconds) * time.Second,
-		AttemptsPerHop:      probeDefaultsAttemptsPerHop,
-		MaxAttemptsPerRound: 0, // 0 = auto: egress count × attempts-per-proxy
-		Cooldown:            time.Duration(probeDefaultsCooldownMinutes) * time.Minute,
-		ExitCooldown:        time.Duration(probeDefaultsExitCooldownMinutes) * time.Minute,
-		ExitFailThreshold:   probeDefaultsExitFailThreshold,
+		Enabled:               block.Enabled != nil && *block.Enabled,
+		Models:                append([]string(nil), block.Models...),
+		CredFile:              strings.TrimSpace(block.CredFile),
+		AccountMode:           strings.TrimSpace(block.AccountMode),
+		CandidateLimit:        5,
+		AuthCooldown:          60 * time.Minute,
+		Proxies:               append([]string(nil), block.Proxies...),
+		TTL:                   time.Duration(probeDefaultsTTLMinutes) * time.Minute,
+		Window:                time.Duration(probeDefaultsWindowMinutes) * time.Minute,
+		ScanInterval:          time.Duration(probeDefaultsScanSeconds) * time.Second,
+		ProbeInterval:         time.Duration(probeDefaultsIntervalSeconds) * time.Second,
+		AttemptsPerHop:        probeDefaultsAttemptsPerHop,
+		MaxAttemptsPerRound:   0, // 0 = auto: egress count × attempts-per-proxy
+		Cooldown:              time.Duration(probeDefaultsCooldownMinutes) * time.Minute,
+		ExitCooldown:          time.Duration(probeDefaultsExitCooldownMinutes) * time.Minute,
+		ExitFailThreshold:     probeDefaultsExitFailThreshold,
 		ExitPoolFailThreshold: probeDefaultsExitPoolFailThreshold,
-		ExitMinActive:       probeDefaultsExitMinActive,
-		ExitSuccessCooldown: time.Duration(probeDefaultsExitSuccessCooldownMinutes) * time.Minute,
-		PoolAttempts:        probeDefaultsPoolAttempts,
-		Prefetch:            time.Duration(probeDefaultsPrefetchMinutes) * time.Minute,
-		SuspectThreshold:    probeDefaultsSuspectThreshold,
-		Timeout:             time.Duration(probeDefaultsTimeoutSeconds) * time.Second,
-		Prompt:              probeDefaultsPrompt,
-		UpstreamURL:         probeDefaultsUpstreamURL,
-		SecretsFile:         strings.TrimSpace(block.ProxiesFile),
-		ProxyPools:          map[string]bool{},
-		ProxyLabels:         map[string]string{},
+		ExitMinActive:         probeDefaultsExitMinActive,
+		ExitSuccessCooldown:   time.Duration(probeDefaultsExitSuccessCooldownMinutes) * time.Minute,
+		PoolAttempts:          probeDefaultsPoolAttempts,
+		Prefetch:              time.Duration(probeDefaultsPrefetchMinutes) * time.Minute,
+		SuspectThreshold:      probeDefaultsSuspectThreshold,
+		Timeout:               time.Duration(probeDefaultsTimeoutSeconds) * time.Second,
+		Prompt:                probeDefaultsPrompt,
+		UpstreamURL:           probeDefaultsUpstreamURL,
+		SecretsFile:           strings.TrimSpace(block.ProxiesFile),
+		ProxyPools:            map[string]bool{},
+		ProxyLabels:           map[string]string{},
 	}
 	if len(cfg.Models) == 0 {
 		cfg.Models = []string{"gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-luna", "gpt-5.6-terra"}
 	}
 	if cfg.CredFile == "" {
 		cfg.CredFile = probeDefaultsCredFile
+	}
+	if cfg.AccountMode == "" {
+		cfg.AccountMode = "fixed"
+	}
+	if block.CandidateLimit != nil && *block.CandidateLimit > 0 {
+		cfg.CandidateLimit = *block.CandidateLimit
+	}
+	if block.AuthCooldownMinutes != nil && *block.AuthCooldownMinutes > 0 {
+		cfg.AuthCooldown = time.Duration(*block.AuthCooldownMinutes) * time.Minute
 	}
 	if block.TTLMinutes != nil && *block.TTLMinutes > 0 {
 		cfg.TTL = time.Duration(*block.TTLMinutes) * time.Minute
@@ -455,12 +482,8 @@ func configureProbeTrack(block probeConfigYAML) error {
 		}
 	}
 	probeTrack.mu.Unlock()
-	// The probe track never auto-starts. The dashboard's manual control is
-	// the only way to run full rounds; the prefetch watcher below is the one
-	// narrow automatic exception: while a model's active token is still
-	// comfortably far from expiry nothing happens at all, and only inside the
-	// final hand-off window (prefetch-minutes) does the watcher attempt one
-	// probe to park a successor token for a seamless takeover.
+	// Configuration does not enqueue a full manual round. The watcher handles
+	// bounded account-expiry renewal and optional early-prefetch independently.
 	ensurePersistence()
 	probeTrack.ensurePrefetchWatcher()
 	return nil
@@ -480,8 +503,10 @@ func currentProbeConfig() probeConfigState {
 // one-off operator refresh (bypasses the settled-baseline gate and survives
 // a halted engine).
 type probeTask struct {
-	Model string
-	Force bool
+	Model        string
+	Force        bool
+	TargetAuthID string
+	Generation   string
 }
 
 func (e *probeEngine) start() bool {
@@ -600,7 +625,46 @@ func (e *probeEngine) enqueueTask(model string, force bool) bool {
 	return e.enqueueTaskLocked(model, force)
 }
 
+// Renew only the selected account, once per 90 seconds, on demand. Respect
+// manual stop/pause and disabled probing; never switch the global probe account.
+func (e *probeEngine) renewAccount(authID, model string, now time.Time) bool {
+	if strings.TrimSpace(authID) == "" {
+		return false
+	}
+	generation := ""
+	for _, entry := range accountRouter.renewalCandidates(now) {
+		if entry.AuthID == authID && entry.Model == routingModelKey(model) {
+			generation = renewalGeneration(entry)
+			break
+		}
+	}
+	if generation == "" {
+		return false
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.cfg.Config.AccountMode != "highest-priority" || e.halted {
+		return false
+	}
+	key := "account-renewal:" + accountHealthKey(authID, routingModelKey(model))
+	if gate := e.prefetchGate[key]; !gate.IsZero() && now.Sub(gate) < prefetchRetryWindow {
+		return false
+	}
+	if !e.enqueueTargetTaskLocked(model, false, authID, generation) {
+		return false
+	}
+	if e.prefetchGate == nil {
+		e.prefetchGate = map[string]time.Time{}
+	}
+	e.prefetchGate[key] = now
+	return true
+}
+
 func (e *probeEngine) enqueueTaskLocked(model string, force bool) bool {
+	return e.enqueueTargetTaskLocked(model, force, "", "")
+}
+
+func (e *probeEngine) enqueueTargetTaskLocked(model string, force bool, target, generation string) bool {
 	model = strings.TrimSpace(model)
 	if model == "" || !degradationDetectionEnabled(model, "") || !e.cfg.Config.Enabled || e.cfg.Error != "" || e.stopping || e.shuttingDown || e.paused[model] || (!force && e.halted) {
 		return false
@@ -609,14 +673,17 @@ func (e *probeEngine) enqueueTaskLocked(model string, force bool) bool {
 		e.queue = []probeTask{}
 	}
 	for _, task := range e.queue {
-		if task.Model == model {
+		if task.Model == model && task.TargetAuthID == target {
 			return false
 		}
 	}
-	if e.probing[model] {
+	if e.activeTask != nil && e.activeTask.Model == model && e.activeTask.TargetAuthID == target {
 		return false
 	}
-	e.queue = append(e.queue, probeTask{Model: model, Force: force})
+	if target == "" && e.activeTask == nil && e.probing[model] {
+		return false
+	}
+	e.queue = append(e.queue, probeTask{Model: model, Force: force, TargetAuthID: target, Generation: generation})
 	active := e.queueActive
 	if !active {
 		e.queueActive = true
@@ -659,7 +726,12 @@ func (e *probeEngine) queueLoop() {
 		}
 		task := e.queue[0]
 		e.queue = e.queue[1:]
+		e.activeTask = &task
 		cfg := e.cfg.Config
+		if task.TargetAuthID != "" {
+			cfg.TargetAuthID = task.TargetAuthID
+			cfg.MaxAttemptsPerRound = 1
+		}
 		brake := e.abortCh
 		if brake == nil {
 			e.abortCh = make(chan struct{})
@@ -672,12 +744,31 @@ func (e *probeEngine) queueLoop() {
 		// waiting (model paused, baseline replenished, engine halted). A
 		// one-off refresh (Force) survives both gates - it is an explicit
 		// command - but still respects an operator pause.
-		if cfg.Enabled && !paused && (task.Force || !halted) &&
-			(task.Force || !e.settledBaseline(task.Model, cfg, time.Now().UTC())) {
+		cancelled := false
+		select {
+		case <-brake:
+			cancelled = true
+		default:
+		}
+		if !cancelled && cfg.Enabled && !paused && (task.Force || !halted) &&
+			(task.Force || task.TargetAuthID != "" || !e.settledBaseline(task.Model, cfg, time.Now().UTC())) {
 			// Capture cancellation before dequeue: a stop between dequeue and
 			// probeModel must not be lost by reading a fresh brake channel.
-			e.probeModel(task.Model, cfg, brake)
+			ready := true
+			if task.TargetAuthID != "" {
+				ready = cfg.AccountMode == "highest-priority" && accountRouter.claimRenewal(task.TargetAuthID, task.Model, task.Generation, time.Now().UTC())
+				if ready && savePersistedState() != nil {
+					ready = false
+					e.noteError("renewal state persistence failed; no probe sent")
+				}
+			}
+			if ready {
+				e.probeModel(task.Model, cfg, brake)
+			}
 		}
+		e.mu.Lock()
+		e.activeTask = nil
+		e.mu.Unlock()
 		// The queue interval: the pacing between two tasks (and, inside a
 		// task, between retries). Interrupted by the global brake.
 		e.waitProbeInterval(cfg.ProbeInterval, brake, nil)
@@ -805,11 +896,8 @@ func (e *probeEngine) setModelPaused(model string, paused bool) bool {
 // ---------------------------------------------------------------------------
 // prefetch watch (smooth hand-off)
 
-// ensurePrefetchWatcher starts the single background watcher once per process.
-// It is the first of the two automatic behaviours in this engine and the only
-// one that replenishes tokens: a model whose baseline is still comfortably
-// valid is never touched, and only the final hand-off window
-// (prefetch-minutes) triggers one successor capture.
+// ensurePrefetchWatcher starts account-expiry and early-prefetch scanning.
+// Expiry is independent of the early-prefetch window but respects operator stops.
 func (e *probeEngine) ensurePrefetchWatcher() {
 	e.mu.Lock()
 	if e.prefetchStop != nil {
@@ -820,6 +908,7 @@ func (e *probeEngine) ensurePrefetchWatcher() {
 	e.prefetchStop = stop
 	e.mu.Unlock()
 	go e.prefetchWatchLoop(stop)
+	go e.authSelectionWatchLoop(stop)
 }
 
 // stopPrefetchWatcher shuts the watcher down (plugin shutdown).
@@ -847,7 +936,48 @@ func (e *probeEngine) prefetchWatchLoop(stop <-chan struct{}) {
 		case <-stop:
 			return
 		case <-ticker.C:
+			e.expiryScan(time.Now().UTC())
 			e.prefetchScan()
+		}
+	}
+}
+
+// Scan account leases even when the early-prefetch window is zero. The
+// configured model allowlist, account eligibility and operator stops still apply.
+func (e *probeEngine) expiryScan(now time.Time) {
+	e.mu.Lock()
+	cfg := e.cfg.Config
+	suppressed := !cfg.Enabled || e.cfg.Error != "" || cfg.AccountMode != "highest-priority" || e.halted || e.stopping || e.shuttingDown
+	e.mu.Unlock()
+	if suppressed {
+		return
+	}
+	entries := accountRouter.renewalCandidates(now)
+	if len(entries) == 0 {
+		return
+	}
+	auths, err := hostAuthListFunc()
+	if err != nil {
+		return
+	}
+	eligible := map[string]bool{}
+	for _, auth := range e.eligibleProbeAccounts(auths, now) {
+		eligible[auth.ID] = true
+	}
+	for _, entry := range entries {
+		if !eligible[entry.AuthID] {
+			continue
+		}
+		for _, model := range cfg.Models {
+			if routingModelKey(model) != entry.Model {
+				continue
+			}
+			e.mu.Lock()
+			if e.cfg.Config.AccountMode == "highest-priority" {
+				e.enqueueTargetTaskLocked(model, false, entry.AuthID, renewalGeneration(entry))
+			}
+			e.mu.Unlock()
+			break
 		}
 	}
 }
@@ -863,6 +993,9 @@ func (e *probeEngine) prefetchScan() {
 		return
 	}
 	now := time.Now().UTC()
+	accountRouter.mu.Lock()
+	accountScoped := accountRouter.config.Config.Enabled && accountRouter.config.Error == ""
+	accountRouter.mu.Unlock()
 	for _, model := range cfg.Models {
 		if !degradationDetectionEnabled(model, "") {
 			continue
@@ -886,6 +1019,12 @@ func (e *probeEngine) prefetchScan() {
 			continue
 		}
 		remaining := issued.Add(cfg.TTL).Sub(now)
+		if remaining <= 0 && accountScoped && cfg.AccountMode == "highest-priority" {
+			// Account-expiry scanning owns expired leases; do not repeatedly
+			// retry them through the model-global prefetch path as well.
+			e.mu.Unlock()
+			continue
+		}
 		if remaining > cfg.Prefetch {
 			// The model still holds a baseline whose validity is comfortably
 			// beyond the hand-off window: there is nothing to replenish, one
@@ -1108,7 +1247,7 @@ func (e *probeEngine) degradedRejectReasonFor(model string, servingModels []stri
 		if e.promoteCandidateLocked(servingModel, e.cfg.Config, now) {
 			markStateDirty()
 		}
-		if entry, ok := e.values[servingModel]; ok && entry.Valid && len(entry.Value) == probeRequiredStateLength && !entryExpired(entry, e.cfg.Config.TTL, now) {
+		if entry, ok := e.values[servingModel]; ok && entry.Valid && isAcceptedStateLength(len(entry.Value)) && !entryExpired(entry, e.cfg.Config.TTL, now) {
 			return ""
 		}
 	}
@@ -1243,7 +1382,7 @@ func (e *probeEngine) clearBusinessDegradation(model string) {
 // observeBusinessState feeds one state value observed on real business
 // traffic into the engine:
 //
-//   - healthy (length 292, model consistent) -> stored as the active value
+//   - healthy (length 332, model consistent) -> stored as the active value
 //     with source "business" (zero upstream pressure), marks cleared;
 //   - unhealthy (length anomaly, or state empty + model mismatch) -> one
 //     observation is enough to mark the model degraded for the rejection
@@ -1262,7 +1401,7 @@ func observeBusinessState(model, state, observedModel string) {
 		}
 		return
 	}
-	if len(state) != probeRequiredStateLength {
+	if !isAcceptedStateLength(len(state)) {
 		probeTrack.noteBusinessDegradation(model, fmt.Sprintf("业务请求观测到状态长度异常（%d 字节）", len(state)))
 		return
 	}
@@ -1466,9 +1605,13 @@ func (e *probeEngine) probeModel(model string, cfg probeConfig, stop <-chan stru
 	if !degradationDetectionEnabled(model, "") {
 		return
 	}
+	targetAuthID := cfg.TargetAuthID
 	e.mu.Lock()
 	if e.baseCfg != nil {
 		cfg = e.cfg.Config
+	}
+	if targetAuthID != "" {
+		cfg.TargetAuthID, cfg.MaxAttemptsPerRound = targetAuthID, 1
 	}
 	if e.probing == nil {
 		e.probing = map[string]bool{}
@@ -1528,6 +1671,9 @@ func (e *probeEngine) probeModel(model string, cfg probeConfig, stop <-chan stru
 		pausedMidRound := e.paused[model]
 		if revision != e.configRevision {
 			cfg = e.cfg.Config
+			if targetAuthID != "" {
+				cfg.TargetAuthID, cfg.MaxAttemptsPerRound = targetAuthID, 1
+			}
 			revision = e.configRevision
 			proxies = append([]string(nil), cfg.Proxies...)
 			maxAttempts = effectiveMaxAttempts(cfg, proxies)
@@ -1622,18 +1768,24 @@ func (e *probeEngine) probeModel(model string, cfg probeConfig, stop <-chan stru
 func (e *probeEngine) probeOnce(model, proxySpec string, cfg probeConfig) (probeRecord, string) {
 	started := time.Now()
 	record := probeRecord{
-		Time:   started.UTC().Format(time.RFC3339Nano),
-		Model:  model,
-		Proxy:  proxySpec,
+		Time:    started.UTC().Format(time.RFC3339Nano),
+		Model:   model,
+		Proxy:   proxySpec,
 		Success: false,
 	}
-	cred, err := readProbeCredential(cfg.CredFile)
+	cred, err := e.resolveProbeCredential(cfg)
 	if err != nil {
 		record.DurationMS = time.Since(started).Milliseconds()
 		record.Error = fmt.Sprintf("read cred: %v", err)
 		e.noteError(record.Error)
 		return record, ""
 	}
+	record.AuthLabel = cred.Label
+	record.AuthPriority = cred.Priority
+	capturedState := ""
+	defer func() {
+		accountRouter.observeProbe(cred.AuthID, model, record, capturedState, time.Now().UTC())
+	}()
 	transport, binder, err := buildProbeTransport(proxySpec)
 	if err != nil {
 		record.DurationMS = time.Since(started).Milliseconds()
@@ -1690,7 +1842,16 @@ func (e *probeEngine) probeOnce(model, proxySpec string, cfg probeConfig) (probe
 	if resp.StatusCode != http.StatusOK {
 		// Read a bounded snippet for diagnostics.
 		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		record.ReasonCode = quotaFailure(resp.StatusCode, string(snippet))
+		if record.ReasonCode != "" {
+			record.RetryAt = quotaRetryAt(record.ReasonCode, resp.Header, string(snippet), time.Now().UTC())
+		}
 		record.Error = fmt.Sprintf("status %d: %s", resp.StatusCode, strings.TrimSpace(string(snippet)))
+		if record.ReasonCode != "" {
+			e.cooldownProbeAccount(cred.AuthIndex, time.Until(record.RetryAt))
+		} else if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+			e.cooldownProbeAccount(cred.AuthIndex, cfg.AuthCooldown)
+		}
 		e.noteError(record.Error)
 		return record, ""
 	}
@@ -1727,16 +1888,19 @@ func (e *probeEngine) probeOnce(model, proxySpec string, cfg probeConfig) (probe
 	if !probeModelConsistent(model, observedModel) {
 		record.Error = fmt.Sprintf("model mismatch: requested %s got %s", model, observedModel)
 		record.ObservedModel = observedModel
+		e.cooldownProbeAccount(cred.AuthIndex, 90*time.Second)
 		e.noteError(record.Error)
 		return record, ""
 	}
-	// Length acceptance: only the pristine 292-byte state is valid. Other
+	// Length policy accepts 292 or 332 bytes; length alone does not prove
+	// model capability. Other
 	// lengths (for example 312) are treated as risk-controlled degraded
 	// states and rejected, so the probe keeps retrying.
-	if len(state) != probeRequiredStateLength {
-		record.Error = fmt.Sprintf("state length %d != %d (suspected degraded)", len(state), probeRequiredStateLength)
+	if !isAcceptedStateLength(len(state)) {
+		record.Error = fmt.Sprintf("state length %d not in {292,332} (suspected degraded)", len(state))
 		record.ObservedModel = observedModel
 		record.StateLength = len(state)
+		e.cooldownProbeAccount(cred.AuthIndex, 90*time.Second)
 		e.noteError(record.Error)
 		return record, ""
 	}
@@ -1748,6 +1912,7 @@ func (e *probeEngine) probeOnce(model, proxySpec string, cfg probeConfig) (probe
 	record.Success = true
 	record.StateLength = len(state)
 	record.ObservedModel = observedModel
+	capturedState = state
 	e.mu.Lock()
 	e.probesTotal++
 	e.probesOK++
@@ -1896,7 +2061,7 @@ func (e *probeEngine) activeValueFor(model string) string {
 // seedBaselinesFromAudit restores missing baseline entries from recorded
 // history: first the deployment seeds file (last known-good values extracted
 // from server records by the open-source-prep scanner), then the newest
-// healthy (292-byte, decodable) turn-state values in the audit journal. A
+// accepted (292/332-byte, decodable) turn-state values in the audit journal. A
 // fresh plugin instance therefore keeps protecting traffic with the last
 // known-good states before any business observation or manual probe refreshes
 // them, and nothing is drafted into the baseline unless it passes the same
@@ -1918,7 +2083,7 @@ func (e *probeEngine) seedBaselinesFromAudit() {
 			for model, value := range seeds {
 				model = strings.TrimSpace(model)
 				value = strings.TrimSpace(value)
-				if model == "" || len(value) != probeRequiredStateLength {
+				if model == "" || !isAcceptedStateLength(len(value)) {
 					continue
 				}
 				if ts, ok := parseTurnStateTimestamp(value); ok {
@@ -1933,7 +2098,7 @@ func (e *probeEngine) seedBaselinesFromAudit() {
 		if model == "" {
 			model = strings.TrimSpace(record.RequestedModel)
 		}
-		if model == "" || record.TurnStateLength != probeRequiredStateLength || record.TurnStateValue == "" {
+		if model == "" || !isAcceptedStateLength(record.TurnStateLength) || record.TurnStateValue == "" {
 			continue
 		}
 		ts, ok := parseTurnStateTimestamp(record.TurnStateValue)
@@ -2031,6 +2196,10 @@ func activeModels(probing map[string]bool, tasks []probeTask) []string {
 type probeCredential struct {
 	AccessToken string `json:"access_token"`
 	AccountID   string `json:"account_id"`
+	AuthID      string `json:"-"`
+	AuthIndex   string `json:"-"`
+	Label       string `json:"-"`
+	Priority    int    `json:"-"`
 }
 
 func readProbeCredential(path string) (probeCredential, error) {
@@ -2133,13 +2302,13 @@ func probeSummary() map[string]any {
 			entry = stateEntry{Model: model}
 		}
 		item := map[string]any{
-			"model":        entry.Model,
+			"model":             entry.Model,
 			"detection_enabled": true,
-			"value_length": entry.ValueLength,
-			"source":       entry.Source,
-			"proxy":        publicProxyURL(entry.Proxy),
-			"captured_at":  entry.CapturedAt,
-			"valid":        entry.Valid,
+			"value_length":      entry.ValueLength,
+			"source":            entry.Source,
+			"proxy":             publicProxyURL(entry.Proxy),
+			"captured_at":       entry.CapturedAt,
+			"valid":             entry.Valid,
 		}
 		if entry.Value != "" {
 			item["value_preview"] = previewValue(entry.Value, turnStatePreviewLength)
@@ -2285,58 +2454,58 @@ func probeSummary() map[string]any {
 		pool = append(pool, item)
 	}
 	summary := map[string]any{
-		"enabled":      cfg.Enabled,
-		"error":        cfgState.Error,
-		"models":       append([]string(nil), cfg.Models...),
-		"detection_models": detectionModels,
-		"proxies":      publicProxyList(cfg.Proxies),
-		"proxies_state": pool,
-		"pool_total":   len(cfg.Proxies),
-		"pool_active":  activeCount,
-		"pool_disabled": disabledCount,
-		"exit_fail_threshold":   cfg.ExitFailThreshold,
-		"exit_pool_fail_threshold": cfg.ExitPoolFailThreshold,
-		"exit_cooldown_minutes": int(cfg.ExitCooldown / time.Minute),
+		"enabled":                       cfg.Enabled,
+		"error":                         cfgState.Error,
+		"models":                        append([]string(nil), cfg.Models...),
+		"detection_models":              detectionModels,
+		"proxies":                       publicProxyList(cfg.Proxies),
+		"proxies_state":                 pool,
+		"pool_total":                    len(cfg.Proxies),
+		"pool_active":                   activeCount,
+		"pool_disabled":                 disabledCount,
+		"exit_fail_threshold":           cfg.ExitFailThreshold,
+		"exit_pool_fail_threshold":      cfg.ExitPoolFailThreshold,
+		"exit_cooldown_minutes":         int(cfg.ExitCooldown / time.Minute),
 		"exit_success_cooldown_minutes": int(cfg.ExitSuccessCooldown / time.Minute),
-		"exit_min_active":       cfg.ExitMinActive,
-		"prefetch_minutes":      int(cfg.Prefetch / time.Minute),
-		"prefetch_override":     probeTrack.settings.PrefetchMinutes != nil,
-		"settings_error":        probeTrack.settingsError,
-		"proxy_index":  probeTrack.proxyIndex,
-		"ttl_minutes":      int(cfg.TTL / time.Minute),
-		"window_minutes":   int(cfg.Window / time.Minute),
-		"scan_seconds": int(cfg.ScanInterval / time.Second),
-		"interval_seconds": int(cfg.ProbeInterval / time.Second),
-		"interval_override": probeTrack.settings.IntervalSeconds != nil,
-		"attempts_per_proxy": cfg.AttemptsPerHop,
-		"pool_attempts": poolAttemptsFor(cfg),
-		"max_attempts_per_round": effectiveMaxAttempts(cfg, cfg.Proxies),
-		"max_attempts_explicit": cfg.MaxAttemptsPerRound > 0,
-		"cooldown_minutes": int(cfg.Cooldown / time.Minute),
-		"business":        businessMarks,
-		"suspect_threshold": cfg.SuspectThreshold,
-		"suspects":        suspects,
-		"paused":           paused,
-		"reject_degraded":  probeTrack.rejectDegraded,
-		"running":      probeTrack.running,
-		"halted":       probeTrack.halted,
-		"stopping":     probeTrack.stopping,
-		"prefetch_enabled": cfg.Enabled && cfgState.Error == "" && cfg.Prefetch > 0 && !probeTrack.halted && len(detectionModels) > 0,
-		"queue_length": len(probeTrack.queue),
-		"queue_models": queueModels(probeTrack.queue),
-		"active_models": activeModels(probeTrack.probing, probeTrack.queue),
-		"run_started_at":  probeTrack.runStartedAt,
-		"run_finished_at": probeTrack.runFinishedAt,
-		"run_note":        probeTrack.runNote,
-		"seeded":       probeTrack.seeded,
-		"probes_total": probeTrack.probesTotal,
-		"probes_ok":    probeTrack.probesOK,
-		"last_error":   redactProxyText(probeTrack.lastError),
-		"last_activity": redactProxyText(probeTrack.lastActivity),
-		"values":       values,
-		"failures":     failures,
-		"history":      history,
-		"success_history": successHistory,
+		"exit_min_active":               cfg.ExitMinActive,
+		"prefetch_minutes":              int(cfg.Prefetch / time.Minute),
+		"prefetch_override":             probeTrack.settings.PrefetchMinutes != nil,
+		"settings_error":                probeTrack.settingsError,
+		"proxy_index":                   probeTrack.proxyIndex,
+		"ttl_minutes":                   int(cfg.TTL / time.Minute),
+		"window_minutes":                int(cfg.Window / time.Minute),
+		"scan_seconds":                  int(cfg.ScanInterval / time.Second),
+		"interval_seconds":              int(cfg.ProbeInterval / time.Second),
+		"interval_override":             probeTrack.settings.IntervalSeconds != nil,
+		"attempts_per_proxy":            cfg.AttemptsPerHop,
+		"pool_attempts":                 poolAttemptsFor(cfg),
+		"max_attempts_per_round":        effectiveMaxAttempts(cfg, cfg.Proxies),
+		"max_attempts_explicit":         cfg.MaxAttemptsPerRound > 0,
+		"cooldown_minutes":              int(cfg.Cooldown / time.Minute),
+		"business":                      businessMarks,
+		"suspect_threshold":             cfg.SuspectThreshold,
+		"suspects":                      suspects,
+		"paused":                        paused,
+		"reject_degraded":               probeTrack.rejectDegraded,
+		"running":                       probeTrack.running,
+		"halted":                        probeTrack.halted,
+		"stopping":                      probeTrack.stopping,
+		"prefetch_enabled":              cfg.Enabled && cfgState.Error == "" && cfg.Prefetch > 0 && !probeTrack.halted && len(detectionModels) > 0,
+		"queue_length":                  len(probeTrack.queue),
+		"queue_models":                  queueModels(probeTrack.queue),
+		"active_models":                 activeModels(probeTrack.probing, probeTrack.queue),
+		"run_started_at":                probeTrack.runStartedAt,
+		"run_finished_at":               probeTrack.runFinishedAt,
+		"run_note":                      probeTrack.runNote,
+		"seeded":                        probeTrack.seeded,
+		"probes_total":                  probeTrack.probesTotal,
+		"probes_ok":                     probeTrack.probesOK,
+		"last_error":                    redactProxyText(probeTrack.lastError),
+		"last_activity":                 redactProxyText(probeTrack.lastActivity),
+		"values":                        values,
+		"failures":                      failures,
+		"history":                       history,
+		"success_history":               successHistory,
 	}
 	probeTrack.mu.Unlock()
 	return summary

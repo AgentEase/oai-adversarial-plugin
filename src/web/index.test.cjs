@@ -66,6 +66,74 @@ function fixture(overrides={}) {
       issued_at:new Date(Date.now()-52*60000).toISOString(),expires_at:new Date(Date.now()+3*60000).toISOString()}],...overrides};
 }
 
+test('account routing renders empty, expired, pending and business failure separately',()=>{
+  const p=panel();
+  const data={records:[],turn_state_override:{probe:fixture()},account_routing:{enabled:true,accounts:[]}};
+  p.renderData(data);
+  assert.match(p.get('account-routing-rows').textContent,/尚无账号级使用记录/);
+  data.account_routing.accounts=[
+    {account:'auth-a',model:'astra',state:'expired'},
+    {account:'auth-b',model:'astra',state:'probe_pending',probe_reason:'probe_model_mismatch'},
+    {account:'auth-c',model:'sol',state:'degraded',cooldown_until:new Date(Date.now()+60000).toISOString()},
+    {account:'auth-d',model:'astra',state:'healthy',healthy_until:new Date(Date.now()+60000).toISOString(),last_state_length:332},
+    {account:'auth-e',model:'astra',state:'expired',renewal_attempted:true},
+  ];
+  p.renderData(data);
+  const rows=p.get('account-routing-rows').children;
+  assert.match(rows[0].children[2].textContent,/票据到期 · 待重探/);
+  assert.match(rows[0].children[2].children[0].className,/state-warn/);
+  assert.match(rows[1].children[2].textContent,/待重新探测/);
+  assert.match(rows[1].children[6].textContent,/探测记录：probe_model_mismatch/);
+  assert.match(rows[2].children[2].children[0].className,/state-fail/);
+  assert.match(rows[2].children[6].textContent,/冷却/);
+  assert.match(rows[3].children[2].children[0].className,/state-ok/);
+  assert.equal(rows[3].children[3].textContent,'332 B');
+  assert.match(rows[4].children[2].textContent,/续期已尝试 · 可手动重探/);
+});
+
+test('account guard counts, errors and all account locales update during refresh',()=>{
+  const p=panel();
+  const data={records:[],turn_state_override:{probe:fixture(),session_guard:{enabled:true,mode:'enforce',foreign_observed:5,foreign_replaced:2,foreign_stripped:3,last_decision:{kind:'foreign-account',account:'auth-a',owner:'auth-b',fingerprint:'123abc'}}},account_routing:{enabled:true,accounts:[{account:'auth-a',model:'astra',state:'expired'}]}};
+  p.renderData(data);
+  assert.match(p.get('account-routing-note').textContent,/异账号 5（替换 2 \/ 剥离 3）/);
+  assert.match(p.get('account-routing-note').title,/指纹 123abc/);
+  for(const [locale,label] of [['en','State expired'],['zh-TW','票據到期'],['ru','Срок истёк']]){
+    p.changeLanguage(locale);
+    assert.ok(p.get('account-routing-rows').textContent.includes(label));
+    assert.doesNotMatch(p.get('account-routing-note').textContent,/会话守卫|路由已开启/);
+  }
+  p.changeLanguage('en');
+  assert.match(p.get('account-routing-note').textContent,/Foreign states 5/);
+  data.turn_state_override.session_guard={mode:'off'};data.account_routing.error='invalid_setting';
+  p.renderData(data);
+  assert.match(p.get('account-routing-note').textContent,/Configuration error: invalid_setting/);
+  assert.match(p.get('account-routing-note').className,/settings-error/);
+  assert.equal(p.get('account-routing-note').title,'');
+});
+
+test('account provenance request badges are translated with their tooltips',()=>{
+  const p=panel({storedLanguage:'en'});
+  p.renderData({records:[{time:new Date().toISOString(),model:'gpt-6-astra',original:[],paths:[],turn_state_override:'session-foreign-stripped',turn_state_provenance:'foreign-account',turn_state_fingerprint:'123abc',turn_state_owner:'auth-owner'}],turn_state_override:{probe:fixture()}});
+  assert.match(p.get('rows').textContent,/Foreign state stripped/);
+  assert.match(p.get('rows').textContent,/Other-account source/);
+  assert.doesNotMatch(p.get('rows').textContent,/异账号/);
+});
+
+test('quota and authentication failures are not labelled as degradation',()=>{
+  const p=panel({storedLanguage:'en'});
+  const records=['quota_exhausted','rate_limited','account_auth_error','account_temporarily_unavailable'].map(kind=>({time:new Date().toISOString(),model:'gpt-6-astra',original:[],paths:[],rejection_kind:kind}));
+  p.renderData({records,account_routing:{enabled:true,accounts:[{account:'quota',model:'astra',state:'quota_exhausted',cooldown_until:new Date(Date.now()+120000).toISOString()},{account:'rate',model:'astra',state:'rate_limited'}]},turn_state_override:{probe:fixture()}});
+  assert.match(p.get('rows').textContent,/Quota exhausted/);
+  assert.match(p.get('rows').textContent,/Rate limited/);
+  assert.match(p.get('rows').textContent,/Authentication failed/);
+  assert.doesNotMatch(p.get('rows').textContent,/Degradation blocked/);
+  assert.match(p.get('account-routing-rows').textContent,/Quota exhausted/);
+  assert.match(p.get('account-routing-rows').children[0].children[2].children[0].className,/state-warn/);
+  p.changeLanguage('zh-CN');
+  assert.match(p.get('rows').textContent,/额度已用完/);
+  assert.doesNotMatch(p.get('rows').textContent,/降智已拦截/);
+});
+
 test('full stop and zero prefetch window do not advertise automatic takeover',()=>{
   const p=panel();p.render(fixture({halted:true}));
   assert.equal(p.get('probe-status').textContent,'全部停止');

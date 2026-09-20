@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -12,7 +13,7 @@ import (
 
 const (
 	pluginID                   = "timezone-override"
-	pluginVersion              = "1.5.37"
+	pluginVersion              = "1.5.39"
 	historyLimit               = 200
 	schemaVersion              = 6
 	streamChunkHeaderInitIndex = -1
@@ -30,11 +31,13 @@ type interceptRequest struct {
 	RequestedModel string
 	Headers        http.Header
 	Body           []byte
+	Metadata       map[string]any
 }
 
 type interceptResponse struct {
 	Body            []byte      `json:"Body,omitempty"`
 	Headers         http.Header `json:"Headers,omitempty"`
+	ClearHeaders    []string    `json:"ClearHeaders,omitempty"`
 	Terminate       bool        `json:"Terminate,omitempty"`
 	StatusCode      int         `json:"StatusCode,omitempty"`
 	ResponseHeaders http.Header `json:"ResponseHeaders,omitempty"`
@@ -102,23 +105,28 @@ type responseInterceptOutput struct {
 
 type auditRecord struct {
 	conversion
-	RequestID        string `json:"request_id"`
-	TraceID          string `json:"trace_id,omitempty"`
-	Model            string `json:"model"`
-	RequestedModel   string `json:"requested_model,omitempty"`
-	Time             string `json:"time"`
-	UpstreamModel    string `json:"upstream_model,omitempty"`
-	ModelChecked     bool   `json:"model_checked"`
-	ModelMismatch    bool   `json:"model_mismatch"`
-	DetectionExempt  bool   `json:"detection_exempt,omitempty"`
-	TurnStateLength  int    `json:"turn_state_length"`
-	TurnStateSource  string `json:"turn_state_source,omitempty"`
-	TurnStatePreview string `json:"turn_state_preview,omitempty"`
-	TurnStateValue   string `json:"turn_state_value,omitempty"`
-	TurnStateTruncated bool `json:"turn_state_truncated,omitempty"`
-	TurnStateOverride  string `json:"turn_state_override,omitempty"`
-	TurnStateInjectedLength int `json:"turn_state_injected_length,omitempty"`
-	DegradedRejected   bool   `json:"degraded_rejected,omitempty"`
+	RequestID               string `json:"request_id"`
+	TraceID                 string `json:"trace_id,omitempty"`
+	Model                   string `json:"model"`
+	RequestedModel          string `json:"requested_model,omitempty"`
+	Time                    string `json:"time"`
+	UpstreamModel           string `json:"upstream_model,omitempty"`
+	ModelChecked            bool   `json:"model_checked"`
+	ModelMismatch           bool   `json:"model_mismatch"`
+	DetectionExempt         bool   `json:"detection_exempt,omitempty"`
+	TurnStateLength         int    `json:"turn_state_length"`
+	TurnStateSource         string `json:"turn_state_source,omitempty"`
+	TurnStatePreview        string `json:"turn_state_preview,omitempty"`
+	TurnStateValue          string `json:"turn_state_value,omitempty"`
+	TurnStateTruncated      bool   `json:"turn_state_truncated,omitempty"`
+	TurnStateOverride       string `json:"turn_state_override,omitempty"`
+	TurnStateInjectedLength int    `json:"turn_state_injected_length,omitempty"`
+	TurnStateProvenance     string `json:"turn_state_provenance,omitempty"`
+	TurnStateOwner          string `json:"turn_state_owner,omitempty"`
+	TurnStateFingerprint    string `json:"turn_state_fingerprint,omitempty"`
+	DegradedRejected        bool   `json:"degraded_rejected,omitempty"`
+	RejectionKind           string `json:"rejection_kind,omitempty"`
+	QuotaStatus             string `json:"quota_status,omitempty"`
 }
 
 type auditState struct {
@@ -152,10 +160,8 @@ func handleMethod(method string, raw []byte) (any, error) {
 			"schema_version": schemaVersion,
 			"metadata": map[string]any{
 				"Name": "O/对抗插件", "Version": pluginVersion,
-				"Author": "Local", "ConfigFields": []any{},
-				// CPA requires a repository reference; this links to its extension SDK.
-				// This plugin's implementation is delivered as local source.
-				"GitHubRepository": "https://github.com/router-for-me/CLIProxyAPI",
+				"Author": "FlashyyL / AgentEase", "ConfigFields": visualConfigFields(),
+				"GitHubRepository": "https://github.com/AgentEase/oai-adversarial-plugin",
 			},
 			"capabilities": map[string]bool{
 				"request_interceptor":         true,
@@ -163,6 +169,8 @@ func handleMethod(method string, raw []byte) (any, error) {
 				"response_interceptor":        true,
 				"response_stream_interceptor": true,
 				"websocket_response_observer": true,
+				"scheduler":                   true,
+				"usage_plugin":                true,
 			},
 		}, nil
 	case "plugin.quiesce":
@@ -177,6 +185,10 @@ func handleMethod(method string, raw []byte) (any, error) {
 		return interceptStreamChunk(raw)
 	case "websocket.response_event":
 		return observeWebSocketEvent(raw)
+	case "scheduler.pick":
+		return pickAccountForRequest(raw)
+	case "usage.handle":
+		return struct{}{}, observeAccountUsage(raw)
 	case "management.register":
 		return map[string]any{
 			"routes": []map[string]string{
@@ -207,27 +219,64 @@ func intercept(raw []byte) (interceptResponse, error) {
 	if req.ToFormat != "codex" {
 		return interceptResponse{}, nil
 	}
+	authID := selectedAuthID(req.Metadata)
+	now := time.Now().UTC()
+	accountModel := businessModelName(req.Model, req.RequestedModel)
+	turnStateSessions.bindRequest(req.RequestID, authID, accountModel, now)
+	if accountRouter.needsRenewal(authID, accountModel, now) {
+		probeTrack.renewAccount(authID, accountModel, now)
+	}
+	clientState := headerValue(req.Headers, turnStateHeader)
+	provenance := turnStateSessions.inspect(req.Headers, req.Body, req.Metadata, authID, accountModel, clientState, now)
+	// A client-carried state may recover an account only when its owner is
+	// already known to be the selected AuthID. Unknown states remain pass-through
+	// evidence until a successful upstream response confirms their ownership.
+	if !sessionGuardEnabled() || provenance.Kind == "same-account" {
+		accountRouter.observeRequestState(authID, accountModel, clientState, now)
+	}
 	// Degraded-model rejection: when the switch is on and the request targets
 	// a model with business degradation evidence, or probe evidence without
 	// a usable baseline, terminate with 403. A failing prefetch must not
 	// interrupt traffic still protected by the active or successor value.
-	if message := degradedRejectMessage(req.Model, req.RequestedModel); message != "" {
+	message := degradedRejectMessageForAccount(authID, req.Model, req.RequestedModel)
+	rejectionKind, rejectionStatus := "degraded_model_rejected", http.StatusForbidden
+	responseHeaders := http.Header{"Content-Type": {"application/json; charset=utf-8"}}
+	if kind, until := accountRouter.quotaBlock(authID, accountModel, now); kind != "" {
+		message = "该账号额度已耗尽或请求受限，等待冷却结束；当前没有选中可用替补账号。"
+		rejectionKind, rejectionStatus = kind, http.StatusTooManyRequests
+		responseHeaders.Set("Retry-After", strconv.Itoa(max(1, int(until.Sub(now).Seconds()))))
+	} else if message != "" {
+		accountRouter.mu.Lock()
+		entry := accountRouter.health[accountHealthKey(authID, routingModelKey(accountModel))]
+		accountRouter.mu.Unlock()
+		if entry.State == "auth_error" {
+			rejectionKind, rejectionStatus = "account_auth_error", http.StatusUnauthorized
+		}
+		if entry.State == "transient_failure" {
+			rejectionKind, rejectionStatus = "account_temporarily_unavailable", http.StatusServiceUnavailable
+		}
+	}
+	if message != "" {
 		history.record(auditRecord{
 			RequestID: req.RequestID, TraceID: req.TraceID,
 			Model: req.Model, RequestedModel: req.RequestedModel,
-			Time:             time.Now().UTC().Format(time.RFC3339Nano),
-			DegradedRejected: true,
+			Time:                 time.Now().UTC().Format(time.RFC3339Nano),
+			DegradedRejected:     rejectionKind == "degraded_model_rejected",
+			RejectionKind:        rejectionKind,
+			TurnStateProvenance:  provenance.Kind,
+			TurnStateOwner:       publicAccountIDOrEmpty(provenance.OwnerAuthID),
+			TurnStateFingerprint: provenance.Fingerprint,
 			// The request never reaches normalization, so the conversion keeps
 			// empty slices (never nil) - a nil slice marshals as JSON null and
 			// the dashboard expects arrays.
 			conversion: conversion{Target: targetTimezone, Original: []string{}, Paths: []string{}},
 		})
 		payload, _ := json.Marshal(map[string]any{"error": map[string]string{
-			"type": "degraded_model_rejected", "message": message,
+			"type": rejectionKind, "message": message,
 		}})
 		return interceptResponse{
-			Terminate: true, StatusCode: http.StatusForbidden,
-			ResponseHeaders: http.Header{"Content-Type": {"application/json; charset=utf-8"}},
+			Terminate: true, StatusCode: rejectionStatus,
+			ResponseHeaders: responseHeaders,
 			ResponseBody:    payload,
 		}, nil
 	}
@@ -241,16 +290,68 @@ func intercept(raw []byte) (interceptResponse, error) {
 			ResponseHeaders: http.Header{"Content-Type": {"application/json"}}, ResponseBody: payload,
 		}, nil
 	}
-	overrideHeaders, overrideStatus := applyTurnStateOverride(req.Model, req.RequestedModel, req.Headers)
+	overrideInput := req.Headers
+	foreignState := provenance.Kind == "foreign-account" || provenance.Kind == "foreign-model"
+	enforceForeign := foreignState && provenance.Mode == sessionGuardModeEnforce
+	expiredClient := false
+	if issued, ok := parseTurnStateTimestamp(clientState); ok && degradationDetectionEnabled(req.Model, req.RequestedModel) {
+		expiredClient = !issued.Add(currentProbeConfig().Config.TTL).After(now)
+	}
+	if enforceForeign || expiredClient {
+		overrideInput = req.Headers.Clone()
+		overrideInput.Del(turnStateHeader)
+	}
+	overrideHeaders, overrideStatus := applyTurnStateOverrideForAccount(authID, req.Model, req.RequestedModel, overrideInput)
+	clearHeaders := []string(nil)
+	if enforceForeign || expiredClient {
+		if overrideHeaders != nil && headerValue(overrideHeaders, turnStateHeader) != "" {
+			overrideStatus = "session-foreign-replaced"
+			if enforceForeign {
+				turnStateSessions.noteEnforcement("replaced")
+			}
+		} else {
+			overrideStatus = "session-foreign-stripped"
+			clearHeaders = []string{turnStateHeader}
+			// CPA 7.3's host can flatten ClearHeaders into a complete header
+			// snapshot, which its executor then merges into the original map.
+			// An explicit empty value survives that merge and prevents the
+			// original client value from being reintroduced. Codex omits it
+			// from the actual upstream request.
+			overrideHeaders = http.Header{turnStateHeader: []string{""}}
+			if enforceForeign {
+				turnStateSessions.noteEnforcement("stripped")
+			}
+		}
+		if expiredClient && !enforceForeign {
+			if headerValue(overrideHeaders, turnStateHeader) == "" {
+				overrideStatus = "expired-state-stripped"
+			} else {
+				overrideStatus = "expired-state-replaced"
+			}
+		}
+	}
 	injectedLength := 0
 	if overrideHeaders != nil {
 		injectedLength = len(overrideHeaders.Get(turnStateHeader))
+	}
+	finalState := clientState
+	if len(clearHeaders) > 0 {
+		finalState = ""
+	}
+	if value := headerValue(overrideHeaders, turnStateHeader); value != "" {
+		finalState = value
+	}
+	if finalState != "" && (provenance.Kind == "same-account" || accountRouter.stateOwnedBy(authID, accountModel, finalState, now)) {
+		turnStateSessions.noteOwned(req.Headers, req.Body, req.Metadata, authID, accountModel, finalState, "request-account-state", now)
 	}
 	history.record(auditRecord{
 		conversion: result, RequestID: req.RequestID, TraceID: req.TraceID,
 		Model: req.Model, RequestedModel: req.RequestedModel,
 		Time:              time.Now().UTC().Format(time.RFC3339Nano),
 		TurnStateOverride: overrideStatus, TurnStateInjectedLength: injectedLength,
+		TurnStateProvenance:  provenance.Kind,
+		TurnStateOwner:       publicAccountIDOrEmpty(provenance.OwnerAuthID),
+		TurnStateFingerprint: provenance.Fingerprint,
 	})
 	history.observeTurnState(req.RequestID, headerValue(req.Headers, turnStateHeader), "request")
 	response := interceptResponse{}
@@ -258,6 +359,7 @@ func intercept(raw []byte) (interceptResponse, error) {
 		response.Body = body
 	}
 	response.Headers = overrideHeaders
+	response.ClearHeaders = clearHeaders
 	return response, nil
 }
 
@@ -279,6 +381,11 @@ func (s *auditState) record(record auditRecord) {
 				if record.TurnStateInjectedLength > 0 {
 					existing.TurnStateInjectedLength = record.TurnStateInjectedLength
 				}
+			}
+			if record.TurnStateProvenance != "" {
+				existing.TurnStateProvenance = record.TurnStateProvenance
+				existing.TurnStateOwner = record.TurnStateOwner
+				existing.TurnStateFingerprint = record.TurnStateFingerprint
 			}
 			if record.Action != "" || len(record.Original) > 0 || record.Model != "" {
 				existing.conversion = record.conversion
@@ -314,6 +421,34 @@ func (s *auditState) record(record auditRecord) {
 		return
 	}
 	s.records = append(s.records, record)
+}
+
+func (s *auditState) observeSessionGuard(requestID string, decision turnStateProvenanceDecision, override string, injectedLength int) {
+	requestID = strings.TrimSpace(requestID)
+	if requestID == "" || (decision.Kind == "" && override == "") {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.records {
+		if s.records[i].RequestID != requestID {
+			continue
+		}
+		if decision.Kind != "" {
+			foreign := decision.Kind == "foreign-account" || decision.Kind == "foreign-model"
+			if s.records[i].TurnStateProvenance == "" || foreign {
+				s.records[i].TurnStateProvenance = decision.Kind
+				s.records[i].TurnStateOwner = publicAccountIDOrEmpty(decision.OwnerAuthID)
+				s.records[i].TurnStateFingerprint = decision.Fingerprint
+			}
+		}
+		if override != "" {
+			s.records[i].TurnStateOverride = override
+			s.records[i].TurnStateInjectedLength = injectedLength
+		}
+		markStateDirty()
+		return
+	}
 }
 
 func (s *auditState) snapshot() map[string]any {
@@ -352,7 +487,8 @@ func (s *auditState) snapshot() map[string]any {
 		"limit": historyLimit, "total": s.total, "inserted": s.inserted,
 		"replaced": s.replaced, "mismatches": mismatches, "overridden": overridden,
 		"turn_state_override": turnStateOverrideSummary(),
-		"records":            records,
+		"account_routing":     accountRoutingSummary(),
+		"records":             records,
 	}
 }
 
@@ -406,13 +542,13 @@ func management(raw []byte) (managementResponse, error) {
 func probeControl(body []byte) (managementResponse, error) {
 	skipped := false
 	var req struct {
-		Model   string `json:"model"`
-		Proxy   string `json:"proxy"`
-		ID      string `json:"id"`
-		Action  string `json:"action"`
-		Enabled *bool  `json:"enabled"`
-		Minutes *int   `json:"minutes"`
-		Seconds *int   `json:"seconds"`
+		Model   string    `json:"model"`
+		Proxy   string    `json:"proxy"`
+		ID      string    `json:"id"`
+		Action  string    `json:"action"`
+		Enabled *bool     `json:"enabled"`
+		Minutes *int      `json:"minutes"`
+		Seconds *int      `json:"seconds"`
 		Exit    *exitEdit `json:"exit"`
 	}
 	if len(body) > 0 {

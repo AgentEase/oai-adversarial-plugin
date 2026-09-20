@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -45,11 +46,13 @@ const (
 //	  value: "gAAAAAB..."
 //	  force: true
 type turnStateOverrideConfig struct {
-	Enabled bool               `yaml:"enabled"`
-	Models  []string           `yaml:"models"`
-	Value   string             `yaml:"value"`
-	Force   bool               `yaml:"force"`
-	Probe   probeConfigYAML    `yaml:"probe"`
+	Enabled                     bool            `yaml:"enabled"`
+	Models                      []string        `yaml:"models"`
+	Value                       string          `yaml:"value"`
+	Force                       bool            `yaml:"force"`
+	SessionGuardMode            string          `yaml:"session-guard-mode"`
+	SessionProvenanceTTLMinutes int             `yaml:"session-provenance-ttl-minutes"`
+	Probe                       probeConfigYAML `yaml:"probe"`
 }
 
 // turnStateOverrideState is the active rewrite configuration plus the last
@@ -80,6 +83,12 @@ func configureTurnStateOverride(configYAML []byte) error {
 	}
 	trimmed := bytes.TrimSpace(configYAML)
 	if len(trimmed) > 0 {
+		normalized, err := normalizePanelConfig(trimmed)
+		if err != nil {
+			turnStateOverride.Store(&turnStateOverrideState{Error: err.Error()})
+			return err
+		}
+		trimmed = normalized
 		if err := yaml.Unmarshal(trimmed, &root); err != nil {
 			state = &turnStateOverrideState{Error: fmt.Sprintf("decode turn-state-override config: %v", err)}
 			turnStateOverride.Store(state)
@@ -88,6 +97,23 @@ func configureTurnStateOverride(configYAML []byte) error {
 	}
 	config := root.TurnStateOverride
 	config.Value = strings.TrimSpace(config.Value)
+	config.SessionGuardMode = strings.ToLower(strings.TrimSpace(config.SessionGuardMode))
+	if config.SessionGuardMode == "" {
+		config.SessionGuardMode = sessionGuardModeObserve
+	}
+	if config.SessionGuardMode != sessionGuardModeOff && config.SessionGuardMode != sessionGuardModeObserve && config.SessionGuardMode != sessionGuardModeEnforce {
+		state = &turnStateOverrideState{Config: config, Error: "turn-state-override.session-guard-mode must be off, observe or enforce"}
+		turnStateOverride.Store(state)
+		return fmt.Errorf("turn-state-override.session-guard-mode must be off, observe or enforce")
+	}
+	if config.SessionProvenanceTTLMinutes == 0 {
+		config.SessionProvenanceTTLMinutes = int(defaultSessionProvenanceTTL / time.Minute)
+	}
+	if config.SessionProvenanceTTLMinutes < 1 || config.SessionProvenanceTTLMinutes > 1440 {
+		state = &turnStateOverrideState{Config: config, Error: "turn-state-override.session-provenance-ttl-minutes must be 1-1440"}
+		turnStateOverride.Store(state)
+		return fmt.Errorf("turn-state-override.session-provenance-ttl-minutes must be 1-1440")
+	}
 	models := make([]string, 0, len(config.Models))
 	for _, model := range config.Models {
 		if model = strings.TrimSpace(model); model != "" {
@@ -101,14 +127,10 @@ func configureTurnStateOverride(configYAML []byte) error {
 			state = &turnStateOverrideState{Config: config, Error: "turn-state-override.models must not be empty"}
 			turnStateOverride.Store(state)
 			return fmt.Errorf("turn-state-override.models must not be empty")
-		case config.Value == "" && !probeEnabled(config.Probe):
-			state = &turnStateOverrideState{Config: config, Error: "turn-state-override.value must not be empty (and probe is disabled)"}
-			turnStateOverride.Store(state)
-			return fmt.Errorf("turn-state-override.value must not be empty (and probe is disabled)")
 		}
 	}
-	// The probe track may be enabled independently of the static value; it
-	// supplies fresh per-model values when available.
+	// Empty static value is valid: passive business observations may populate
+	// the baseline even with the probe track disabled. Until then, do not inject.
 	_ = configureProbeTrack(config.Probe)
 	state = &turnStateOverrideState{Config: config}
 	turnStateOverride.Store(state)
@@ -153,10 +175,40 @@ func turnStateOverrideMatches(config turnStateOverrideConfig, models ...string) 
 // configured value; the baseline keeps serving even while the probe track is
 // idle - it is cached protection, not probing.
 func applyTurnStateOverride(model, requestedModel string, headers http.Header) (http.Header, string) {
+	return applyTurnStateOverrideInternal("", model, requestedModel, headers, false)
+}
+
+func applyTurnStateOverrideForAccount(authID, model, requestedModel string, headers http.Header) (http.Header, string) {
+	return applyTurnStateOverrideInternal(authID, model, requestedModel, headers, true)
+}
+
+func applyTurnStateOverrideInternal(authID, model, requestedModel string, headers http.Header, accountScoped bool) (http.Header, string) {
 	if !degradationDetectionEnabled(model, requestedModel) {
 		return nil, ""
 	}
 	state := currentTurnStateOverride()
+	force := state != nil && state.Config.Force
+	existing := headerValue(headers, turnStateHeader)
+	keepExisting := existing != "" && isAcceptedStateLength(len(existing)) && !force
+
+	// Once account routing is enabled, the selected AuthID owns its state and
+	// expiry. Never borrow the model-global baseline or static fallback from a
+	// different account. A healthy client-provided value may still pass through
+	// in fill mode because it already belongs to this request/account.
+	accountModel := businessModelName(model, requestedModel)
+	now := time.Now().UTC()
+	if accountScoped {
+		if value, scoped := accountRouter.accountTurnState(authID, accountModel, now); scoped {
+			if keepExisting {
+				return nil, "skipped-existing"
+			}
+			if value == "" {
+				return nil, "account-state-missing"
+			}
+			return http.Header{turnStateHeader: []string{value}}, "applied-account"
+		}
+	}
+
 	if state == nil {
 		return nil, ""
 	}
@@ -182,8 +234,6 @@ func applyTurnStateOverride(model, requestedModel string, headers http.Header) (
 	// An existing client value is kept only when it looks healthy (required
 	// length) and force is off; an unhealthy one (for example a 312-byte
 	// degraded state) is always replaced, whichever the mode.
-	existing := headerValue(headers, turnStateHeader)
-	keepExisting := existing != "" && len(existing) == probeRequiredStateLength && !state.Config.Force
 	if baseline == "" {
 		if !state.Config.Enabled || state.Config.Value == "" {
 			return nil, ""
@@ -203,7 +253,7 @@ func applyTurnStateOverride(model, requestedModel string, headers http.Header) (
 // exactly the required length and, when the upstream model is known, served by
 // a consistent model. An unknown upstream model only length-checks.
 func isHealthyTurnState(model, observedModel, state string) bool {
-	if len(state) != probeRequiredStateLength {
+	if !isAcceptedStateLength(len(state)) {
 		return false
 	}
 	if observedModel != "" && !probeModelConsistent(model, observedModel) {
@@ -218,7 +268,19 @@ func isHealthyTurnState(model, observedModel, state string) bool {
 // instead, so it is not fed back into the next request. Returns nil when no
 // repair applies (healthy value, no state, or no baseline yet), in which case
 // the response must pass through untouched.
+func isAcceptedStateLength(length int) bool {
+	return length == 292 || length == 332
+}
+
 func repairTurnStateHeader(model, requestedModel, observedModel, state string) http.Header {
+	return repairTurnStateHeaderInternal("", model, requestedModel, observedModel, state, false)
+}
+
+func repairTurnStateHeaderForAccount(authID, model, requestedModel, observedModel, state string) http.Header {
+	return repairTurnStateHeaderInternal(authID, model, requestedModel, observedModel, state, true)
+}
+
+func repairTurnStateHeaderInternal(authID, model, requestedModel, observedModel, state string, accountScoped bool) http.Header {
 	if !degradationDetectionEnabled(model, requestedModel) {
 		return nil
 	}
@@ -233,7 +295,14 @@ func repairTurnStateHeader(model, requestedModel, observedModel, state string) h
 	if isHealthyTurnState(key, observedModel, state) {
 		return nil
 	}
-	baseline := probeTrack.activeValueFor(key)
+	baseline := ""
+	scoped := false
+	if accountScoped {
+		baseline, scoped = accountRouter.accountTurnState(authID, key, time.Now().UTC())
+	}
+	if !accountScoped || !scoped {
+		baseline = probeTrack.activeValueFor(key)
+	}
 	if baseline == "" || baseline == state {
 		return nil
 	}
@@ -275,6 +344,13 @@ func interceptNonStreamingResponse(raw []byte) (responseInterceptOutput, error) 
 		return responseInterceptOutput{}, fmt.Errorf("decode response interception: %w", err)
 	}
 	state := headerValue(req.ResponseHeaders, turnStateHeader)
+	authID := turnStateSessions.responseAuth(req.RequestID, businessModelName(req.Model, req.RequestedModel), req.Metadata, time.Now().UTC())
+	if kind := quotaFailure(req.StatusCode, string(req.Body)); kind != "" {
+		now := time.Now().UTC()
+		accountRouter.observeQuota(authID, businessModelName(req.Model, req.RequestedModel), kind, quotaRetryAt(kind, req.ResponseHeaders, string(req.Body), now), now)
+		history.observeQuota(req.RequestID, kind)
+		return responseInterceptOutput{}, nil
+	}
 	upstream := ""
 	if model, ok := probeUpstreamModel(req.Body); ok {
 		upstream = model
@@ -283,8 +359,28 @@ func interceptNonStreamingResponse(raw []byte) (responseInterceptOutput, error) 
 	history.observeTurnState(req.RequestID, state, "response")
 	observeBusinessStateForRequest(req.Model, req.RequestedModel, state, upstream)
 	out := responseInterceptOutput{}
-	if headers := repairTurnStateHeader(req.Model, req.RequestedModel, upstream, state); headers != nil {
+	if headers := repairTurnStateHeaderForAccount(authID, req.Model, req.RequestedModel, upstream, state); headers != nil {
 		out.Headers = headers
+	}
+	guardResponseTurnState(
+		req.RequestID, req.RequestHeaders, firstNonEmptyBody(req.RequestBody, req.OriginalRequest), req.Metadata,
+		authID, businessModelName(req.Model, req.RequestedModel), state, &out, time.Now().UTC(),
+	)
+	if req.StatusCode == 0 || (req.StatusCode >= http.StatusOK && req.StatusCode < http.StatusMultipleChoices) {
+		downstreamState := state
+		if replacement := headerValue(out.Headers, turnStateHeader); replacement != "" {
+			downstreamState = replacement
+		}
+		if responseClearsHeader(out.ClearHeaders, turnStateHeader) {
+			downstreamState = ""
+		}
+		turnStateSessions.stageResponse(
+			req.RequestID, req.RequestHeaders, firstNonEmptyBody(req.RequestBody, req.OriginalRequest), req.Metadata,
+			authID, businessModelName(req.Model, req.RequestedModel), state, downstreamState, time.Now().UTC(),
+		)
+		if upstream != "" {
+			turnStateSessions.confirmResponse(req.RequestID, upstream, time.Now().UTC())
+		}
 	}
 	return out, nil
 }
@@ -296,6 +392,13 @@ func interceptStreamChunk(raw []byte) (responseInterceptOutput, error) {
 	var req streamChunkInterceptRequest
 	if err := json.Unmarshal(raw, &req); err != nil {
 		return responseInterceptOutput{}, fmt.Errorf("decode stream chunk interception: %w", err)
+	}
+	authID := turnStateSessions.responseAuth(req.RequestID, businessModelName(req.Model, req.RequestedModel), req.Metadata, time.Now().UTC())
+	if kind := quotaFailure(0, string(req.Body)); kind != "" {
+		now := time.Now().UTC()
+		accountRouter.observeQuota(authID, businessModelName(req.Model, req.RequestedModel), kind, quotaRetryAt(kind, req.ResponseHeaders, string(req.Body), now), now)
+		history.observeQuota(req.RequestID, kind)
+		return responseInterceptOutput{}, nil
 	}
 	upstream := ""
 	if req.ChunkIndex != streamChunkHeaderInitIndex {
@@ -310,8 +413,28 @@ func interceptStreamChunk(raw []byte) (responseInterceptOutput, error) {
 		observeBusinessStateForRequest(req.Model, req.RequestedModel, state, upstream)
 	}
 	out := responseInterceptOutput{}
-	if headers := repairTurnStateHeader(req.Model, req.RequestedModel, upstream, state); headers != nil {
+	if headers := repairTurnStateHeaderForAccount(authID, req.Model, req.RequestedModel, upstream, state); headers != nil {
 		out.Headers = headers
+	}
+	guardResponseTurnState(
+		req.RequestID, req.RequestHeaders, firstNonEmptyBody(req.RequestBody, req.OriginalRequest), req.Metadata,
+		authID, businessModelName(req.Model, req.RequestedModel), state, &out, time.Now().UTC(),
+	)
+	if state != "" {
+		downstreamState := state
+		if replacement := headerValue(out.Headers, turnStateHeader); replacement != "" {
+			downstreamState = replacement
+		}
+		if responseClearsHeader(out.ClearHeaders, turnStateHeader) {
+			downstreamState = ""
+		}
+		turnStateSessions.stageResponse(
+			req.RequestID, req.RequestHeaders, firstNonEmptyBody(req.RequestBody, req.OriginalRequest), req.Metadata,
+			authID, businessModelName(req.Model, req.RequestedModel), state, downstreamState, time.Now().UTC(),
+		)
+	}
+	if upstream != "" {
+		turnStateSessions.confirmResponse(req.RequestID, upstream, time.Now().UTC())
 	}
 	return out, nil
 }
@@ -327,8 +450,65 @@ func observeWebSocketEvent(raw []byte) (struct{}, error) {
 	if model, ok := probeUpstreamModel(event.Payload); ok {
 		history.observeModel(event.RequestID, event.TraceID, model)
 		observeBusinessStateForRequest(event.Model, event.RequestedModel, "", model)
+		turnStateSessions.confirmResponse(event.RequestID, model, time.Now().UTC())
 	}
 	return struct{}{}, nil
+}
+
+func firstNonEmptyBody(primary, fallback []byte) []byte {
+	if len(primary) > 0 {
+		return primary
+	}
+	return fallback
+}
+
+func guardResponseTurnState(requestID string, requestHeaders http.Header, requestBody []byte, metadata map[string]any, authID, model, state string, out *responseInterceptOutput, now time.Time) {
+	if out == nil || strings.TrimSpace(state) == "" {
+		return
+	}
+	decision := turnStateSessions.inspect(requestHeaders, requestBody, metadata, authID, model, state, now)
+	foreign := decision.Kind == "foreign-account" || decision.Kind == "foreign-model"
+	status := ""
+	injectedLength := 0
+	if foreign && decision.Mode == sessionGuardModeEnforce {
+		replacement := headerValue(out.Headers, turnStateHeader)
+		if replacement == "" || !accountRouter.stateOwnedBy(authID, model, replacement, now) {
+			if owned, scoped := accountRouter.accountTurnState(authID, model, now); scoped {
+				replacement = owned
+			}
+		}
+		if replacement != "" && replacement != state {
+			if out.Headers == nil {
+				out.Headers = make(http.Header)
+			}
+			out.Headers.Set(turnStateHeader, replacement)
+			status = "session-foreign-replaced"
+			injectedLength = len(replacement)
+			turnStateSessions.noteEnforcement("replaced")
+		} else {
+			out.Headers.Del(turnStateHeader)
+			out.ClearHeaders = appendUniqueHeader(out.ClearHeaders, turnStateHeader)
+			status = "session-foreign-stripped"
+			turnStateSessions.noteEnforcement("stripped")
+		}
+	}
+	history.observeSessionGuard(requestID, decision, status, injectedLength)
+}
+
+func appendUniqueHeader(headers []string, name string) []string {
+	if responseClearsHeader(headers, name) {
+		return headers
+	}
+	return append(headers, name)
+}
+
+func responseClearsHeader(headers []string, name string) bool {
+	for _, candidate := range headers {
+		if strings.EqualFold(strings.TrimSpace(candidate), name) {
+			return true
+		}
+	}
+	return false
 }
 
 // Exempt requests are selected by the user's requested model, never by the
@@ -500,6 +680,7 @@ func configureTurnStateOverrideFromLifecycle(raw []byte) {
 		return
 	}
 	_ = configureTurnStateOverride(request.ConfigYAML)
+	_ = configureAccountRouting(request.ConfigYAML)
 }
 
 // turnStateOverrideSummary describes the active rewrite configuration for the
@@ -525,6 +706,7 @@ func turnStateOverrideSummary() map[string]any {
 		"value_length":  len(state.Config.Value),
 		"value_preview": preview,
 		"error":         state.Error,
+		"session_guard": turnStateSessions.summary(),
 		"probe":         probeSummary(),
 	}
 }

@@ -17,6 +17,7 @@ package main
 
 import (
 	"encoding/json"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -34,27 +35,28 @@ const (
 // persistedState is the on-disk snapshot. Optional fields use omitempty so a
 // minimal snapshot (only the switch) stays tiny.
 type persistedState struct {
-	StateVersion   int             `json:"state_version"`
-	SavedAt        string          `json:"saved_at,omitempty"`
-	RejectDegraded *bool           `json:"reject_degraded,omitempty"`
-	Halted         *bool           `json:"halted,omitempty"`
-	Paused         []string        `json:"paused,omitempty"`
-	Values         []stateEntry    `json:"values,omitempty"`
-	Candidates     []stateEntry    `json:"candidates,omitempty"`
-	Failures       []probeFailure  `json:"failures,omitempty"`
-	Suspects       []probeSuspicion `json:"suspects,omitempty"`
+	StateVersion   int                   `json:"state_version"`
+	SavedAt        string                `json:"saved_at,omitempty"`
+	RejectDegraded *bool                 `json:"reject_degraded,omitempty"`
+	Halted         *bool                 `json:"halted,omitempty"`
+	Paused         []string              `json:"paused,omitempty"`
+	Values         []stateEntry          `json:"values,omitempty"`
+	Candidates     []stateEntry          `json:"candidates,omitempty"`
+	Failures       []probeFailure        `json:"failures,omitempty"`
+	Suspects       []probeSuspicion      `json:"suspects,omitempty"`
 	Business       []businessDegradation `json:"business,omitempty"`
-	ExitPenalties  []exitPenalty   `json:"exit_penalties,omitempty"`
-	DisabledExits  []string        `json:"disabled_exits,omitempty"`
-	ProbesTotal    uint64          `json:"probes_total,omitempty"`
-	ProbesOK       uint64          `json:"probes_ok,omitempty"`
-	ProbeHistory   []probeRecord   `json:"probe_history,omitempty"`
+	ExitPenalties  []exitPenalty         `json:"exit_penalties,omitempty"`
+	DisabledExits  []string              `json:"disabled_exits,omitempty"`
+	ProbesTotal    uint64                `json:"probes_total,omitempty"`
+	ProbesOK       uint64                `json:"probes_ok,omitempty"`
+	ProbeHistory   []probeRecord         `json:"probe_history,omitempty"`
 	// Keep an explicit empty array to distinguish new snapshots from legacy ones.
-	ProbeSuccessHistory []probeRecord `json:"probe_success_history"`
-	Records        []auditRecord   `json:"records,omitempty"`
-	Total          uint64          `json:"total,omitempty"`
-	Inserted       uint64          `json:"inserted,omitempty"`
-	Replaced       uint64          `json:"replaced,omitempty"`
+	ProbeSuccessHistory []probeRecord        `json:"probe_success_history"`
+	Records             []auditRecord        `json:"records,omitempty"`
+	Total               uint64               `json:"total,omitempty"`
+	Inserted            uint64               `json:"inserted,omitempty"`
+	Replaced            uint64               `json:"replaced,omitempty"`
+	AccountHealth       []accountModelHealth `json:"account_health,omitempty"`
 }
 
 var (
@@ -89,7 +91,7 @@ func ensurePersistence() {
 		loadPersistedState()
 		loadRuntimeSettings()
 		// After the snapshot is restored, fill any entry that has no value yet
-		// from the newest healthy (292-byte) turn-state values in the audit
+		// from the newest healthy (332-byte) turn-state values in the audit
 		// journal, so the baseline table is never empty after a fresh start.
 		probeTrack.seedBaselinesFromAudit()
 		go persistLoop(persistStop)
@@ -135,7 +137,7 @@ func flushStateNow() {
 // may be milliseconds apart, which is fine for a dashboard snapshot.
 func collectState() persistedState {
 	state := persistedState{
-		StateVersion: 1,
+		StateVersion: 4,
 		SavedAt:      time.Now().UTC().Format(time.RFC3339Nano),
 	}
 	probeTrack.mu.Lock()
@@ -186,42 +188,48 @@ func collectState() persistedState {
 	state.Inserted = history.inserted
 	state.Replaced = history.replaced
 	history.mu.Unlock()
+
+	accountRouter.mu.Lock()
+	for _, entry := range accountRouter.health {
+		state.AccountHealth = append(state.AccountHealth, entry)
+	}
+	accountRouter.mu.Unlock()
 	return state
 }
 
 // savePersistedState writes the snapshot atomically. Best effort: failures
 // only surface on the dashboard status line, never break traffic.
-func savePersistedState() {
+func savePersistedState() error {
+	persistWriteMu.Lock()
+	defer persistWriteMu.Unlock()
 	state := collectState()
 	payload, err := json.Marshal(&state)
 	if err != nil {
-		return
+		return err
 	}
-	persistWriteMu.Lock()
-	defer persistWriteMu.Unlock()
 	path := stateFilePath()
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, persistDirMode); err != nil {
-		return
+		return err
 	}
 	temporary := path + ".tmp"
 	file, err := os.OpenFile(temporary, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, persistFileMode)
 	if err != nil {
-		return
+		return err
 	}
 	if _, err := file.Write(payload); err != nil {
 		file.Close()
 		os.Remove(temporary)
-		return
+		return err
 	}
 	if err := file.Sync(); err != nil {
 		file.Close()
 		os.Remove(temporary)
-		return
+		return err
 	}
 	if err := file.Close(); err != nil {
 		os.Remove(temporary)
-		return
+		return err
 	}
 	// Keep the previous snapshot as a fallback copy before replacing it.
 	if _, err := os.Stat(path); err == nil {
@@ -229,8 +237,9 @@ func savePersistedState() {
 	}
 	if err := os.Rename(temporary, path); err != nil {
 		os.Remove(temporary)
-		return
+		return err
 	}
+	return nil
 }
 
 // loadPersistedState restores the previous snapshot into the live state.
@@ -388,4 +397,53 @@ func applyPersistedState(state persistedState) {
 		history.replaced = state.Replaced
 	}
 	history.mu.Unlock()
+
+	// Account routing evidence is restored using each AuthID+model entry's own
+	// TTL. A refresh captured for one account must never extend another
+	// account, and legacy snapshots without an account-owned state cannot be
+	// treated as healthy.
+	now := time.Now().UTC()
+	ttl := currentProbeConfig().Config.TTL
+	accountRouter.mu.Lock()
+	if accountRouter.health == nil {
+		accountRouter.health = map[string]accountModelHealth{}
+	}
+	for _, entry := range state.AccountHealth {
+		if strings.TrimSpace(entry.AuthID) == "" || routingModelKey(entry.Model) == "" {
+			continue
+		}
+		entry.Model = routingModelKey(entry.Model)
+		// Older usage classification tested state length before HTTP 429 and
+		// retained stale status codes. This evidence is ambiguous, not healthy:
+		// release its hard rejection and require one bounded recheck.
+		if state.StateVersion < 4 && entry.State == "degraded" && entry.LastStatusCode == http.StatusTooManyRequests && strings.HasPrefix(entry.LastReason, "state_length_") {
+			entry.ProbeReason = entry.LastReason
+			entry.State = "probe_pending"
+			entry.LastReason = "legacy_quota_evidence_needs_recheck"
+			entry.TurnStateValue = ""
+			entry.CooldownUntil = time.Time{}
+			entry.RenewalAttemptedFor = ""
+		}
+		expireAccountHealth(&entry, now)
+		if entry.State == "healthy" {
+			if entry.TurnStateValue == "" || !isAcceptedStateLength(len(entry.TurnStateValue)) {
+				continue
+			}
+			if entry.HealthyUntil.IsZero() {
+				entry.HealthyUntil = accountStateExpiry(entry.TurnStateValue, entry.ObservedAt, ttl)
+			}
+			if expireAccountHealth(&entry, now) {
+				entry.Account = publicAccountID(entry.AuthID)
+				accountRouter.health[accountHealthKey(entry.AuthID, entry.Model)] = entry
+				continue
+			}
+		} else if entry.CooldownUntil.IsZero() || !now.Before(entry.CooldownUntil) {
+			if entry.State != "expired" && entry.State != "probe_pending" {
+				continue
+			}
+		}
+		entry.Account = publicAccountID(entry.AuthID)
+		accountRouter.health[accountHealthKey(entry.AuthID, entry.Model)] = entry
+	}
+	accountRouter.mu.Unlock()
 }
