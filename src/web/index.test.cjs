@@ -630,3 +630,18 @@ test('changed exits and sign-out discard late public sampling results',async()=>
   finish({egress_check:{samples:[{ip:'8.8.8.8'}]}});await pendingLogin;
   p.renderData(data);assert.match(p.get('pool-rows').textContent,/尚未采样/);
 });
+
+
+test('target timezone follows API changes and remains literal text',()=>{
+  const p=panel();
+  const data={records:[],turn_state_override:{probe:fixture()}};
+  p.renderData({...data,target:'Asia/Singapore'});
+  assert.equal(p.get('target-timezone').textContent,'Asia/Singapore');
+  p.changeLanguage('en');
+  assert.equal(p.get('target-timezone').textContent,'Asia/Singapore');
+  p.renderData({...data,target:'America/New_York'});
+  assert.equal(p.get('target-timezone').textContent,'America/New_York');
+  p.renderData({...data,target:'<img src=x onerror=alert(1)>'});
+  assert.equal(p.get('target-timezone').children.length,0);
+  p.renderData(data);assert.equal(p.get('target-timezone').textContent,'—');
+});

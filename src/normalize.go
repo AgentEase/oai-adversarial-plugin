@@ -29,9 +29,9 @@ func currentTimezone() string {
 	return targetTimezone
 }
 
-func timezoneTag() string { return "<timezone>" + currentTimezone() + "</timezone>" }
-func environmentBlock() string {
-	return "<environment_context>\n" + timezoneTag() + "\n</environment_context>"
+func timezoneTag(zone string) string { return "<timezone>" + zone + "</timezone>" }
+func environmentBlock(zone string) string {
+	return "<environment_context>\n" + timezoneTag(zone) + "\n</environment_context>"
 }
 
 var (
@@ -137,7 +137,7 @@ func (n *normalizer) textField(object map[string]any, key, path string) {
 				n.Original = appendUnique(n.Original, original)
 			}
 		}
-		tag := timezoneTag()
+		tag := timezoneTag(n.Target)
 		if len(matches) > 0 {
 			return timezonePattern.ReplaceAllString(block, tag)
 		}
@@ -159,11 +159,11 @@ func (n *normalizer) inject(request map[string]any, sourceFormat string) error {
 	if strings.EqualFold(sourceFormat, "claude") {
 		switch system := request["system"].(type) {
 		case nil:
-			request["system"] = environmentBlock()
+			request["system"] = environmentBlock(n.Target)
 		case string:
-			request["system"] = appendContext(system)
+			request["system"] = appendContext(system, n.Target)
 		case []any:
-			request["system"] = append(system, map[string]any{"type": "text", "text": environmentBlock()})
+			request["system"] = append(system, map[string]any{"type": "text", "text": environmentBlock(n.Target)})
 		default:
 			return fmt.Errorf("unsupported system content")
 		}
@@ -171,16 +171,16 @@ func (n *normalizer) inject(request map[string]any, sourceFormat string) error {
 		return nil
 	}
 	if messages, ok := request["messages"].([]any); ok {
-		contextMessage := map[string]any{"role": "system", "content": environmentBlock()}
+		contextMessage := map[string]any{"role": "system", "content": environmentBlock(n.Target)}
 		request["messages"] = append([]any{contextMessage}, messages...)
 		n.Paths = append(n.Paths, "$.messages[0].content")
 		return nil
 	}
 	switch instructions := request["instructions"].(type) {
 	case nil:
-		request["instructions"] = environmentBlock()
+		request["instructions"] = environmentBlock(n.Target)
 	case string:
-		request["instructions"] = appendContext(instructions)
+		request["instructions"] = appendContext(instructions, n.Target)
 	default:
 		return fmt.Errorf("unsupported instructions content")
 	}
@@ -188,11 +188,11 @@ func (n *normalizer) inject(request map[string]any, sourceFormat string) error {
 	return nil
 }
 
-func appendContext(text string) string {
+func appendContext(text, zone string) string {
 	if text == "" {
-		return environmentBlock()
+		return environmentBlock(zone)
 	}
-	return text + "\n\n" + environmentBlock()
+	return text + "\n\n" + environmentBlock(zone)
 }
 
 func appendUnique(values []string, value string) []string {

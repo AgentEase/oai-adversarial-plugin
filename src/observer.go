@@ -49,11 +49,11 @@ const (
 //	  value: "gAAAAAB..."
 //	  force: true
 type turnStateOverrideConfig struct {
-	Enabled bool               `yaml:"enabled"`
-	Models  []string           `yaml:"models"`
-	Value   string             `yaml:"value"`
-	Force   bool               `yaml:"force"`
-	Probe   probeConfigYAML    `yaml:"probe"`
+	Enabled bool            `yaml:"enabled"`
+	Models  []string        `yaml:"models"`
+	Value   string          `yaml:"value"`
+	Force   bool            `yaml:"force"`
+	Probe   probeConfigYAML `yaml:"probe"`
 }
 
 // turnStateOverrideState is the active rewrite configuration plus the last
@@ -100,7 +100,6 @@ func configureTurnStateOverride(configYAML []byte) error {
 		turnStateOverride.Store(state)
 		return fmt.Errorf("invalid timezone %q: %w", zone, err)
 	}
-	configuredTimezone.Store(zone)
 	config := root.TurnStateOverride
 	config.Value = strings.TrimSpace(config.Value)
 	models := make([]string, 0, len(config.Models))
@@ -125,6 +124,8 @@ func configureTurnStateOverride(configYAML []byte) error {
 	// The probe track may be enabled independently of the static value; it
 	// supplies fresh per-model values when available.
 	_ = configureProbeTrack(config.Probe)
+	// Publish only after the complete rewrite configuration passed validation.
+	configuredTimezone.Store(zone)
 	state = &turnStateOverrideState{Config: config}
 	turnStateOverride.Store(state)
 	return nil

@@ -42,7 +42,7 @@
 <main>
   <header>
     <div><div class="eyebrow">CPA / O-ADVERSARIAL-PLUGIN</div><h1><span data-i18n="O/对抗插件">O/对抗插件</span></h1><p><span data-i18n="查看请求处理、管理健康基线与探测出口。">查看请求处理、管理健康基线与探测出口。</span></p></div>
-    <div class="chip-grid"><div class="target"><span class="dot"></span><code>America/Los_Angeles</code></div><div class="target hidden" id="override-chip" title="请求侧 X-Codex-Turn-State 覆写状态" data-i18n-title="请求侧 X-Codex-Turn-State 覆写状态"><span class="dot" id="override-dot"></span><code id="override-label"><span data-i18n="覆写：—">覆写：—</span></code></div><div class="target" title="探测引擎状态" data-i18n-title="探测引擎状态"><span class="dot" id="probe-dot"></span><code id="probe-label"><span data-i18n="探测：—">探测：—</span></code></div><button id="reject-toggle" type="button" class="switch-btn" title="业务流量确认异常时按此开关拦截；探测失败仅在没有可用健康基线时参与拦截，预备失败不影响仍有效的业务值" data-i18n-title="业务流量确认异常时按此开关拦截；探测失败仅在没有可用健康基线时参与拦截，预备失败不影响仍有效的业务值"><span data-i18n="异常请求拦截：—">异常请求拦截：—</span></button></div>
+    <div class="chip-grid"><div class="target"><span class="dot"></span><code id="target-timezone">—</code></div><div class="target hidden" id="override-chip" title="请求侧 X-Codex-Turn-State 覆写状态" data-i18n-title="请求侧 X-Codex-Turn-State 覆写状态"><span class="dot" id="override-dot"></span><code id="override-label"><span data-i18n="覆写：—">覆写：—</span></code></div><div class="target" title="探测引擎状态" data-i18n-title="探测引擎状态"><span class="dot" id="probe-dot"></span><code id="probe-label"><span data-i18n="探测：—">探测：—</span></code></div><button id="reject-toggle" type="button" class="switch-btn" title="业务流量确认异常时按此开关拦截；探测失败仅在没有可用健康基线时参与拦截，预备失败不影响仍有效的业务值" data-i18n-title="业务流量确认异常时按此开关拦截；探测失败仅在没有可用健康基线时参与拦截，预备失败不影响仍有效的业务值"><span data-i18n="异常请求拦截：—">异常请求拦截：—</span></button></div>
   </header>
   <nav class="tabs" aria-label="插件功能" data-i18n-aria-label="插件功能">
     <button id="tab-records" type="button" class="tab active" aria-current="page"><svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M8 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-3"/><path d="M16 3h5v5M21 3l-9 9M7 12h2M7 16h10"/></svg><span><span data-i18n="请求记录">请求记录</span></span></button>
@@ -622,6 +622,7 @@
     return Math.max(0,Math.min(1,ratio));
   }
   function render(data){
+    el('target-timezone').textContent=data.target||'—';
     lastData=data;
     el('total').textContent=Number(data.total).toLocaleString(locale);
     el('replaced').textContent=Number(data.replaced).toLocaleString(locale);
