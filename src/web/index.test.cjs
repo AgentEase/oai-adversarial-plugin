@@ -689,3 +689,17 @@ test('proxy list retains management actions without independent public sampling'
   test('malformed v2 login fails closed',()=>assert.equal(storagePanel({isLoggedIn:'true','cli-proxy-auth':'enc::v2::!!!'}).key(),''));
   test('logged-out session cannot reuse v2 login',()=>assert.equal(storagePanel({...login(),isLoggedIn:'false'}).key(),''));
 }
+
+test('target timezone follows API changes and remains literal text',()=>{
+  const p=panel();
+  const data={records:[],turn_state_override:{probe:fixture()}};
+  p.renderData({...data,target:'Asia/Singapore'});
+  assert.equal(p.get('target-timezone').textContent,'Asia/Singapore');
+  p.changeLanguage('en');
+  assert.equal(p.get('target-timezone').textContent,'Asia/Singapore');
+  p.renderData({...data,target:'America/New_York'});
+  assert.equal(p.get('target-timezone').textContent,'America/New_York');
+  p.renderData({...data,target:'<img src=x onerror=alert(1)>'});
+  assert.equal(p.get('target-timezone').children.length,0);
+  p.renderData(data);assert.equal(p.get('target-timezone').textContent,'—');
+});

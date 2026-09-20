@@ -222,7 +222,7 @@ func intercept(raw []byte) (interceptResponse, error) {
 			// The request never reaches normalization, so the conversion keeps
 			// empty slices (never nil) - a nil slice marshals as JSON null and
 			// the dashboard expects arrays.
-			conversion: conversion{Target: targetTimezone, Original: []string{}, Paths: []string{}},
+			conversion: conversion{Target: currentTimezone(), Original: []string{}, Paths: []string{}},
 		})
 		payload, _ := json.Marshal(map[string]any{"error": map[string]string{
 			"type": "degraded_model_rejected", "message": message,
@@ -350,7 +350,7 @@ func (s *auditState) snapshot() map[string]any {
 		}
 	}
 	return map[string]any{
-		"plugin": pluginID, "version": pluginVersion, "target": targetTimezone,
+		"plugin": pluginID, "version": pluginVersion, "target": currentTimezone(),
 		"limit": historyLimit, "total": s.total, "inserted": s.inserted,
 		"replaced": s.replaced, "mismatches": mismatches, "overridden": overridden,
 		"turn_state_override": turnStateOverrideSummary(),
