@@ -21,6 +21,9 @@ type panelField struct {
 
 var panelFields = []panelField{
 	{Name: "operation-mode", Type: "enum", EnumValues: []string{"business-only", "probe"}, Description: "运行模式：business-only 仅业务观测、不发主动探测；probe 启用探测能力（任务由状态路由台控制）。留空继承旧 YAML。"},
+	{Name: "probe-account-mode", Type: "enum", EnumValues: []string{"highest-priority", "fixed"}, Description: "探测账号：highest-priority 自动选择 CPA 中优先级最高的健康 Codex 账号；fixed 使用凭证文件。", path: []string{"probe", "account-mode"}},
+	{Name: "probe-candidate-limit", Type: "integer", Description: "每轮允许尝试的候选账号上限（1–50）。", path: []string{"probe", "candidate-limit"}, min: 1, max: 50},
+	{Name: "probe-auth-cooldown-minutes", Type: "integer", Description: "401/403 或无效凭证被跳过的冷却分钟数（1–1440）。", path: []string{"probe", "auth-cooldown-minutes"}, min: 1, max: 1440},
 	{Name: "override-policy", Type: "enum", EnumValues: []string{"preserve-healthy-client", "always"}, Description: "覆写策略：保留健康客户端 state，或始终优先使用有效基线。留空继承旧 YAML。"},
 	{Name: "override-models", Type: "array", Description: "覆写目标模型前缀，JSON 字符串数组；留空继承旧 YAML。", path: []string{"models"}},
 	{Name: "probe-models", Type: "array", Description: "主动探测模型列表；仅业务观测模式下不发探测请求。", path: []string{"probe", "models"}},
@@ -121,6 +124,9 @@ func normalizePanelConfig(input []byte) ([]byte, error) {
 		if mode == "business-only" {
 			probe["prefetch-minutes"] = 0
 		}
+	}
+	if mode, ok := root["probe-account-mode"].(string); ok && mode == "highest-priority" {
+		delete(probe, "cred-file")
 	}
 	// Validate the final merged values, without changing legacy-only semantics.
 	if root["prefetch-minutes"] != nil || root["state-ttl-minutes"] != nil {

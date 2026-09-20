@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestPanelSchemaAndAliases(t *testing.T) {
@@ -16,7 +17,7 @@ func TestPanelSchemaAndAliases(t *testing.T) {
 		}
 		seen[name] = true
 	}
-	if len(seen) != 16 {
+	if len(seen) != 19 {
 		t.Fatal("missing fields")
 	}
 	b, err := normalizePanelConfig([]byte("operation-mode: business-only\noverride-policy: always\noverride-models: [gpt-6-astra]\nprobe-interval-seconds: 10\nturn-state-override:\n  value: preserved\n  probe:\n    enabled: true\n    prefetch-minutes: 3\n"))
@@ -32,6 +33,23 @@ func TestPanelSchemaAndAliases(t *testing.T) {
 	c := root.Config
 	if !c.Enabled || !c.Force || probeEnabled(c.Probe) || *c.Probe.PrefetchMinutes != 0 || *c.Probe.IntervalSeconds != 10 || c.Value != "preserved" {
 		t.Fatal("alias merge failed")
+	}
+}
+
+func TestHighestPriorityPanelConfig(t *testing.T) {
+	b, err := normalizePanelConfig([]byte("operation-mode: probe\nprobe-account-mode: highest-priority\nprobe-candidate-limit: 4\nprobe-auth-cooldown-minutes: 30\nturn-state-override:\n  models: [gpt-6-astra]\n  probe:\n    cred-file: /old/fixed.json\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var root struct {
+		Config turnStateOverrideConfig `yaml:"turn-state-override"`
+	}
+	if yaml.Unmarshal(b, &root) != nil {
+		t.Fatal("decode")
+	}
+	cfg := parseProbeConfig(root.Config.Probe)
+	if !cfg.Enabled || cfg.AccountMode != "highest-priority" || cfg.CandidateLimit != 4 || cfg.AuthCooldown != 30*time.Minute || root.Config.Probe.CredFile != "" {
+		t.Fatal("automatic mode not applied")
 	}
 }
 
