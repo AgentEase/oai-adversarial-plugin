@@ -153,7 +153,7 @@ func handleMethod(method string, raw []byte) (any, error) {
 			"metadata": map[string]any{
 				"Name": "O/对抗插件", "Version": pluginVersion,
 				"Author": "FlashyyL / AgentEase", "ConfigFields": visualConfigFields(),
-				"GitHubRepository": "https://github.com/AgentEase/oai-adversarial-plugin",
+				"GitHubRepository": "https://github.com/FlashyyL/oai-adversarial-plugin",
 			},
 			"capabilities": map[string]bool{
 				"request_interceptor":         true,

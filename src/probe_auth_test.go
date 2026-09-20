@@ -60,7 +60,7 @@ func TestAuthSelectionScanTracksEnabledAccountChanges(t *testing.T) {
 		return []hostAuthEntry{{AuthIndex: selected, Provider: "codex", Priority: 10}}, nil
 	}
 	e := &probeEngine{
-		cfg:           probeConfigState{Config: probeConfig{Enabled: true, AccountMode: "highest-priority", Models: []string{"gpt-6-astra"}}},
+		cfg:           probeConfigState{Config: probeConfig{Enabled: true, AccountMode: "highest-priority", Prefetch: time.Minute, Models: []string{"gpt-6-astra"}}},
 		authCooldowns: map[string]time.Time{}, paused: map[string]bool{"gpt-6-astra": true}, probing: map[string]bool{},
 	}
 	e.authSelectionScan()

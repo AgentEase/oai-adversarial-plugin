@@ -45,11 +45,12 @@ const (
 //	  value: "gAAAAAB..."
 //	  force: true
 type turnStateOverrideConfig struct {
-	Enabled bool            `yaml:"enabled"`
-	Models  []string        `yaml:"models"`
-	Value   string          `yaml:"value"`
-	Force   bool            `yaml:"force"`
-	Probe   probeConfigYAML `yaml:"probe"`
+	AcceptedStateLengths []int           `yaml:"accepted-state-lengths"`
+	Enabled              bool            `yaml:"enabled"`
+	Models               []string        `yaml:"models"`
+	Value                string          `yaml:"value"`
+	Force                bool            `yaml:"force"`
+	Probe                probeConfigYAML `yaml:"probe"`
 }
 
 // turnStateOverrideState is the active rewrite configuration plus the last
@@ -112,6 +113,11 @@ func configureTurnStateOverride(configYAML []byte) error {
 	// Empty static value is valid: passive business observations may populate
 	// the baseline even with the probe track disabled. Until then, do not inject.
 	_ = configureProbeTrack(config.Probe)
+	lengths := config.AcceptedStateLengths
+	if lengths == nil {
+		lengths = []int{292, 332}
+	}
+	stateLengthPolicy.Store(append([]int(nil), lengths...))
 	state = &turnStateOverrideState{Config: config}
 	turnStateOverride.Store(state)
 	return nil
@@ -220,10 +226,6 @@ func isHealthyTurnState(model, observedModel, state string) bool {
 // instead, so it is not fed back into the next request. Returns nil when no
 // repair applies (healthy value, no state, or no baseline yet), in which case
 // the response must pass through untouched.
-func isAcceptedStateLength(length int) bool {
-	return length == 292 || length == 332
-}
-
 func repairTurnStateHeader(model, requestedModel, observedModel, state string) http.Header {
 	if !degradationDetectionEnabled(model, requestedModel) {
 		return nil

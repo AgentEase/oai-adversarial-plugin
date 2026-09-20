@@ -42,7 +42,15 @@ type accountModelHealth struct {
 	LastStatusCode      int       `json:"last_status_code,omitempty"`
 	LastReason          string    `json:"last_reason,omitempty"`
 	ObservedAt          time.Time `json:"observed_at"`
+	HealthyAt           time.Time `json:"healthy_at,omitempty"`
 	CooldownUntil       time.Time `json:"cooldown_until,omitempty"`
+}
+
+const accountHealthMaxAge = time.Hour
+
+func (e accountModelHealth) healthyAt(now time.Time) bool {
+	return e.State == "healthy" && !e.HealthyAt.IsZero() &&
+		!now.Before(e.HealthyAt) && now.Sub(e.HealthyAt) < accountHealthMaxAge
 }
 
 type schedulerCandidateDiagnostic struct {
@@ -238,7 +246,8 @@ func (m *accountRoutingManager) pick(req schedulerPickRequest, now time.Time) sc
 			Account: publicAccountID(candidate.ID), Provider: candidate.Provider,
 			Status: candidate.Status, Health: "unknown",
 		}
-		if ok && entry.State != "" {
+		freshHealthy := entry.healthyAt(now) && isAcceptedStateLength(entry.LastStateLength)
+		if ok && entry.State != "" && (entry.State != "healthy" || freshHealthy) {
 			candidateDiagnostic.Health = entry.State
 		}
 		if ok && !entry.CooldownUntil.IsZero() && now.Before(entry.CooldownUntil) {
@@ -248,7 +257,7 @@ func (m *accountRoutingManager) pick(req schedulerPickRequest, now time.Time) sc
 			continue
 		}
 		diagnostic.Candidates = append(diagnostic.Candidates, candidateDiagnostic)
-		if ok && entry.State == "healthy" {
+		if ok && freshHealthy {
 			healthy = append(healthy, candidate)
 		} else {
 			unknown = append(unknown, candidate)
@@ -346,17 +355,28 @@ func (m *accountRoutingManager) observe(record usageRecord, now time.Time) {
 	entry.Account = publicAccountID(record.AuthID)
 	entry.Model = model
 	entry.ObservedAt = now
-	if stateLength > 0 {
+	ignoredFailure := record.Failed && (transportUsageFailure(record.Failure) || record.Failure.StatusCode == http.StatusTooManyRequests)
+	if stateLength > 0 && !ignoredFailure {
 		entry.LastStateLength = stateLength
 	}
 	if record.Failure.StatusCode > 0 {
 		entry.LastStatusCode = record.Failure.StatusCode
 	}
 	m.usageObserved++
+	// A completed request breaks a run of failures even without a state header.
+	// It does not renew the separate healthy-state evidence timestamp.
+	if !record.Failed {
+		entry.ConsecutiveFailures = 0
+	}
 
 	switch {
+	case record.Failed && transportUsageFailure(record.Failure):
+		entry.LastReason = "transport_failure"
+	case record.Failed && record.Failure.StatusCode == http.StatusTooManyRequests:
+		entry.LastReason = "rate_limited"
 	case !record.Failed && isAcceptedStateLength(stateLength):
 		entry.State = "healthy"
+		entry.HealthyAt = now
 		entry.ConsecutiveFailures = 0
 		entry.LastReason = "healthy_state"
 		entry.CooldownUntil = time.Time{}
@@ -370,8 +390,6 @@ func (m *accountRoutingManager) observe(record usageRecord, now time.Time) {
 		entry.ConsecutiveFailures++
 		entry.LastReason = fmt.Sprintf("http_%d", record.Failure.StatusCode)
 		entry.CooldownUntil = now.Add(m.config.Config.DegradedCooldown)
-	case record.Failed && record.Failure.StatusCode == http.StatusTooManyRequests:
-		entry.LastReason = "rate_limited"
 	case record.Failed:
 		entry.ConsecutiveFailures++
 		entry.LastReason = classifyUsageFailure(record.Failure)
@@ -414,6 +432,7 @@ func (m *accountRoutingManager) observeProbe(authID, requestedModel string, reco
 	switch {
 	case record.Success && isAcceptedStateLength(record.StateLength) && probeModelConsistent(requestedModel, record.ObservedModel):
 		entry.State = "healthy"
+		entry.HealthyAt = now
 		entry.ConsecutiveFailures = 0
 		entry.LastReason = "probe_healthy"
 		entry.CooldownUntil = time.Time{}
@@ -467,6 +486,21 @@ func classifyUsageFailure(failure usageFailure) string {
 	}
 }
 
+// Transport/proxy failures provide no evidence about credential quality.
+// Keep only the fixed category in diagnostics, never the raw error body.
+func transportUsageFailure(failure usageFailure) bool {
+	if failure.StatusCode == 0 || failure.StatusCode == http.StatusProxyAuthRequired {
+		return true
+	}
+	body := strings.ToLower(failure.Body)
+	for _, marker := range []string{"proxyconnect", "socks", "dial tcp", "connection refused", "connection reset", "i/o timeout", "tls handshake timeout", "no such host", "context deadline exceeded"} {
+		if strings.Contains(body, marker) {
+			return true
+		}
+	}
+	return false
+}
+
 func routingModelKey(model string) string {
 	model = strings.ToLower(strings.TrimSpace(model))
 	switch {
@@ -490,8 +524,13 @@ func accountRoutingSummary() map[string]any {
 	accountRouter.mu.Lock()
 	defer accountRouter.mu.Unlock()
 	entries := make([]accountModelHealth, 0, len(accountRouter.health))
+	now := time.Now().UTC()
 	for _, entry := range accountRouter.health {
 		entry.AuthID = ""
+		if entry.State == "healthy" && (!entry.healthyAt(now) || !isAcceptedStateLength(entry.LastStateLength)) {
+			entry.State = ""
+			entry.LastReason = "health_evidence_unavailable"
+		}
 		entries = append(entries, entry)
 	}
 	sort.Slice(entries, func(i, j int) bool {

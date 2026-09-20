@@ -21,8 +21,9 @@ type panelField struct {
 
 var panelFields = []panelField{
 	{Name: "operation-mode", Type: "enum", EnumValues: []string{"business-only", "probe"}, Description: "运行模式：business-only 仅业务观测、不发主动探测；probe 启用探测能力（任务由状态路由台控制）。留空继承旧 YAML。"},
-	{Name: "experimental-account-routing", Type: "boolean", Description: "实验性账号路由：仅在同一优先级候选中优先健康账号，并暂时避开已确认 312/356 或鉴权失败的账号。关闭时仍只读记录健康证据。"},
-	{Name: "account-degraded-cooldown-minutes", Type: "integer", Description: "账号出现 312/356 或 401/403 后的路由冷却分钟数（1–1440）。", min: 1, max: 1440},
+	{Name: "experimental-account-routing", Type: "boolean", Description: "实验性账号路由：仅在同一优先级候选中优先健康账号，按配置的长度策略、模型一致性和鉴权结果评估。关闭时仍只读记录健康证据。"},
+	{Name: "accepted-state-lengths", Type: "array", Description: "可接受的 State 字节长度，JSON 整数数组；默认 [292,332]。1–32 个不同值，每个 1–4096。按实际账号配置，不根据 Team 等套餐名称推断。", path: []string{"accepted-state-lengths"}},
+	{Name: "account-degraded-cooldown-minutes", Type: "integer", Description: "账号不满足长度策略、模型不一致或出现 401/403 后的路由冷却分钟数（1–1440）。", min: 1, max: 1440},
 	{Name: "account-failure-cooldown-minutes", Type: "integer", Description: "连续瞬时失败达到阈值后的短冷却分钟数（1–120）。", min: 1, max: 120},
 	{Name: "account-failure-threshold", Type: "integer", Description: "无异常 state 的连续失败达到多少次后短暂避开该账号（1–10）。", min: 1, max: 10},
 	{Name: "probe-account-mode", Type: "enum", EnumValues: []string{"highest-priority", "fixed"}, Description: "探测账号：highest-priority 自动选择 CPA 中优先级最高的健康 Codex 账号；fixed 使用凭证文件。", path: []string{"probe", "account-mode"}},
@@ -31,7 +32,7 @@ var panelFields = []panelField{
 	{Name: "override-policy", Type: "enum", EnumValues: []string{"preserve-healthy-client", "always"}, Description: "覆写策略：保留健康客户端 state，或始终优先使用有效基线。留空继承旧 YAML。"},
 	{Name: "override-models", Type: "array", Description: "覆写目标模型前缀，JSON 字符串数组；留空继承旧 YAML。", path: []string{"models"}},
 	{Name: "probe-models", Type: "array", Description: "主动探测模型列表；仅业务观测模式下不发探测请求。", path: []string{"probe", "models"}},
-	{Name: "probe-credential-file", Type: "string", Description: "主动探测凭证文件路径（不是 Token）；仅 probe 模式使用，不支持自动选号。", path: []string{"probe", "cred-file"}},
+	{Name: "probe-credential-file", Type: "string", Description: "主动探测凭证文件路径（不是 Token）；仅 fixed 账号模式使用。自动选号通过 CPA Host Auth 获取凭据。", path: []string{"probe", "cred-file"}},
 	{Name: "probe-proxies-file", Type: "string", Description: "已有代理出口文件路径；不要填写供应商取 IP URL。代理认证请在代理池页面管理。", path: []string{"probe", "proxies-file"}},
 	{Name: "state-ttl-minutes", Type: "integer", Description: "基线有效期（分钟，1–1440）。", path: []string{"probe", "ttl-minutes"}, min: 1, max: 1440},
 	{Name: "prefetch-minutes", Type: "integer", Description: "提前预备分钟数，0 关闭；必须小于有效期。状态路由台保存的运行设置优先。", path: []string{"probe", "prefetch-minutes"}, min: 0, max: 1439},
@@ -102,6 +103,11 @@ func normalizePanelConfig(input []byte) ([]byte, error) {
 				}
 			}
 		case "array":
+			if f.Name == "accepted-state-lengths" {
+				_, err := parseStateLengths(value)
+				valid = err == nil
+				break
+			}
 			items, ok := value.([]any)
 			valid = ok && len(items) > 0 && len(items) <= 32
 			for _, item := range items {
@@ -144,5 +150,10 @@ func normalizePanelConfig(input []byte) ([]byte, error) {
 			return nil, fmt.Errorf("prefetch-minutes must be less than state-ttl-minutes")
 		}
 	}
+	lengths, err := parseStateLengths(config["accepted-state-lengths"])
+	if err != nil {
+		return nil, err
+	}
+	config["accepted-state-lengths"] = lengths
 	return yaml.Marshal(root)
 }

@@ -149,7 +149,7 @@ func (e *probeEngine) authSelectionWatchLoop(stop <-chan struct{}) {
 func (e *probeEngine) authSelectionScan() {
 	e.mu.Lock()
 	cfg := e.cfg.Config
-	suppressed := !cfg.Enabled || cfg.AccountMode != "highest-priority" || e.cfg.Error != "" || e.halted || e.stopping || e.shuttingDown
+	suppressed := !cfg.Enabled || cfg.Prefetch <= 0 || cfg.AccountMode != "highest-priority" || e.cfg.Error != "" || e.halted || e.stopping || e.shuttingDown
 	e.mu.Unlock()
 	if suppressed {
 		return
@@ -164,24 +164,25 @@ func (e *probeEngine) authSelectionScan() {
 	}
 	selected := eligible[0].AuthIndex
 	e.mu.Lock()
+	defer e.mu.Unlock()
+	// The host callback runs without our mutex. Recheck operator settings
+	// before enqueueing so a concurrent stop or zero window cannot be lost.
+	cfg = e.cfg.Config
+	if !cfg.Enabled || cfg.Prefetch <= 0 || cfg.AccountMode != "highest-priority" || e.cfg.Error != "" || e.halted || e.stopping || e.shuttingDown {
+		return
+	}
 	if !e.autoAuthSeen {
 		e.autoAuthSeen = true
 		e.lastAutoAuth = selected
-		e.mu.Unlock()
 		return
 	}
-	changed := selected != e.lastAutoAuth
-	if changed {
-		e.lastAutoAuth = selected
-	}
-	models := append([]string(nil), cfg.Models...)
-	e.mu.Unlock()
-	if !changed {
+	if selected == e.lastAutoAuth {
 		return
 	}
-	for _, model := range models {
+	e.lastAutoAuth = selected
+	for _, model := range cfg.Models {
 		if degradationDetectionEnabled(model, "") {
-			e.enqueueTask(model, true)
+			e.enqueueTaskLocked(model, true)
 		}
 	}
 }

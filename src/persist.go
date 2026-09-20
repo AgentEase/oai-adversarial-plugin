@@ -90,7 +90,7 @@ func ensurePersistence() {
 		loadPersistedState()
 		loadRuntimeSettings()
 		// After the snapshot is restored, fill any entry that has no value yet
-		// from the newest healthy (332-byte) turn-state values in the audit
+		// from the newest healthy turn-state values in the audit
 		// journal, so the baseline table is never empty after a fresh start.
 		probeTrack.seedBaselinesFromAudit()
 		go persistLoop(persistStop)
@@ -410,7 +410,7 @@ func applyPersistedState(state persistedState) {
 			continue
 		}
 		if entry.State == "healthy" {
-			if entry.ObservedAt.IsZero() || now.Sub(entry.ObservedAt) > time.Hour {
+			if !entry.healthyAt(now) {
 				continue
 			}
 		} else if entry.CooldownUntil.IsZero() || !now.Before(entry.CooldownUntil) {

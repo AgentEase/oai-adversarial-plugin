@@ -630,3 +630,29 @@ test('changed exits and sign-out discard late public sampling results',async()=>
   finish({egress_check:{samples:[{ip:'8.8.8.8'}]}});await pendingLogin;
   p.renderData(data);assert.match(p.get('pool-rows').textContent,/尚未采样/);
 });
+
+
+test('configured lengths drive baseline and history badges',()=>{
+  const p=panel();
+  const probe=fixture({accepted_state_lengths:[308],values:[{model:'gpt-6-astra',valid:true,value_length:308,remaining_seconds:180}],
+    history:[{state_length:308,success:true},{state_length:292,success:true}]});
+  p.render(probe);
+  assert.equal(p.get('probe-values').children[0].children[1].children[0].className,'badge state-ok');
+  const rows=p.get('probe-history').children;
+  assert.equal(rows[0].children[6].children[0].className,'badge state-ok');
+  assert.equal(rows[1].children[6].children[0].className,'badge state-warn');
+  assert.match(p.get('probe-values').textContent,/剩余/);
+});
+
+test('account routing status follows all CPA languages and preserves user text',()=>{
+  const p=panel();
+  const data={records:[],turn_state_override:{probe:fixture()},account_routing:{enabled:true,accounts:[{
+    account:'auth-test-account',model:'astra',state:'healthy',last_state_length:308,observed_at:new Date().toISOString()}]}};
+  p.renderData(data);
+  for(const [locale,label] of [['en','Healthy'],['zh-TW','健康'],['ru','Исправен'],['zh-CN','健康']]){
+    p.changeLanguage(locale);
+    assert.match(p.get('account-routing-rows').textContent,new RegExp(label));
+    assert.match(p.get('account-routing-rows').textContent,/auth-test-account/);
+    if(locale==='en')assert.match(p.get('account-routing-note').textContent,/Routing enabled/);
+  }
+});

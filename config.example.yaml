@@ -17,6 +17,10 @@ plugins:
       enabled: true
       priority: 100
 
+      # Empirical acceptance policy; replace for your accounts, not by plan name.
+      # Also supported as turn-state-override.accepted-state-lengths.
+      # accepted-state-lengths: [292, 332]
+
       # ---- request-side X-Codex-Turn-State rewrite --------------------------
       turn-state-override:
         # Master switch: when enabled, matching requests get the header value
