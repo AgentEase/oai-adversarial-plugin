@@ -9,6 +9,7 @@ import (
 )
 
 type hostAuthEntry struct {
+	ID             string    `json:"id"`
 	AuthIndex      string    `json:"auth_index"`
 	Name           string    `json:"name"`
 	Type           string    `json:"type"`
@@ -79,6 +80,7 @@ func (e *probeEngine) resolveProbeCredential(cfg probeConfig) (probeCredential, 
 			continue
 		}
 		cred.AuthIndex = entry.AuthIndex
+		cred.AuthID = entry.ID
 		cred.Priority = entry.Priority
 		cred.Label = maskedAccountLabel(entry)
 		return cred, nil

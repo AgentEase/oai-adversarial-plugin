@@ -81,6 +81,14 @@
       <div class="card"><div class="label"><span data-i18n="探测成功 / 总探测">探测成功 / 总探测</span></div><div class="number" id="probe-counts">—</div></div>
       <div class="card"><div class="label"><span data-i18n="最近探测活动">最近探测活动</span></div><div class="number" id="probe-activity">—</div></div>
     </section>
+    <details class="panel probe-records" id="account-routing-panel" open>
+      <summary class="toolbar"><h2 class="section-heading"><svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M4 6h16M4 12h10M4 18h7"/><path d="m15 15 3 3 4-5"/></svg><span>实验性账号健康路由</span></h2><span class="probe-note" id="account-routing-note">只读监测</span></summary>
+      <div class="table-wrap" tabindex="0" role="region" aria-label="账号与模型健康状态，可横向滚动"><table>
+        <thead><tr><th>账号标识</th><th>模型族</th><th>健康状态</th><th>State 长度</th><th>最近观测（UTC+8）</th><th>冷却 / 原因</th></tr></thead>
+        <tbody id="account-routing-rows"></tbody>
+      </table></div>
+      <div class="footer"><span>仅使用 CPA usage 记录中的 AuthID 与响应头，不读取或展示 Token。</span><span>同优先级内路由 · 全部冷却时回退 CPA 原调度</span></div>
+    </details>
     <section class="panel">
       <div class="toolbar"><h2 class="section-heading"><svg class="section-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6l8-3Z"/><path d="m8 12 3 3 5-6"/></svg><span><span data-i18n="模型健康基线">模型健康基线</span></span></h2><div class="actions"><button id="round-start" type="button" class="primary" title="启用自动预备并开始一轮探测：跳过健康值仍充裕或已备好接班值的模型；所有任务串行执行" data-i18n-title="启用自动预备并开始一轮探测：跳过健康值仍充裕或已备好接班值的模型；所有任务串行执行"><span data-i18n="开始探测">开始探测</span></button><button id="round-stop" type="button" title="取消本轮排队和在途探测，在下一个尝试边界生效；保持自动预备原状态，临近到期时仍可再次探测" data-i18n-title="取消本轮排队和在途探测，在下一个尝试边界生效；保持自动预备原状态，临近到期时仍可再次探测"><span data-i18n="停止当前轮">停止当前轮</span></button><button id="all-stop" type="button" title="取消所有探测并停止自动预备；重启后保持停止，直到再次点击开始探测；已获得的健康值保留" data-i18n-title="取消所有探测并停止自动预备；重启后保持停止，直到再次点击开始探测；已获得的健康值保留"><span data-i18n="停止全部">停止全部</span></button><span id="probe-times" class="probe-note">—</span></div></div>
       <details class="probe-settings" id="probe-settings">
@@ -685,7 +693,40 @@
     el('rows').replaceChildren(fragment);el('auth-notice').classList.add('hidden');el('results').classList.remove('hidden');
     renderProbe(override.probe);
     renderPool(override.probe);
+    renderAccountRouting(data.account_routing||{});
     setMessage('refresh-note',()=>t('每 5 秒刷新'));setMessage('status',()=>t('已复用 CPA 登录 · 插件 v{version}',{version:data.version}));
+  }
+  function renderAccountRouting(routing){
+    routing=routing||{};
+    const accounts=Array.isArray(routing.accounts)?routing.accounts:[];
+    const enabled=routing.enabled===true&&!routing.error;
+    const note=el('account-routing-note');
+    note.textContent=routing.error?('配置错误：'+routing.error):(enabled?'路由已开启 · 同优先级健康优先':'只读监测 · 路由未开启');
+    note.className='probe-note'+(routing.error?' settings-error':'');
+    const frag=document.createDocumentFragment();
+    for(const item of accounts){
+      const tr=document.createElement('tr');
+      cell(tr,item.account||'—','model');
+      cell(tr,item.model||'—');
+      const state=cell(tr,'','ttl-cell');
+      const badge=document.createElement('span');
+      const healthy=item.state==='healthy';
+      badge.className='badge '+(healthy?'state-ok':item.state?'state-fail':'state-warn');
+      const labels={healthy:'健康',degraded:'降级',auth_error:'鉴权失败',transient_failure:'瞬时失败'};
+      badge.textContent=labels[item.state]||'待观察';state.append(badge);
+      cell(tr,item.last_state_length?String(item.last_state_length)+' B':'—',item.last_state_length?'':'none');
+      cell(tr,item.observed_at?fmtBeijing(item.observed_at):'—','time');
+      const detail=cell(tr,'','ttl-cell');
+      const until=item.cooldown_until?new Date(item.cooldown_until).getTime():0;
+      if(until>Date.now()){
+        const seconds=Math.max(0,Math.floor((until-Date.now())/1000));
+        const cooling=document.createElement('span');cooling.className='badge state-warn';cooling.textContent='冷却 '+fmtDuration(seconds);detail.append(cooling);
+      }
+      const reason=document.createElement('div');reason.className='sub';reason.textContent=item.last_reason||'—';detail.append(reason);
+      frag.append(tr);
+    }
+    if(!accounts.length){const tr=document.createElement('tr');const td=cell(tr,'尚无账号级使用记录。完成一次 Codex 请求后，这里会按脱敏 AuthID 展示健康证据。','empty');td.colSpan=6;frag.append(tr);}
+    el('account-routing-rows').replaceChildren(frag);
   }
   function egressError(code,status){
     const keys={busy:'已有公网采样正在进行，请稍后重试',unknown_exit:'出口不存在，请刷新列表',exit_changed:'出口已修改，请重新采样',timeout:'查询超时',connection_failed:'无法连接代理或查询服务',unsupported_proxy:'代理协议不支持',read_failed:'查询响应读取失败',invalid_response:'查询服务未返回有效数据',non_public_ip:'未返回可用的公网 IP'};

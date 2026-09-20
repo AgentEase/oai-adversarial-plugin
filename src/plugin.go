@@ -12,7 +12,7 @@ import (
 
 const (
 	pluginID                   = "timezone-override"
-	pluginVersion              = "1.5.37-agentease.3"
+	pluginVersion              = "1.5.37-agentease.7"
 	historyLimit               = 200
 	schemaVersion              = 6
 	streamChunkHeaderInitIndex = -1
@@ -102,23 +102,23 @@ type responseInterceptOutput struct {
 
 type auditRecord struct {
 	conversion
-	RequestID        string `json:"request_id"`
-	TraceID          string `json:"trace_id,omitempty"`
-	Model            string `json:"model"`
-	RequestedModel   string `json:"requested_model,omitempty"`
-	Time             string `json:"time"`
-	UpstreamModel    string `json:"upstream_model,omitempty"`
-	ModelChecked     bool   `json:"model_checked"`
-	ModelMismatch    bool   `json:"model_mismatch"`
-	DetectionExempt  bool   `json:"detection_exempt,omitempty"`
-	TurnStateLength  int    `json:"turn_state_length"`
-	TurnStateSource  string `json:"turn_state_source,omitempty"`
-	TurnStatePreview string `json:"turn_state_preview,omitempty"`
-	TurnStateValue   string `json:"turn_state_value,omitempty"`
-	TurnStateTruncated bool `json:"turn_state_truncated,omitempty"`
-	TurnStateOverride  string `json:"turn_state_override,omitempty"`
-	TurnStateInjectedLength int `json:"turn_state_injected_length,omitempty"`
-	DegradedRejected   bool   `json:"degraded_rejected,omitempty"`
+	RequestID               string `json:"request_id"`
+	TraceID                 string `json:"trace_id,omitempty"`
+	Model                   string `json:"model"`
+	RequestedModel          string `json:"requested_model,omitempty"`
+	Time                    string `json:"time"`
+	UpstreamModel           string `json:"upstream_model,omitempty"`
+	ModelChecked            bool   `json:"model_checked"`
+	ModelMismatch           bool   `json:"model_mismatch"`
+	DetectionExempt         bool   `json:"detection_exempt,omitempty"`
+	TurnStateLength         int    `json:"turn_state_length"`
+	TurnStateSource         string `json:"turn_state_source,omitempty"`
+	TurnStatePreview        string `json:"turn_state_preview,omitempty"`
+	TurnStateValue          string `json:"turn_state_value,omitempty"`
+	TurnStateTruncated      bool   `json:"turn_state_truncated,omitempty"`
+	TurnStateOverride       string `json:"turn_state_override,omitempty"`
+	TurnStateInjectedLength int    `json:"turn_state_injected_length,omitempty"`
+	DegradedRejected        bool   `json:"degraded_rejected,omitempty"`
 }
 
 type auditState struct {
@@ -161,6 +161,8 @@ func handleMethod(method string, raw []byte) (any, error) {
 				"response_interceptor":        true,
 				"response_stream_interceptor": true,
 				"websocket_response_observer": true,
+				"scheduler":                   true,
+				"usage_plugin":                true,
 			},
 		}, nil
 	case "plugin.quiesce":
@@ -175,6 +177,10 @@ func handleMethod(method string, raw []byte) (any, error) {
 		return interceptStreamChunk(raw)
 	case "websocket.response_event":
 		return observeWebSocketEvent(raw)
+	case "scheduler.pick":
+		return pickAccountForRequest(raw)
+	case "usage.handle":
+		return struct{}{}, observeAccountUsage(raw)
 	case "management.register":
 		return map[string]any{
 			"routes": []map[string]string{
@@ -350,7 +356,8 @@ func (s *auditState) snapshot() map[string]any {
 		"limit": historyLimit, "total": s.total, "inserted": s.inserted,
 		"replaced": s.replaced, "mismatches": mismatches, "overridden": overridden,
 		"turn_state_override": turnStateOverrideSummary(),
-		"records":            records,
+		"account_routing":     accountRoutingSummary(),
+		"records":             records,
 	}
 }
 
@@ -404,13 +411,13 @@ func management(raw []byte) (managementResponse, error) {
 func probeControl(body []byte) (managementResponse, error) {
 	skipped := false
 	var req struct {
-		Model   string `json:"model"`
-		Proxy   string `json:"proxy"`
-		ID      string `json:"id"`
-		Action  string `json:"action"`
-		Enabled *bool  `json:"enabled"`
-		Minutes *int   `json:"minutes"`
-		Seconds *int   `json:"seconds"`
+		Model   string    `json:"model"`
+		Proxy   string    `json:"proxy"`
+		ID      string    `json:"id"`
+		Action  string    `json:"action"`
+		Enabled *bool     `json:"enabled"`
+		Minutes *int      `json:"minutes"`
+		Seconds *int      `json:"seconds"`
 		Exit    *exitEdit `json:"exit"`
 	}
 	if len(body) > 0 {

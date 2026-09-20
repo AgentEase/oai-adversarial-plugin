@@ -21,6 +21,10 @@ type panelField struct {
 
 var panelFields = []panelField{
 	{Name: "operation-mode", Type: "enum", EnumValues: []string{"business-only", "probe"}, Description: "运行模式：business-only 仅业务观测、不发主动探测；probe 启用探测能力（任务由状态路由台控制）。留空继承旧 YAML。"},
+	{Name: "experimental-account-routing", Type: "boolean", Description: "实验性账号路由：仅在同一优先级候选中优先健康账号，并暂时避开已确认 312/356 或鉴权失败的账号。关闭时仍只读记录健康证据。"},
+	{Name: "account-degraded-cooldown-minutes", Type: "integer", Description: "账号出现 312/356 或 401/403 后的路由冷却分钟数（1–1440）。", min: 1, max: 1440},
+	{Name: "account-failure-cooldown-minutes", Type: "integer", Description: "连续瞬时失败达到阈值后的短冷却分钟数（1–120）。", min: 1, max: 120},
+	{Name: "account-failure-threshold", Type: "integer", Description: "无异常 state 的连续失败达到多少次后短暂避开该账号（1–10）。", min: 1, max: 10},
 	{Name: "probe-account-mode", Type: "enum", EnumValues: []string{"highest-priority", "fixed"}, Description: "探测账号：highest-priority 自动选择 CPA 中优先级最高的健康 Codex 账号；fixed 使用凭证文件。", path: []string{"probe", "account-mode"}},
 	{Name: "probe-candidate-limit", Type: "integer", Description: "每轮允许尝试的候选账号上限（1–50）。", path: []string{"probe", "candidate-limit"}, min: 1, max: 50},
 	{Name: "probe-auth-cooldown-minutes", Type: "integer", Description: "401/403 或无效凭证被跳过的冷却分钟数（1–1440）。", path: []string{"probe", "auth-cooldown-minutes"}, min: 1, max: 1440},
@@ -80,6 +84,8 @@ func normalizePanelConfig(input []byte) ([]byte, error) {
 		}
 		valid := false
 		switch f.Type {
+		case "boolean":
+			_, valid = value.(bool)
 		case "integer":
 			n, ok := value.(int)
 			valid = ok && n >= f.min && n <= f.max

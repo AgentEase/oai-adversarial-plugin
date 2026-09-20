@@ -45,11 +45,11 @@ const (
 //	  value: "gAAAAAB..."
 //	  force: true
 type turnStateOverrideConfig struct {
-	Enabled bool               `yaml:"enabled"`
-	Models  []string           `yaml:"models"`
-	Value   string             `yaml:"value"`
-	Force   bool               `yaml:"force"`
-	Probe   probeConfigYAML    `yaml:"probe"`
+	Enabled bool            `yaml:"enabled"`
+	Models  []string        `yaml:"models"`
+	Value   string          `yaml:"value"`
+	Force   bool            `yaml:"force"`
+	Probe   probeConfigYAML `yaml:"probe"`
 }
 
 // turnStateOverrideState is the active rewrite configuration plus the last
@@ -506,6 +506,7 @@ func configureTurnStateOverrideFromLifecycle(raw []byte) {
 		return
 	}
 	_ = configureTurnStateOverride(request.ConfigYAML)
+	_ = configureAccountRouting(request.ConfigYAML)
 }
 
 // turnStateOverrideSummary describes the active rewrite configuration for the

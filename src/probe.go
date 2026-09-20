@@ -1660,6 +1660,9 @@ func (e *probeEngine) probeOnce(model, proxySpec string, cfg probeConfig) (probe
 	}
 	record.AuthLabel = cred.Label
 	record.AuthPriority = cred.Priority
+	defer func() {
+		accountRouter.observeProbe(cred.AuthID, model, record, time.Now().UTC())
+	}()
 	transport, binder, err := buildProbeTransport(proxySpec)
 	if err != nil {
 		record.DurationMS = time.Since(started).Milliseconds()
@@ -2064,6 +2067,7 @@ func activeModels(probing map[string]bool, tasks []probeTask) []string {
 type probeCredential struct {
 	AccessToken string `json:"access_token"`
 	AccountID   string `json:"account_id"`
+	AuthID      string `json:"-"`
 	AuthIndex   string `json:"-"`
 	Label       string `json:"-"`
 	Priority    int    `json:"-"`

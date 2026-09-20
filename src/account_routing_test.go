@@ -1,0 +1,198 @@
+package main
+
+import (
+	"encoding/json"
+	"net/http"
+	"strings"
+	"testing"
+	"time"
+)
+
+func newRoutingTestManager(enabled bool) *accountRoutingManager {
+	cfg := defaultAccountRoutingConfig()
+	cfg.Enabled = enabled
+	return &accountRoutingManager{
+		config: accountRoutingConfigState{Config: cfg},
+		health: map[string]accountModelHealth{},
+	}
+}
+
+func routingUsage(authID string, stateLength, status int, failed bool) usageRecord {
+	headers := http.Header{}
+	if stateLength > 0 {
+		headers.Set(turnStateHeader, strings.Repeat("s", stateLength))
+	}
+	return usageRecord{
+		Provider: "codex", Model: "gpt-6-astra", AuthID: authID,
+		Failed: failed, Failure: usageFailure{StatusCode: status}, ResponseHeaders: headers,
+	}
+}
+
+func routingRequest(ids ...string) schedulerPickRequest {
+	candidates := make([]schedulerAuthCandidate, 0, len(ids))
+	for _, id := range ids {
+		candidates = append(candidates, schedulerAuthCandidate{ID: id, Provider: "codex", Priority: 10, Status: "active"})
+	}
+	return schedulerPickRequest{Provider: "codex", Model: "gpt-6-astra", Candidates: candidates}
+}
+
+func TestAccountRoutingUsageAndSchedulerAvoidDegraded(t *testing.T) {
+	m := newRoutingTestManager(true)
+	now := time.Date(2026, 9, 20, 6, 0, 0, 0, time.UTC)
+	m.observe(routingUsage("healthy", 332, 0, false), now)
+	m.observe(routingUsage("degraded", 356, 0, false), now)
+	got := m.pick(routingRequest("degraded", "healthy"), now.Add(time.Minute))
+	if !got.Handled || got.AuthID != "healthy" {
+		t.Fatalf("pick = %+v", got)
+	}
+	entry := m.health[accountHealthKey("degraded", "astra")]
+	if entry.State != "degraded" || entry.LastStateLength != 356 || !now.Before(entry.CooldownUntil) {
+		t.Fatalf("degraded entry = %+v", entry)
+	}
+}
+
+func TestAccountRoutingKeepsBuiltinForAllUnknownOrAllCooling(t *testing.T) {
+	m := newRoutingTestManager(true)
+	now := time.Now().UTC()
+	if got := m.pick(routingRequest("a", "b"), now); got.Handled {
+		t.Fatalf("all unknown should preserve builtin: %+v", got)
+	}
+	m.observe(routingUsage("a", 356, 0, false), now)
+	m.observe(routingUsage("b", 356, 0, false), now)
+	if got := m.pick(routingRequest("a", "b"), now.Add(time.Minute)); got.Handled {
+		t.Fatalf("all cooling should fail open to builtin: %+v", got)
+	}
+}
+
+func TestAccountRoutingChoosesUnknownInsteadOfCoolingCandidate(t *testing.T) {
+	m := newRoutingTestManager(true)
+	now := time.Now().UTC()
+	m.observe(routingUsage("bad", 312, 0, false), now)
+	got := m.pick(routingRequest("bad", "new"), now.Add(time.Minute))
+	if !got.Handled || got.AuthID != "new" {
+		t.Fatalf("pick = %+v", got)
+	}
+}
+
+func TestAccountRoutingAcceptsEmptyCandidateProvider(t *testing.T) {
+	m := newRoutingTestManager(true)
+	now := time.Now().UTC()
+	m.observe(routingUsage("healthy", 332, 0, false), now)
+	req := routingRequest("healthy", "other")
+	for i := range req.Candidates {
+		req.Candidates[i].Provider = ""
+	}
+	got := m.pick(req, now.Add(time.Minute))
+	if !got.Handled || got.AuthID != "healthy" {
+		t.Fatalf("pick = %+v; diagnostic = %+v", got, m.lastScheduler)
+	}
+	if m.schedulerCalls != 1 || m.lastScheduler.EligibleCount != 2 || m.lastScheduler.Selected != publicAccountID("healthy") {
+		t.Fatalf("diagnostic = %+v", m.lastScheduler)
+	}
+}
+
+func TestAccountRoutingDiagnosticsExplainNoCandidates(t *testing.T) {
+	m := newRoutingTestManager(true)
+	req := routingRequest("foreign")
+	req.Candidates[0].Provider = "claude"
+	if got := m.pick(req, time.Now().UTC()); got.Handled {
+		t.Fatalf("foreign candidate should not be handled: %+v", got)
+	}
+	if m.schedulerCalls != 1 || m.lastScheduler.Outcome != "no_eligible_candidates" || m.lastScheduler.CandidateCount != 1 {
+		t.Fatalf("diagnostic = %+v", m.lastScheduler)
+	}
+}
+
+func TestAccountRouting401AndTransientThreshold(t *testing.T) {
+	m := newRoutingTestManager(true)
+	now := time.Now().UTC()
+	m.observe(routingUsage("revoked", 0, http.StatusUnauthorized, true), now)
+	if got := m.health[accountHealthKey("revoked", "astra")]; got.State != "auth_error" || got.CooldownUntil.IsZero() {
+		t.Fatalf("revoked = %+v", got)
+	}
+	m.observe(routingUsage("flaky", 0, http.StatusBadGateway, true), now)
+	if got := m.health[accountHealthKey("flaky", "astra")]; got.State == "transient_failure" {
+		t.Fatalf("first transient failure must not cool down: %+v", got)
+	}
+	m.observe(routingUsage("flaky", 0, http.StatusBadGateway, true), now.Add(time.Second))
+	if got := m.health[accountHealthKey("flaky", "astra")]; got.State != "transient_failure" || got.CooldownUntil.IsZero() {
+		t.Fatalf("second transient failure = %+v", got)
+	}
+}
+
+func TestAccountRoutingRateLimitDoesNotCoolDown(t *testing.T) {
+	m := newRoutingTestManager(true)
+	m.observe(routingUsage("limited", 0, http.StatusTooManyRequests, true), time.Now().UTC())
+	got := m.health[accountHealthKey("limited", "astra")]
+	if got.State != "" || !got.CooldownUntil.IsZero() || got.LastReason != "rate_limited" {
+		t.Fatalf("rate limited = %+v", got)
+	}
+}
+
+func TestAccountRoutingConsumesProbeEvidence(t *testing.T) {
+	m := newRoutingTestManager(true)
+	now := time.Now().UTC()
+	m.observeProbe("healthy", "gpt-6-astra", probeRecord{
+		Success: true, StatusCode: http.StatusOK, StateLength: 332, ObservedModel: "gpt-6-astra",
+	}, now)
+	m.observeProbe("degraded", "gpt-6-astra", probeRecord{
+		StatusCode: http.StatusOK, StateLength: 356, ObservedModel: "gpt-5.6-luna",
+	}, now)
+	got := m.pick(routingRequest("degraded", "healthy"), now.Add(time.Minute))
+	if !got.Handled || got.AuthID != "healthy" {
+		t.Fatalf("pick = %+v", got)
+	}
+	if entry := m.health[accountHealthKey("degraded", "astra")]; entry.State != "degraded" || entry.LastReason != "probe_state_length_356" {
+		t.Fatalf("degraded probe entry = %+v", entry)
+	}
+}
+
+func TestAccountRoutingProbeIgnoresTransportFailure(t *testing.T) {
+	m := newRoutingTestManager(true)
+	m.observeProbe("candidate", "gpt-6-astra", probeRecord{Error: "proxy timeout"}, time.Now().UTC())
+	if len(m.health) != 0 {
+		t.Fatalf("transport failure must not change account health: %+v", m.health)
+	}
+}
+
+func TestAccountRoutingNoStateKeepsProbeEvidence(t *testing.T) {
+	m := newRoutingTestManager(true)
+	now := time.Now().UTC()
+	m.observeProbe("healthy", "gpt-6-astra", probeRecord{
+		Success: true, StatusCode: http.StatusOK, StateLength: 332, ObservedModel: "gpt-6-astra",
+	}, now)
+	m.observe(routingUsage("healthy", 0, 0, false), now.Add(time.Minute))
+	entry := m.health[accountHealthKey("healthy", "astra")]
+	if entry.State != "healthy" || entry.LastStateLength != 332 || entry.LastReason != "probe_healthy" {
+		t.Fatalf("no-state usage erased probe evidence: %+v", entry)
+	}
+}
+
+func TestConfigureAccountRoutingAliases(t *testing.T) {
+	original := accountRouter
+	accountRouter = newRoutingTestManager(false)
+	t.Cleanup(func() { accountRouter = original })
+	if err := configureAccountRouting([]byte("experimental-account-routing: true\naccount-degraded-cooldown-minutes: 90\naccount-failure-cooldown-minutes: 7\naccount-failure-threshold: 3\n")); err != nil {
+		t.Fatal(err)
+	}
+	summary := accountRoutingSummary()
+	if summary["enabled"] != true || summary["degraded_cooldown_minutes"] != 90 || summary["failure_cooldown_minutes"] != 7 || summary["failure_threshold"] != 3 {
+		t.Fatalf("summary = %#v", summary)
+	}
+}
+
+func TestAccountRoutingRPCShapes(t *testing.T) {
+	original := accountRouter
+	accountRouter = newRoutingTestManager(true)
+	t.Cleanup(func() { accountRouter = original })
+	accountRouter.observe(routingUsage("healthy", 332, 0, false), time.Now().UTC())
+	raw, _ := json.Marshal(routingRequest("healthy", "other"))
+	result, err := pickAccountForRequest(raw)
+	if err != nil || !result.Handled || result.AuthID != "healthy" {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+	usageRaw, _ := json.Marshal(routingUsage("other", 356, 0, false))
+	if err := observeAccountUsage(usageRaw); err != nil {
+		t.Fatal(err)
+	}
+}

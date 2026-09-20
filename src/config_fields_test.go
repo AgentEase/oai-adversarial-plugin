@@ -17,7 +17,7 @@ func TestPanelSchemaAndAliases(t *testing.T) {
 		}
 		seen[name] = true
 	}
-	if len(seen) != 19 {
+	if len(seen) != 23 {
 		t.Fatal("missing fields")
 	}
 	b, err := normalizePanelConfig([]byte("operation-mode: business-only\noverride-policy: always\noverride-models: [gpt-6-astra]\nprobe-interval-seconds: 10\nturn-state-override:\n  value: preserved\n  probe:\n    enabled: true\n    prefetch-minutes: 3\n"))
