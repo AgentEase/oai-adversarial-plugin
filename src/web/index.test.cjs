@@ -630,3 +630,39 @@ test('changed exits and sign-out discard late public sampling results',async()=>
   finish({egress_check:{samples:[{ip:'8.8.8.8'}]}});await pendingLogin;
   p.renderData(data);assert.match(p.get('pool-rows').textContent,/尚未采样/);
 });
+
+
+// Synthetic login fixtures only. Format matches the public CPA/Manager Plus
+// secureStorage v1/v2 encoders; never read a real browser profile or credential.
+{
+  const host='review.example:8317',origin='https://'+host;
+  function encodeStoredFixture(version,value,ua='review-ua') {
+    const salt='cli-proxy-api-webui::secure-storage';
+    const mask=Buffer.from(version==='v1'?`${salt}|${host}|${ua}`:`${salt}|v2|${host}`);
+    const bytes=Buffer.from(value);
+    return `enc::${version}::`+Buffer.from(bytes.map((v,i)=>v^mask[i%mask.length])).toString('base64');
+  }
+  function storagePanel(values,ua='review-ua',prefix='') {
+    const html=fs.readFileSync(__dirname+'/index.html','utf8');
+    const source=html.slice(html.indexOf('  function storedValue('),html.indexOf('  function requireLogin('));
+    const c={localStorage:{getItem:n=>values[n]??null},location:{host,origin},navigator:{userAgent:ua},prefix,URL,TextEncoder,TextDecoder,atob};
+    vm.createContext(c);vm.runInContext(source+'\nglobalThis.read=storedValue;globalThis.key=readManagementKey;',c);
+    return c;
+  }
+  for(const version of ['v1','v2'])test(`${version} storage decodes a persisted login object`,()=>{
+    const value={state:{managementKey:'synthetic-review-key',apiBase:origin}};
+    const p=storagePanel({v:encodeStoredFixture(version,JSON.stringify(value))});
+    assert.equal(JSON.stringify(p.read('v')),JSON.stringify(value));
+  });
+  test('v2 storage supports Unicode',()=>assert.equal(storagePanel({v:encodeStoredFixture('v2',JSON.stringify('简体中文 / русский'))}).read('v'),'简体中文 / русский'));
+  test('v2 storage survives a changed user agent',()=>assert.equal(storagePanel({v:encodeStoredFixture('v2',JSON.stringify('synthetic-review-key'),'ua-before')},'ua-after').read('v'),'synthetic-review-key'));
+  test('plaintext JSON login storage remains readable',()=>assert.equal(storagePanel({v:'"synthetic-review-key"'}).read('v'),'synthetic-review-key'));
+  test('legacy raw login storage remains readable',()=>assert.equal(storagePanel({v:'legacy-review-value'}).read('v'),'legacy-review-value'));
+  test('missing login storage returns null',()=>assert.equal(storagePanel({}).read('v'),null));
+  function login(apiBase=origin){return {isLoggedIn:'true','cli-proxy-auth':encodeStoredFixture('v2',JSON.stringify({state:{managementKey:'synthetic-review-key',apiBase}}))};}
+  test('same-origin v2 session reuses login',()=>assert.equal(storagePanel(login()).key(),'synthetic-review-key'));
+  test('foreign origin cannot reuse v2 login',()=>assert.equal(storagePanel(login('https://other.example')).key(),''));
+  test('foreign base path cannot reuse v2 login',()=>assert.equal(storagePanel(login(origin+'/other')).key(),''));
+  test('malformed v2 login fails closed',()=>assert.equal(storagePanel({isLoggedIn:'true','cli-proxy-auth':'enc::v2::!!!'}).key(),''));
+  test('logged-out session cannot reuse v2 login',()=>assert.equal(storagePanel({...login(),isLoggedIn:'false'}).key(),''));
+}
