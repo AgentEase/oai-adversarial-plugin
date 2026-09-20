@@ -23,6 +23,9 @@ plugins:
       # America/Los_Angeles when omitted. Match it to the egress IP's
       # geolocation, e.g. Asia/Singapore for a Singapore VPS.
       # timezone: "America/Los_Angeles"
+      # Empirical acceptance policy; replace for your accounts, not by plan name.
+      # Also supported as turn-state-override.accepted-state-lengths.
+      # accepted-state-lengths: [292, 332]
 
       # ---- request-side X-Codex-Turn-State rewrite --------------------------
       turn-state-override:

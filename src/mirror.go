@@ -114,7 +114,7 @@ func (e *probeEngine) mirrorState(now time.Time) statemirror.State {
 }
 
 func mirrorTicket(entry stateEntry, ttl time.Duration) *statemirror.Ticket {
-	t := &statemirror.Ticket{Length: entry.ValueLength, Source: "unknown", Valid: entry.Valid}
+	t := &statemirror.Ticket{Length: entry.ValueLength, Source: "unknown", Valid: stateEntryAccepted(entry)}
 	switch entry.Source {
 	case "probe", "business", "seed", "response", "stream", "websocket", "request", "config":
 		t.Source = entry.Source

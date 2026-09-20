@@ -70,7 +70,7 @@
       const tr=document.createElement('tr');const name=cell(tr,'');textNode(name,model.name,'model');
       if(!model.detection){for(let i=0;i<4;i++)cell(tr,'—','muted');badge(cell(tr,''),t('unchecked'));rows.append(tr);continue;}
       textNode(name,t(model.activity));
-      const ticket=model.active,length=cell(tr,'');if(ticket?.length)badge(length,ticket.length+' B',ticket.length===292?'ok':'warn');else length.textContent='—';
+      const ticket=model.active,length=cell(tr,'');if(ticket?.length)badge(length,ticket.length+' B',ticket.valid?'ok':'warn');else length.textContent='—';
       cell(tr,ticket?t(ticket.source==='business'?'businessSource':ticket.source):'—');
       for(const field of ['issued_at','expires_at']){const td=cell(tr,formatTime(ticket?.[field]),'time');if(model.candidate)textNode(td,t('prepared',{time:formatTime(model.candidate[field])}),'candidate');}
       const ttl=cell(tr,'','ttl');
@@ -95,7 +95,7 @@
       evidence.hidden=!busy&&model.evidence==='none';
       evidence.textContent=busy?t(model.activity):t(model.evidence,{count:model.failure_attempts});
       evidence.className='badge '+(busy?'ok':model.evidence==='business'?'danger':'warn');
-      if(!busy&&['failed','suspect'].includes(model.evidence)&&active.kind==='remaining'&&model.active.length===292)evidence.textContent+=' · '+t('stillUsable');
+      if(!busy&&['failed','suspect'].includes(model.evidence)&&active.kind==='remaining')evidence.textContent+=' · '+t('stillUsable');
       left.textContent=t(active.kind,{time:duration(active.seconds)});
       left.className='remaining'+(['expired','invalid'].includes(active.kind)?' badge danger':'');
       progress.hidden=active.kind!=='remaining';progress.value=active.ratio;

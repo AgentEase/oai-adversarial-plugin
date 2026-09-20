@@ -34,27 +34,28 @@ const (
 // persistedState is the on-disk snapshot. Optional fields use omitempty so a
 // minimal snapshot (only the switch) stays tiny.
 type persistedState struct {
-	StateVersion   int             `json:"state_version"`
-	SavedAt        string          `json:"saved_at,omitempty"`
-	RejectDegraded *bool           `json:"reject_degraded,omitempty"`
-	Halted         *bool           `json:"halted,omitempty"`
-	Paused         []string        `json:"paused,omitempty"`
-	Values         []stateEntry    `json:"values,omitempty"`
-	Candidates     []stateEntry    `json:"candidates,omitempty"`
-	Failures       []probeFailure  `json:"failures,omitempty"`
-	Suspects       []probeSuspicion `json:"suspects,omitempty"`
+	StateVersion   int                   `json:"state_version"`
+	SavedAt        string                `json:"saved_at,omitempty"`
+	RejectDegraded *bool                 `json:"reject_degraded,omitempty"`
+	Halted         *bool                 `json:"halted,omitempty"`
+	Paused         []string              `json:"paused,omitempty"`
+	Values         []stateEntry          `json:"values,omitempty"`
+	Candidates     []stateEntry          `json:"candidates,omitempty"`
+	Failures       []probeFailure        `json:"failures,omitempty"`
+	Suspects       []probeSuspicion      `json:"suspects,omitempty"`
 	Business       []businessDegradation `json:"business,omitempty"`
-	ExitPenalties  []exitPenalty   `json:"exit_penalties,omitempty"`
-	DisabledExits  []string        `json:"disabled_exits,omitempty"`
-	ProbesTotal    uint64          `json:"probes_total,omitempty"`
-	ProbesOK       uint64          `json:"probes_ok,omitempty"`
-	ProbeHistory   []probeRecord   `json:"probe_history,omitempty"`
+	ExitPenalties  []exitPenalty         `json:"exit_penalties,omitempty"`
+	DisabledExits  []string              `json:"disabled_exits,omitempty"`
+	ProbesTotal    uint64                `json:"probes_total,omitempty"`
+	ProbesOK       uint64                `json:"probes_ok,omitempty"`
+	ProbeHistory   []probeRecord         `json:"probe_history,omitempty"`
 	// Keep an explicit empty array to distinguish new snapshots from legacy ones.
-	ProbeSuccessHistory []probeRecord `json:"probe_success_history"`
-	Records        []auditRecord   `json:"records,omitempty"`
-	Total          uint64          `json:"total,omitempty"`
-	Inserted       uint64          `json:"inserted,omitempty"`
-	Replaced       uint64          `json:"replaced,omitempty"`
+	ProbeSuccessHistory []probeRecord        `json:"probe_success_history"`
+	Records             []auditRecord        `json:"records,omitempty"`
+	Total               uint64               `json:"total,omitempty"`
+	Inserted            uint64               `json:"inserted,omitempty"`
+	Replaced            uint64               `json:"replaced,omitempty"`
+	AccountHealth       []accountModelHealth `json:"account_health,omitempty"`
 }
 
 var (
@@ -89,7 +90,7 @@ func ensurePersistence() {
 		loadPersistedState()
 		loadRuntimeSettings()
 		// After the snapshot is restored, fill any entry that has no value yet
-		// from the newest healthy (292-byte) turn-state values in the audit
+		// from the newest healthy turn-state values in the audit
 		// journal, so the baseline table is never empty after a fresh start.
 		probeTrack.seedBaselinesFromAudit()
 		go persistLoop(persistStop)
@@ -186,6 +187,12 @@ func collectState() persistedState {
 	state.Inserted = history.inserted
 	state.Replaced = history.replaced
 	history.mu.Unlock()
+
+	accountRouter.mu.Lock()
+	for _, entry := range accountRouter.health {
+		state.AccountHealth = append(state.AccountHealth, entry)
+	}
+	accountRouter.mu.Unlock()
 	return state
 }
 
@@ -388,4 +395,29 @@ func applyPersistedState(state persistedState) {
 		history.replaced = state.Replaced
 	}
 	history.mu.Unlock()
+
+	// Account routing evidence is short-lived operational state. Restore
+	// healthy observations for at most one hour; degraded/auth-error entries
+	// survive only while their explicit cooldown remains active. This avoids a
+	// stale snapshot pinning or blocking a credential after it is refreshed.
+	now := time.Now().UTC()
+	accountRouter.mu.Lock()
+	if accountRouter.health == nil {
+		accountRouter.health = map[string]accountModelHealth{}
+	}
+	for _, entry := range state.AccountHealth {
+		if strings.TrimSpace(entry.AuthID) == "" || routingModelKey(entry.Model) == "" {
+			continue
+		}
+		if entry.State == "healthy" {
+			if !entry.healthyAt(now) {
+				continue
+			}
+		} else if entry.CooldownUntil.IsZero() || !now.Before(entry.CooldownUntil) {
+			continue
+		}
+		entry.Account = publicAccountID(entry.AuthID)
+		accountRouter.health[accountHealthKey(entry.AuthID, entry.Model)] = entry
+	}
+	accountRouter.mu.Unlock()
 }
