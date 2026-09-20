@@ -12,7 +12,7 @@ import (
 
 const (
 	pluginID                   = "timezone-override"
-	pluginVersion              = "1.5.47"
+	pluginVersion              = "1.5.48"
 	historyLimit               = 200
 	schemaVersion              = 6
 	streamChunkHeaderInitIndex = -1
@@ -127,6 +127,10 @@ type auditRecord struct {
 	TurnStateOriginalLength *int   `json:"turn_state_original_length,omitempty"`
 	TurnStateResponseOriginalLength *int `json:"turn_state_response_original_length,omitempty"`
 	TurnStateResponseInjectedLength int `json:"turn_state_response_injected_length,omitempty"`
+	TurnStateResponseStatus string `json:"turn_state_response_status,omitempty"`
+	// In-flight evidence is never restored from snapshots or exposed by the API.
+	responseTicket string
+	responseModel string
 	DegradedRejected        bool   `json:"degraded_rejected,omitempty"`
 }
 
@@ -304,6 +308,9 @@ func (s *auditState) record(record auditRecord) {
 			if record.TurnStateOriginalLength != nil {
 				existing.TurnStateResponseOriginalLength = nil
 				existing.TurnStateResponseInjectedLength = 0
+				existing.TurnStateResponseStatus = ""
+				existing.responseTicket = ""
+				existing.responseModel = ""
 			}
 			if record.AccountScope != existing.AccountScope || record.AuthBinding != existing.AuthBinding {
 				*existing = record // A retry selected another account: do not retain prior account evidence.

@@ -765,13 +765,14 @@ test('collapsed model shows one newest ticket with its own account metadata',()=
   assert.doesNotMatch(p.get('probe-values').children[0].children[2].textContent,/a@example/);
 });
 
-test('overwritten requests show original to injected lengths including zero and unknown',()=>{
+test('missing request headers show only injection while known lengths retain comparison',()=>{
   const p=panel();
   const records=[356,0,undefined].map(turn_state_original_length=>({time:new Date().toISOString(),turn_state_original_length,turn_state_length:332,turn_state_injected_length:292,turn_state_override:'applied'}));
   p.renderData({records,turn_state_override:{probe:fixture()}});
   const rows=p.get('rows').children;
   assert.match(rows[0].textContent,/请求：收到 356 字节 → 注入 292 字节/);
-  assert.match(rows[1].textContent,/请求：未携带 → 注入 292 字节/);
+  assert.match(rows[1].textContent,/注入 292 字节/);
+  assert.doesNotMatch(rows[1].textContent,/请求：|未携带|→/);
   assert.match(rows[2].textContent,/原始长度未知 → 注入 292 字节/);
   assert.doesNotMatch(rows[0].textContent,/332/);
   p.changeLanguage('en');assert.match(p.get('rows').children[0].textContent,/Request: Received 356 bytes → Injected 292 bytes/);
@@ -785,9 +786,9 @@ test('request and response injection lengths remain separate in all locales',()=
   for(const lang of ['zh-CN','en','zh-TW','ru']){
     p.changeLanguage(lang);
     const rows=p.get('rows').children;
-    assert.equal((rows[0].textContent.match(/→/g)||[]).length,2);
+    assert.equal((rows[0].textContent.match(/→/g)||[]).length,1);
     assert.match(rows[0].textContent,/312/);
-    assert.equal((rows[1].textContent.match(/→/g)||[]).length,1);
+    assert.equal((rows[1].textContent.match(/→/g)||[]).length,0);
     assert.match(rows[1].textContent,/332/);
     assert.doesNotMatch(rows[2].textContent,/356/);
   }
@@ -808,6 +809,38 @@ test('missing request tickets are not labelled overwritten and response evidence
     for(const row of rows){assert.ok(row.textContent.includes(label));assert.doesNotMatch(row.textContent,/→/);}
     assert.match(rows[1].textContent,/312/);
   }
+});
+
+test('response learning reports actual outcomes without inventing updates for legacy records',()=>{
+  const p=panel(),base={time:new Date().toISOString(),turn_state_original_length:0,turn_state_injected_length:292,turn_state_override:'applied'};
+  const states=['missing','same-active','same-candidate','updated-active','updated-candidate','awaiting-model','older','expired','invalid-length','model-mismatch','account-unavailable','exempt'];
+  const records=states.map(turn_state_response_status=>({...base,turn_state_response_status,turn_state_response_original_length:turn_state_response_status==='missing'?undefined:332}));
+  records.push({...base});
+  records.push({...base,turn_state_response_status:'missing',turn_state_source:'stream',turn_state_length:332});
+  records.push({...base,turn_state_response_status:'headers-unavailable'});
+  p.renderData({records,turn_state_override:{probe:fixture()}});
+  for(const lang of ['zh-CN','en','zh-TW','ru']){
+    p.changeLanguage(lang);
+    const rows=p.get('rows').children;
+    for(let i=0;i<states.length;i++){
+      assert.doesNotMatch(rows[i].textContent,/请求：未携带|undefined|回灌/);
+      if(lang!=='zh-CN')assert.doesNotMatch(rows[i].textContent,/已更新预备票据|未收到票据|长度不符合策略/);
+    }
+    assert.match(rows[4].textContent,lang==='en'?/Standby ticket updated/:lang==='ru'?/Резервный билет обновлён/:lang==='zh-TW'?/已更新預備票據/:/已更新预备票据/);
+  }
+  p.changeLanguage('zh-CN');
+  const rows=p.get('rows').children;
+  assert.match(rows[0].textContent,/响应：未收到票据/);
+  assert.match(rows[1].textContent,/票据相同，未更新/);
+  assert.match(rows[2].textContent,/与预备票据相同，未更新/);
+  assert.match(rows[3].textContent,/已更新使用中票据/);
+  assert.match(rows[8].textContent,/长度不符合策略，未更新/);
+  assert.match(rows[9].textContent,/模型不一致，未更新/);
+  assert.match(rows[12].textContent,/响应：未观测/);
+  assert.doesNotMatch(rows[12].textContent,/已更新|未收到票据/);
+  assert.match(rows[13].textContent,/响应：未收到票据/);
+  assert.doesNotMatch(rows[13].textContent,/332|收到 332/);
+  assert.match(rows[14].textContent,/响应：宿主未提供响应票据头/);
 });
 
 test('timezone editing keeps drafts through polling and locale changes and confirms explicitly',async()=>{

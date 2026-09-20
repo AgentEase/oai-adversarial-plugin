@@ -1371,36 +1371,43 @@ func (e *probeEngine) clearBusinessDegradation(model string) {
 // observeBusinessState feeds one state value observed on real business
 // traffic into the engine:
 //
-//   - healthy (accepted length, model consistent) -> stored as the active value
-//     with source "business" (zero upstream pressure), marks cleared;
+//   - healthy (accepted length, confirmed model) -> stored in the account's
+//     active/candidate slots with source "business", marks cleared;
 //   - unhealthy (length anomaly, or state empty + model mismatch) -> one
 //     observation is enough to mark the model degraded for the rejection
-//     switch and to trigger a gentle recovery round;
+//     switch;
 //   - state empty with no mismatch -> no signal, ignored.
-func observeBusinessState(model, state, observedModel string) {
+func observeBusinessState(model, state, observedModel string) string {
 	model = strings.TrimSpace(model)
 	if model == "" || !degradationDetectionEnabled(model, "") {
-		return
+		return "exempt"
 	}
 	state = strings.TrimSpace(state)
 	consistent := observedModel == "" || probeModelConsistent(model, observedModel)
 	if state == "" {
 		if observedModel != "" && !consistent {
 			probeTrack.noteBusinessDegradation(model, "上游请求被路由至其它模型（模型不一致）")
+			return "model-mismatch"
 		}
-		return
+		return "missing"
 	}
 	if !isAcceptedStateLength(len(state)) {
 		probeTrack.noteBusinessDegradation(model, fmt.Sprintf("业务请求观测到状态长度异常（%d 字节）", len(state)))
-		return
+		return "invalid-length"
 	}
 	if !consistent {
 		probeTrack.noteBusinessDegradation(model, "上游请求被路由至其它模型（模型不一致）")
-		return
+		return "model-mismatch"
+	}
+	if observedModel == "" {
+		return "awaiting-model"
 	}
 	cfg := currentProbeConfig().Config
-	probeTrack.storeValue(model, state, "business", "", cfg)
-	probeTrack.clearBusinessDegradation(model)
+	result := probeTrack.storeValue(model, state, "business", "", cfg)
+	if result != "expired" {
+		probeTrack.clearBusinessDegradation(model)
+	}
+	return result
 }
 
 // ---------------------------------------------------------------------------
@@ -1953,7 +1960,7 @@ func (e *probeEngine) noteError(message string) {
 // active immediately. This is the "smooth switch" the dashboard relies on:
 // business traffic always overwrites with a currently-valid token while the
 // prefetch machinery replenishes the next one invisibly.
-func (e *probeEngine) storeValue(model, value, source, proxySpec string, cfg probeConfig) {
+func (e *probeEngine) storeValue(model, value, source, proxySpec string, cfg probeConfig) string {
 	generated := ""
 	expires := ""
 	if ts, ok := parseTurnStateTimestamp(value); ok {
@@ -1973,7 +1980,7 @@ func (e *probeEngine) storeValue(model, value, source, proxySpec string, cfg pro
 	}
 	now := time.Now().UTC()
 	if entryExpired(entry, cfg.TTL, now) {
-		return
+		return "expired"
 	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -1988,19 +1995,28 @@ func (e *probeEngine) storeValue(model, value, source, proxySpec string, cfg pro
 	if activeUsable {
 		// Echoed business state is not a successor. Neither it nor an older
 		// capture may replace a newer value already parked for takeover.
+		if value == active.Value {
+			return "same-active"
+		}
 		if !newerState(value, active.Value) {
-			return
+			return "older"
 		}
 		if candidate, ok := e.candidates[model]; ok && stateEntryAccepted(candidate) && !entryExpired(candidate, cfg.TTL, now) && !newerState(value, candidate.Value) {
-			return
+			if value == candidate.Value {
+				return "same-candidate"
+			}
+			return "older"
 		}
 		// Keep serving the old token; park the fresh one as the next slot.
 		e.candidates[model] = entry
+		markStateDirty()
+		return "updated-candidate"
 	} else {
 		e.values[model] = entry
 		delete(e.candidates, model)
 	}
 	markStateDirty()
+	return "updated-active"
 }
 
 func newerState(value, previous string) bool {

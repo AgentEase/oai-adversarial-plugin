@@ -265,7 +265,7 @@ func TestCredentialReplacementNeverReusesSlotsOrLateResponses(t *testing.T) {
 		t.Fatal("replacement inherited old slots")
 	}
 	late := synthStateToken(time.Now())
-	raw, _ := json.Marshal(responseInterceptRequest{RequestID: "account-request", Model: "gpt-6-astra", Metadata: map[string]any{"selected_auth_id": "fixture-A"}, ResponseHeaders: http.Header{turnStateHeader: {late}}, Body: []byte(`{"model":"gpt-6-astra"}`)})
+	raw, _ := json.Marshal(responseInterceptRequest{RequestID: "account-request", Model: "gpt-6-astra", Metadata: map[string]any{"selected_auth_id": "fixture-A"}, ResponseHeaders: http.Header{turnStateHeader: {late}}, Body: []byte(`{"object":"response","model":"gpt-6-astra"}`)})
 	if _, err := interceptNonStreamingResponse(raw); err != nil {
 		t.Fatal(err)
 	}
@@ -379,7 +379,7 @@ func TestOlderHostClearHeadersAndResponseBinding(t *testing.T) {
 	if merged.Get(turnStateHeader) != "" {
 		t.Fatal("old host merge resurrected client ticket")
 	}
-	raw, _ := json.Marshal(responseInterceptRequest{RequestID: "account-request", Model: "gpt-6-astra", ResponseHeaders: http.Header{turnStateHeader: {ticket}}, Body: []byte(`{"model":"gpt-6-astra"}`)})
+	raw, _ := json.Marshal(responseInterceptRequest{RequestID: "account-request", Model: "gpt-6-astra", ResponseHeaders: http.Header{turnStateHeader: {ticket}}, Body: []byte(`{"object":"response","model":"gpt-6-astra"}`)})
 	if _, err := interceptNonStreamingResponse(raw); err != nil {
 		t.Fatal(err)
 	}

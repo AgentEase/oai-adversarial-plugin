@@ -288,7 +288,19 @@ func headerValue(headers http.Header, name string) string {
 	if headers == nil {
 		return ""
 	}
-	return strings.TrimSpace(headers.Get(name))
+	if values, ok := headers[http.CanonicalHeaderKey(name)]; ok {
+		if len(values) > 0 {
+			return strings.TrimSpace(values[0])
+		}
+		return ""
+	}
+	// JSON-decoded ABI maps are not guaranteed to use Go's canonical casing.
+	for key, values := range headers {
+		if strings.EqualFold(key, name) && len(values) > 0 {
+			return strings.TrimSpace(values[0])
+		}
+	}
+	return ""
 }
 
 func previewValue(value string, limit int) string {
@@ -299,8 +311,7 @@ func previewValue(value string, limit int) string {
 }
 
 // interceptNonStreamingResponse observes successful non-streaming execution
-// responses before they are delivered downstream. The handler is observation
-// only and never modifies the response.
+// responses before downstream header repair, so injected values are not learned.
 func interceptNonStreamingResponse(raw []byte) (responseInterceptOutput, error) {
 	var req responseInterceptRequest
 	if err := json.Unmarshal(raw, &req); err != nil {
@@ -312,9 +323,9 @@ func interceptNonStreamingResponse(raw []byte) (responseInterceptOutput, error) 
 		upstream = model
 		history.observeModel(req.RequestID, "", model)
 	}
-	history.observeTurnState(req.RequestID, state, "response")
 	scope := responseMetadataAccount(req.RequestID, req.Metadata)
-	observeScopedBusiness(scope, req.Model, req.RequestedModel, state, upstream)
+	original := history.observeResponseBusiness(req.RequestID, scope, state, upstream)
+	history.observeTurnState(req.RequestID, original, "response")
 	out := responseInterceptOutput{}
 	if headers := repairScopedHeader(scope, req.Model, req.RequestedModel, upstream, state); headers != nil {
 		out.Headers = headers
@@ -325,7 +336,8 @@ func interceptNonStreamingResponse(raw []byte) (responseInterceptOutput, error) 
 
 // interceptStreamChunk observes every successful stream chunk before it is
 // delivered downstream. The header-init call (ChunkIndex == -1) carries no
-// payload; payload chunks carry one upstream event each. Observation only.
+// payload; payload chunks carry one upstream event each. Learning waits for
+// a reported model while retaining the original, unrepaired header.
 func interceptStreamChunk(raw []byte) (responseInterceptOutput, error) {
 	var req streamChunkInterceptRequest
 	if err := json.Unmarshal(raw, &req); err != nil {
@@ -339,16 +351,48 @@ func interceptStreamChunk(raw []byte) (responseInterceptOutput, error) {
 		}
 	}
 	state := headerValue(req.ResponseHeaders, turnStateHeader)
-	history.observeTurnState(req.RequestID, state, "stream")
-	if upstream != "" || state != "" {
-		observeScopedBusiness(responseMetadataAccount(req.RequestID, req.Metadata), req.Model, req.RequestedModel, state, upstream)
-	}
+	scope := responseMetadataAccount(req.RequestID, req.Metadata)
+	original := history.observeResponseBusiness(req.RequestID, scope, state, upstream)
+	history.observeTurnState(req.RequestID, original, "stream")
 	out := responseInterceptOutput{}
-	if headers := repairScopedHeader(responseMetadataAccount(req.RequestID, req.Metadata), req.Model, req.RequestedModel, upstream, state); headers != nil {
+	if headers := repairScopedHeader(scope, req.Model, req.RequestedModel, upstream, state); headers != nil {
 		out.Headers = headers
 	}
-	history.observeResponseTicket(req.RequestID, responseMetadataAccount(req.RequestID, req.Metadata), state, out.Headers)
+	history.observeResponseTicket(req.RequestID, scope, state, out.Headers)
 	return out, nil
+}
+
+// Serialize learning with request-attempt replacement. The engine never holds
+// its mutex while acquiring the audit mutex. Keep the first nonempty header:
+// later stream callbacks may contain the plugin's repaired value instead.
+func (s *auditState) observeResponseBusiness(requestID, scope, value, upstream string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.records {
+		r := &s.records[i]
+		if requestID == "" || r.RequestID != requestID || r.AccountScope != scope {
+			continue
+		}
+		changed := r.TurnStateResponseStatus == "" || r.TurnStateResponseStatus == "headers-unavailable"
+		if r.responseTicket == "" && value != "" {
+			// Lengths above the maximum accepted size need no full-value cache.
+			if len(value) > turnStateValueLimit+1 {
+				value = value[:turnStateValueLimit+1]
+			}
+			r.responseTicket = value
+			changed = true
+		}
+		if upstream != "" && upstream != r.responseModel {
+			r.responseModel = upstream
+			changed = true
+		}
+		if changed {
+			r.TurnStateResponseStatus = observeScopedBusiness(scope, r.Model, r.RequestedModel, r.responseTicket, r.responseModel)
+			markStateDirty()
+		}
+		return r.responseTicket
+	}
+	return ""
 }
 
 // Record the response header decision independently of the request injection.
@@ -385,11 +429,28 @@ func observeWebSocketEvent(raw []byte) (struct{}, error) {
 	if err := json.Unmarshal(raw, &event); err != nil {
 		return struct{}{}, fmt.Errorf("decode websocket event: %w", err)
 	}
+	scope := responseAccount(event.RequestID, event.AuthID)
+	history.noteResponseHeadersUnavailable(event.RequestID, scope)
 	if model, ok := probeUpstreamModel(event.Payload); ok {
 		history.observeModel(event.RequestID, event.TraceID, model)
-		observeScopedBusiness(responseAccount(event.RequestID, event.AuthID), event.Model, event.RequestedModel, "", model)
+		observeScopedBusiness(scope, event.Model, event.RequestedModel, "", model)
 	}
 	return struct{}{}, nil
+}
+
+// The current WebSocket event ABI has no response-header field. This is a
+// visibility limitation, not proof that the upstream returned no ticket.
+func (s *auditState) noteResponseHeadersUnavailable(requestID, scope string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.records {
+		r := &s.records[i]
+		if requestID != "" && r.RequestID == requestID && r.AccountScope == scope && r.TurnStateResponseStatus == "" {
+			r.TurnStateResponseStatus = "headers-unavailable"
+			markStateDirty()
+			return
+		}
+	}
 }
 
 // Exempt requests are selected by the user's requested model, never by the
@@ -407,10 +468,11 @@ func degradationDetectionEnabled(model, requestedModel string) bool {
 	return !(len(parts) >= 3 && parts[0] == "gpt" && (parts[2] == "luna" || parts[2] == "terra"))
 }
 
-func observeBusinessStateForRequest(model, requestedModel, state, upstream string) {
+func observeBusinessStateForRequest(model, requestedModel, state, upstream string) string {
 	if degradationDetectionEnabled(model, requestedModel) {
-		observeBusinessState(businessModelName(model, requestedModel), state, upstream)
+		return observeBusinessState(businessModelName(model, requestedModel), state, upstream)
 	}
+	return "exempt"
 }
 
 // businessModelName picks the model name used as the business-observation

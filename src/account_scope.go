@@ -184,11 +184,11 @@ func applyScopedOverride(scope, model, requested string, headers http.Header) (h
 	return applyTurnStateOverride(scopedTarget(scope, model), scopedTarget(scope, requested), nil)
 }
 
-func observeScopedBusiness(scope, model, requested, state, upstream string) {
+func observeScopedBusiness(scope, model, requested, state, upstream string) string {
 	if scope == "" {
-		return
+		return "account-unavailable"
 	}
-	observeBusinessStateForRequest(scopedTarget(scope, model), scopedTarget(scope, requested), state, upstream)
+	return observeBusinessStateForRequest(scopedTarget(scope, model), scopedTarget(scope, requested), state, upstream)
 }
 
 func repairScopedHeader(scope, model, requested, upstream, state string) http.Header {

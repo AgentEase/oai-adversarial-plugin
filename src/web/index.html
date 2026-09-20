@@ -159,6 +159,18 @@
     "响应：{value}":["Response: {value}", "回應：{value}", "Ответ: {value}"],
     "收到 {count} 字节":["Received {count} bytes", "收到 {count} 位元組", "Получено {count} байт"],
     "注入 {count} 字节":["Injected {count} bytes", "注入 {count} 位元組", "Вставлено {count} байт"],
+    "未收到票据":["No response ticket", "未收到票據", "Билет не получен"],
+    "宿主未提供响应票据头":["Host did not expose response ticket headers", "宿主未提供回應票據標頭", "Хост не предоставил заголовок билета ответа"],
+    "票据相同，未更新":["Same active ticket; unchanged", "票據相同，未更新", "Тот же активный билет; без обновления"],
+    "与预备票据相同，未更新":["Same standby ticket; unchanged", "與預備票據相同，未更新", "Тот же резервный билет; без обновления"],
+    "已更新使用中票据":["Active ticket updated", "已更新使用中票據", "Активный билет обновлён"],
+    "已更新预备票据":["Standby ticket updated", "已更新預備票據", "Резервный билет обновлён"],
+    "等待响应模型确认":["Awaiting response model", "等待回應模型確認", "Ожидается модель ответа"],
+    "票据未更新，签发时间未更新":["Ticket unchanged; not newer", "票據未更新，簽發時間未更新", "Билет не обновлён: время выпуска не новее"],
+    "票据已过期，未更新":["Expired ticket; not saved", "票據已過期，未更新", "Билет истёк; не сохранён"],
+    "长度不符合策略，未更新":["Length outside policy; not saved", "長度不符合策略，未更新", "Длина не соответствует правилу; не сохранён"],
+    "模型不一致，未更新":["Model mismatch; not saved", "模型不一致，未更新", "Модель не совпадает; не сохранён"],
+    "账号未确认，未更新":["Account unconfirmed; not saved", "帳號未確認，未更新", "Аккаунт не подтверждён; не сохранён"],
     "未携带":["Not provided", "未攜帶", "Не передан"],
     "请求目标时区":["Request target timezone", "請求目標時區", "Целевой часовой пояс запросов"],
     "请输入有效的 IANA 时区名称":["Enter a valid IANA timezone name", "請輸入有效的 IANA 時區名稱", "Введите корректное имя часового пояса IANA"],
@@ -715,7 +727,8 @@
         const original=record.turn_state_original_length;
         const originalText=original===0?t('未携带'):Number.isInteger(original)&&original>0?t('收到 {count} 字节',{count:original.toLocaleString(locale)}):t('原始长度未知');
         const injected=Number(record.turn_state_injected_length||0);
-        turnstate.textContent=t('请求：{value}',{value:originalText+' → '+(injected>0?t('注入 {count} 字节',{count:injected.toLocaleString(locale)}):'—')});
+        const injection=injected>0?t('注入 {count} 字节',{count:injected.toLocaleString(locale)}):'—';
+        turnstate.textContent=original===0?injection:t('请求：{value}',{value:originalText+' → '+injection});
         const badge=document.createElement('span');badge.className='badge override';badge.textContent=t(record.turn_state_override==='applied-config'?'已覆写（配置值）':'已覆写');turnstate.append(badge);
       }else if(record.turn_state_response_original_length!=null){
         const original=record.turn_state_original_length;
@@ -728,11 +741,14 @@
         turnstate.title=detail+(record.turn_state_source?('　（'+sourceLabel(record.turn_state_source)+'）'):'');
       }else{turnstate.textContent=t(record.turn_state_override==='skipped-missing'?'请求未携带票据，未覆写':'未观测');turnstate.classList.add('none');}
       if(record.turn_state_override==='skipped-missing'&&record.turn_state_length>0){const notice=document.createElement('div');notice.className='sub';notice.textContent=t('请求未携带票据，未覆写');turnstate.append(notice);}
-      if(!record.degraded_rejected&&(record.turn_state_override==='applied'||record.turn_state_override==='applied-config'||record.turn_state_response_original_length!=null)){
-        const received=record.turn_state_response_original_length??(['response','stream'].includes(record.turn_state_source)?record.turn_state_length:null);
+      if(!record.degraded_rejected&&(record.turn_state_override==='applied'||record.turn_state_override==='applied-config'||record.turn_state_response_original_length!=null||record.turn_state_response_status)){
+        const received=record.turn_state_response_original_length??(!record.turn_state_response_status&&['response','stream'].includes(record.turn_state_source)?record.turn_state_length:null);
         const injected=record.turn_state_response_injected_length||0;
         let value=Number.isInteger(received)&&received>0?t('收到 {count} 字节',{count:received.toLocaleString(locale)}):t('未观测');
         if(injected>0)value+=' → '+t('注入 {count} 字节',{count:injected.toLocaleString(locale)});
+        const outcomes={'missing':'未收到票据','headers-unavailable':'宿主未提供响应票据头','same-active':'票据相同，未更新','same-candidate':'与预备票据相同，未更新','updated-active':'已更新使用中票据','updated-candidate':'已更新预备票据','awaiting-model':'等待响应模型确认','older':'票据未更新，签发时间未更新','expired':'票据已过期，未更新','invalid-length':'长度不符合策略，未更新','model-mismatch':'模型不一致，未更新','account-unavailable':'账号未确认，未更新','exempt':'不检测'};
+        const outcome=outcomes[record.turn_state_response_status];
+        if(outcome)value=received>0?value+' · '+t(outcome):t(outcome);
         const response=document.createElement('div');response.className='sub';response.textContent=t('响应：{value}',{value});turnstate.append(response);
       }
       if(record.turn_state_override==='account-unavailable'||record.turn_state_override==='account-baseline-unavailable'){const notice=document.createElement('span');notice.className='badge state-warn';notice.textContent=t(record.turn_state_override==='account-unavailable'?'未注入：账号未识别':'未注入：此账号无有效票据');turnstate.append(notice);}
