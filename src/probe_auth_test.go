@@ -51,3 +51,25 @@ func TestHighestPriorityCredentialRejectsInvalidAndNonCodex(t *testing.T) {
 		t.Fatalf("credential=%+v err=%v", cred, err)
 	}
 }
+
+func TestAuthSelectionScanTracksEnabledAccountChanges(t *testing.T) {
+	oldList := hostAuthListFunc
+	t.Cleanup(func() { hostAuthListFunc = oldList })
+	selected := "first"
+	hostAuthListFunc = func() ([]hostAuthEntry, error) {
+		return []hostAuthEntry{{AuthIndex: selected, Provider: "codex", Priority: 10}}, nil
+	}
+	e := &probeEngine{
+		cfg:           probeConfigState{Config: probeConfig{Enabled: true, AccountMode: "highest-priority", Models: []string{"gpt-6-astra"}}},
+		authCooldowns: map[string]time.Time{}, paused: map[string]bool{"gpt-6-astra": true}, probing: map[string]bool{},
+	}
+	e.authSelectionScan()
+	if !e.autoAuthSeen || e.lastAutoAuth != "first" || len(e.queue) != 0 {
+		t.Fatal("initial snapshot must not probe")
+	}
+	selected = "second"
+	e.authSelectionScan()
+	if e.lastAutoAuth != "second" || len(e.queue) != 0 {
+		t.Fatal("account change was not tracked safely")
+	}
+}

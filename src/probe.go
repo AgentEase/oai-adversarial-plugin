@@ -237,6 +237,8 @@ type probeEngine struct {
 	queueActive    bool
 	disabledExits  map[string]bool
 	authCooldowns  map[string]time.Time
+	autoAuthSeen   bool
+	lastAutoAuth   string
 	rejectDegraded bool
 	history        []probeRecord
 	successHistory []probeRecord
@@ -841,6 +843,7 @@ func (e *probeEngine) ensurePrefetchWatcher() {
 	e.prefetchStop = stop
 	e.mu.Unlock()
 	go e.prefetchWatchLoop(stop)
+	go e.authSelectionWatchLoop(stop)
 }
 
 // stopPrefetchWatcher shuts the watcher down (plugin shutdown).

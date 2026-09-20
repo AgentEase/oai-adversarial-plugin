@@ -62,8 +62,32 @@ func (e *probeEngine) resolveProbeCredential(cfg probeConfig) (probeCredential, 
 	if err != nil {
 		return probeCredential{}, fmt.Errorf("list CPA credentials: %w", err)
 	}
-	now := time.Now()
-	eligible := entries[:0]
+	eligible := e.eligibleProbeAccounts(entries, time.Now())
+	limit := cfg.CandidateLimit
+	if limit <= 0 || limit > len(eligible) {
+		limit = len(eligible)
+	}
+	for _, entry := range eligible[:limit] {
+		raw, err := hostAuthGetFunc(entry.AuthIndex)
+		if err != nil {
+			e.cooldownProbeAccount(entry.AuthIndex, 90*time.Second)
+			continue
+		}
+		var cred probeCredential
+		if json.Unmarshal(raw, &cred) != nil || strings.TrimSpace(cred.AccessToken) == "" {
+			e.cooldownProbeAccount(entry.AuthIndex, cfg.AuthCooldown)
+			continue
+		}
+		cred.AuthIndex = entry.AuthIndex
+		cred.Priority = entry.Priority
+		cred.Label = maskedAccountLabel(entry)
+		return cred, nil
+	}
+	return probeCredential{}, fmt.Errorf("no eligible CPA credential")
+}
+
+func (e *probeEngine) eligibleProbeAccounts(entries []hostAuthEntry, now time.Time) []hostAuthEntry {
+	eligible := make([]hostAuthEntry, 0, len(entries))
 	e.mu.Lock()
 	if e.authCooldowns == nil {
 		e.authCooldowns = map[string]time.Time{}
@@ -102,27 +126,62 @@ func (e *probeEngine) resolveProbeCredential(cfg probeConfig) (probeCredential, 
 		}
 		return eligible[i].AuthIndex < eligible[j].AuthIndex
 	})
-	limit := cfg.CandidateLimit
-	if limit <= 0 || limit > len(eligible) {
-		limit = len(eligible)
-	}
-	for _, entry := range eligible[:limit] {
-		raw, err := hostAuthGetFunc(entry.AuthIndex)
-		if err != nil {
-			e.cooldownProbeAccount(entry.AuthIndex, 90*time.Second)
-			continue
+	return eligible
+}
+
+// The watcher reads credential metadata every ten seconds but sends no model
+// traffic unless the highest-ranked active credential actually changes.
+func (e *probeEngine) authSelectionWatchLoop(stop <-chan struct{}) {
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-stop:
+			return
+		case <-ticker.C:
+			e.authSelectionScan()
 		}
-		var cred probeCredential
-		if json.Unmarshal(raw, &cred) != nil || strings.TrimSpace(cred.AccessToken) == "" {
-			e.cooldownProbeAccount(entry.AuthIndex, cfg.AuthCooldown)
-			continue
-		}
-		cred.AuthIndex = entry.AuthIndex
-		cred.Priority = entry.Priority
-		cred.Label = maskedAccountLabel(entry)
-		return cred, nil
 	}
-	return probeCredential{}, fmt.Errorf("no eligible CPA credential")
+}
+
+func (e *probeEngine) authSelectionScan() {
+	e.mu.Lock()
+	cfg := e.cfg.Config
+	suppressed := !cfg.Enabled || cfg.AccountMode != "highest-priority" || e.cfg.Error != "" || e.halted || e.stopping || e.shuttingDown
+	e.mu.Unlock()
+	if suppressed {
+		return
+	}
+	entries, err := hostAuthListFunc()
+	if err != nil {
+		return
+	}
+	eligible := e.eligibleProbeAccounts(entries, time.Now())
+	if len(eligible) == 0 {
+		return
+	}
+	selected := eligible[0].AuthIndex
+	e.mu.Lock()
+	if !e.autoAuthSeen {
+		e.autoAuthSeen = true
+		e.lastAutoAuth = selected
+		e.mu.Unlock()
+		return
+	}
+	changed := selected != e.lastAutoAuth
+	if changed {
+		e.lastAutoAuth = selected
+	}
+	models := append([]string(nil), cfg.Models...)
+	e.mu.Unlock()
+	if !changed {
+		return
+	}
+	for _, model := range models {
+		if degradationDetectionEnabled(model, "") {
+			e.enqueueTask(model, true)
+		}
+	}
 }
 
 func (e *probeEngine) cooldownProbeAccount(index string, duration time.Duration) {

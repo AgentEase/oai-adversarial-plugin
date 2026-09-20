@@ -12,7 +12,7 @@ import (
 
 const (
 	pluginID                   = "timezone-override"
-	pluginVersion              = "1.5.37-agentease.2"
+	pluginVersion              = "1.5.37-agentease.3"
 	historyLimit               = 200
 	schemaVersion              = 6
 	streamChunkHeaderInitIndex = -1
