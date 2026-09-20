@@ -136,7 +136,7 @@ func flushStateNow() {
 // may be milliseconds apart, which is fine for a dashboard snapshot.
 func collectState() persistedState {
 	state := persistedState{
-		StateVersion: 1,
+		StateVersion: 2,
 		SavedAt:      time.Now().UTC().Format(time.RFC3339Nano),
 	}
 	probeTrack.mu.Lock()
@@ -396,11 +396,12 @@ func applyPersistedState(state persistedState) {
 	}
 	history.mu.Unlock()
 
-	// Account routing evidence is short-lived operational state. Restore
-	// healthy observations for at most one hour; degraded/auth-error entries
-	// survive only while their explicit cooldown remains active. This avoids a
-	// stale snapshot pinning or blocking a credential after it is refreshed.
+	// Account routing evidence is restored using each AuthID+model entry's own
+	// TTL. A refresh captured for one account must never extend another
+	// account, and legacy snapshots without an account-owned state cannot be
+	// treated as healthy.
 	now := time.Now().UTC()
+	ttl := currentProbeConfig().Config.TTL
 	accountRouter.mu.Lock()
 	if accountRouter.health == nil {
 		accountRouter.health = map[string]accountModelHealth{}
@@ -410,11 +411,21 @@ func applyPersistedState(state persistedState) {
 			continue
 		}
 		if entry.State == "healthy" {
-			if entry.ObservedAt.IsZero() || now.Sub(entry.ObservedAt) > time.Hour {
+			if entry.TurnStateValue == "" || !isAcceptedStateLength(len(entry.TurnStateValue)) {
+				continue
+			}
+			if entry.HealthyUntil.IsZero() {
+				entry.HealthyUntil = accountStateExpiry(entry.TurnStateValue, entry.ObservedAt, ttl)
+			}
+			if expireAccountHealth(&entry, now) {
+				entry.Account = publicAccountID(entry.AuthID)
+				accountRouter.health[accountHealthKey(entry.AuthID, entry.Model)] = entry
 				continue
 			}
 		} else if entry.CooldownUntil.IsZero() || !now.Before(entry.CooldownUntil) {
-			continue
+			if entry.State != "expired" {
+				continue
+			}
 		}
 		entry.Account = publicAccountID(entry.AuthID)
 		accountRouter.health[accountHealthKey(entry.AuthID, entry.Model)] = entry

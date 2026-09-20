@@ -21,7 +21,7 @@ type panelField struct {
 
 var panelFields = []panelField{
 	{Name: "operation-mode", Type: "enum", EnumValues: []string{"business-only", "probe"}, Description: "运行模式：business-only 仅业务观测、不发主动探测；probe 启用探测能力（任务由状态路由台控制）。留空继承旧 YAML。"},
-	{Name: "experimental-account-routing", Type: "boolean", Description: "实验性账号路由：仅在同一优先级候选中优先健康账号，并暂时避开已确认 312/356 或鉴权失败的账号。关闭时仍只读记录健康证据。"},
+	{Name: "experimental-account-routing", Type: "boolean", Description: "实验性账号路由：同一优先级健康账号优先；State 与 TTL 按 AuthID+模型独立绑定，禁止跨账号借票，并暂时避开 312/356 或鉴权失败账号。关闭时保留旧的模型级行为。"},
 	{Name: "account-degraded-cooldown-minutes", Type: "integer", Description: "账号出现 312/356 或 401/403 后的路由冷却分钟数（1–1440）。", min: 1, max: 1440},
 	{Name: "account-failure-cooldown-minutes", Type: "integer", Description: "连续瞬时失败达到阈值后的短冷却分钟数（1–120）。", min: 1, max: 120},
 	{Name: "account-failure-threshold", Type: "integer", Description: "无异常 state 的连续失败达到多少次后短暂避开该账号（1–10）。", min: 1, max: 10},
@@ -33,7 +33,7 @@ var panelFields = []panelField{
 	{Name: "probe-models", Type: "array", Description: "主动探测模型列表；仅业务观测模式下不发探测请求。", path: []string{"probe", "models"}},
 	{Name: "probe-credential-file", Type: "string", Description: "主动探测凭证文件路径（不是 Token）；仅 probe 模式使用，不支持自动选号。", path: []string{"probe", "cred-file"}},
 	{Name: "probe-proxies-file", Type: "string", Description: "已有代理出口文件路径；不要填写供应商取 IP URL。代理认证请在代理池页面管理。", path: []string{"probe", "proxies-file"}},
-	{Name: "state-ttl-minutes", Type: "integer", Description: "基线有效期（分钟，1–1440）。", path: []string{"probe", "ttl-minutes"}, min: 1, max: 1440},
+	{Name: "state-ttl-minutes", Type: "integer", Description: "State 有效期（分钟，1–1440）；开启实验性账号路由后，每个 AuthID+模型从自己的票据时间戳独立计算。", path: []string{"probe", "ttl-minutes"}, min: 1, max: 1440},
 	{Name: "prefetch-minutes", Type: "integer", Description: "提前预备分钟数，0 关闭；必须小于有效期。状态路由台保存的运行设置优先。", path: []string{"probe", "prefetch-minutes"}, min: 0, max: 1439},
 	{Name: "probe-interval-seconds", Type: "integer", Description: "串行间隔秒数（1–3600）；状态路由台保存的运行设置优先。", path: []string{"probe", "probe-interval-seconds"}, min: 1, max: 3600},
 	{Name: "probe-timeout-seconds", Type: "integer", Description: "单次探测超时秒数（1–300）。", path: []string{"probe", "timeout-seconds"}, min: 1, max: 300},

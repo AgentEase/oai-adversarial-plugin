@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -155,10 +156,40 @@ func turnStateOverrideMatches(config turnStateOverrideConfig, models ...string) 
 // configured value; the baseline keeps serving even while the probe track is
 // idle - it is cached protection, not probing.
 func applyTurnStateOverride(model, requestedModel string, headers http.Header) (http.Header, string) {
+	return applyTurnStateOverrideInternal("", model, requestedModel, headers, false)
+}
+
+func applyTurnStateOverrideForAccount(authID, model, requestedModel string, headers http.Header) (http.Header, string) {
+	return applyTurnStateOverrideInternal(authID, model, requestedModel, headers, true)
+}
+
+func applyTurnStateOverrideInternal(authID, model, requestedModel string, headers http.Header, accountScoped bool) (http.Header, string) {
 	if !degradationDetectionEnabled(model, requestedModel) {
 		return nil, ""
 	}
 	state := currentTurnStateOverride()
+	force := state != nil && state.Config.Force
+	existing := headerValue(headers, turnStateHeader)
+	keepExisting := existing != "" && isAcceptedStateLength(len(existing)) && !force
+
+	// Once account routing is enabled, the selected AuthID owns its state and
+	// expiry. Never borrow the model-global baseline or static fallback from a
+	// different account. A healthy client-provided value may still pass through
+	// in fill mode because it already belongs to this request/account.
+	accountModel := businessModelName(model, requestedModel)
+	now := time.Now().UTC()
+	if accountScoped {
+		if value, scoped := accountRouter.accountTurnState(authID, accountModel, now); scoped {
+			if keepExisting {
+				return nil, "skipped-existing"
+			}
+			if value == "" {
+				return nil, "account-state-missing"
+			}
+			return http.Header{turnStateHeader: []string{value}}, "applied-account"
+		}
+	}
+
 	if state == nil {
 		return nil, ""
 	}
@@ -184,8 +215,6 @@ func applyTurnStateOverride(model, requestedModel string, headers http.Header) (
 	// An existing client value is kept only when it looks healthy (required
 	// length) and force is off; an unhealthy one (for example a 312-byte
 	// degraded state) is always replaced, whichever the mode.
-	existing := headerValue(headers, turnStateHeader)
-	keepExisting := existing != "" && isAcceptedStateLength(len(existing)) && !state.Config.Force
 	if baseline == "" {
 		if !state.Config.Enabled || state.Config.Value == "" {
 			return nil, ""
@@ -225,6 +254,14 @@ func isAcceptedStateLength(length int) bool {
 }
 
 func repairTurnStateHeader(model, requestedModel, observedModel, state string) http.Header {
+	return repairTurnStateHeaderInternal("", model, requestedModel, observedModel, state, false)
+}
+
+func repairTurnStateHeaderForAccount(authID, model, requestedModel, observedModel, state string) http.Header {
+	return repairTurnStateHeaderInternal(authID, model, requestedModel, observedModel, state, true)
+}
+
+func repairTurnStateHeaderInternal(authID, model, requestedModel, observedModel, state string, accountScoped bool) http.Header {
 	if !degradationDetectionEnabled(model, requestedModel) {
 		return nil
 	}
@@ -239,7 +276,14 @@ func repairTurnStateHeader(model, requestedModel, observedModel, state string) h
 	if isHealthyTurnState(key, observedModel, state) {
 		return nil
 	}
-	baseline := probeTrack.activeValueFor(key)
+	baseline := ""
+	scoped := false
+	if accountScoped {
+		baseline, scoped = accountRouter.accountTurnState(authID, key, time.Now().UTC())
+	}
+	if !accountScoped || !scoped {
+		baseline = probeTrack.activeValueFor(key)
+	}
 	if baseline == "" || baseline == state {
 		return nil
 	}
@@ -289,7 +333,7 @@ func interceptNonStreamingResponse(raw []byte) (responseInterceptOutput, error) 
 	history.observeTurnState(req.RequestID, state, "response")
 	observeBusinessStateForRequest(req.Model, req.RequestedModel, state, upstream)
 	out := responseInterceptOutput{}
-	if headers := repairTurnStateHeader(req.Model, req.RequestedModel, upstream, state); headers != nil {
+	if headers := repairTurnStateHeaderForAccount(selectedAuthID(req.Metadata), req.Model, req.RequestedModel, upstream, state); headers != nil {
 		out.Headers = headers
 	}
 	return out, nil
@@ -316,7 +360,7 @@ func interceptStreamChunk(raw []byte) (responseInterceptOutput, error) {
 		observeBusinessStateForRequest(req.Model, req.RequestedModel, state, upstream)
 	}
 	out := responseInterceptOutput{}
-	if headers := repairTurnStateHeader(req.Model, req.RequestedModel, upstream, state); headers != nil {
+	if headers := repairTurnStateHeaderForAccount(selectedAuthID(req.Metadata), req.Model, req.RequestedModel, upstream, state); headers != nil {
 		out.Headers = headers
 	}
 	return out, nil

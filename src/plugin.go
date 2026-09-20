@@ -12,7 +12,7 @@ import (
 
 const (
 	pluginID                   = "timezone-override"
-	pluginVersion              = "1.5.37-agentease.7"
+	pluginVersion              = "1.5.37-agentease.10"
 	historyLimit               = 200
 	schemaVersion              = 6
 	streamChunkHeaderInitIndex = -1
@@ -30,6 +30,7 @@ type interceptRequest struct {
 	RequestedModel string
 	Headers        http.Header
 	Body           []byte
+	Metadata       map[string]any
 }
 
 type interceptResponse struct {
@@ -211,11 +212,22 @@ func intercept(raw []byte) (interceptResponse, error) {
 	if req.ToFormat != "codex" {
 		return interceptResponse{}, nil
 	}
+	authID := selectedAuthID(req.Metadata)
+	// Adopt a valid client-carried state before evaluating account-scoped
+	// rejection. This is the recovery path for an account whose earlier
+	// response was degraded: only its own timestamped 292/332-byte state can
+	// clear that account's cooldown; another account is never consulted.
+	accountRouter.observeRequestState(
+		authID,
+		businessModelName(req.Model, req.RequestedModel),
+		headerValue(req.Headers, turnStateHeader),
+		time.Now().UTC(),
+	)
 	// Degraded-model rejection: when the switch is on and the request targets
 	// a model with business degradation evidence, or probe evidence without
 	// a usable baseline, terminate with 403. A failing prefetch must not
 	// interrupt traffic still protected by the active or successor value.
-	if message := degradedRejectMessage(req.Model, req.RequestedModel); message != "" {
+	if message := degradedRejectMessageForAccount(authID, req.Model, req.RequestedModel); message != "" {
 		history.record(auditRecord{
 			RequestID: req.RequestID, TraceID: req.TraceID,
 			Model: req.Model, RequestedModel: req.RequestedModel,
@@ -245,7 +257,7 @@ func intercept(raw []byte) (interceptResponse, error) {
 			ResponseHeaders: http.Header{"Content-Type": {"application/json"}}, ResponseBody: payload,
 		}, nil
 	}
-	overrideHeaders, overrideStatus := applyTurnStateOverride(req.Model, req.RequestedModel, req.Headers)
+	overrideHeaders, overrideStatus := applyTurnStateOverrideForAccount(authID, req.Model, req.RequestedModel, req.Headers)
 	injectedLength := 0
 	if overrideHeaders != nil {
 		injectedLength = len(overrideHeaders.Get(turnStateHeader))

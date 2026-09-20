@@ -1660,8 +1660,9 @@ func (e *probeEngine) probeOnce(model, proxySpec string, cfg probeConfig) (probe
 	}
 	record.AuthLabel = cred.Label
 	record.AuthPriority = cred.Priority
+	capturedState := ""
 	defer func() {
-		accountRouter.observeProbe(cred.AuthID, model, record, time.Now().UTC())
+		accountRouter.observeProbe(cred.AuthID, model, record, capturedState, time.Now().UTC())
 	}()
 	transport, binder, err := buildProbeTransport(proxySpec)
 	if err != nil {
@@ -1784,6 +1785,7 @@ func (e *probeEngine) probeOnce(model, proxySpec string, cfg probeConfig) (probe
 	record.Success = true
 	record.StateLength = len(state)
 	record.ObservedModel = observedModel
+	capturedState = state
 	e.mu.Lock()
 	e.probesTotal++
 	e.probesOK++

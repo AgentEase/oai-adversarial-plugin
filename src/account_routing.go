@@ -37,6 +37,8 @@ type accountModelHealth struct {
 	Account             string    `json:"account"`
 	Model               string    `json:"model"`
 	State               string    `json:"state"`
+	TurnStateValue      string    `json:"turn_state_value,omitempty"`
+	HealthyUntil        time.Time `json:"healthy_until,omitempty"`
 	LastStateLength     int       `json:"last_state_length,omitempty"`
 	ConsecutiveFailures int       `json:"consecutive_failures,omitempty"`
 	LastStatusCode      int       `json:"last_status_code,omitempty"`
@@ -233,7 +235,12 @@ func (m *accountRoutingManager) pick(req schedulerPickRequest, now time.Time) sc
 			continue
 		}
 		all = append(all, candidate)
-		entry, ok := m.health[accountHealthKey(candidate.ID, model)]
+		key := accountHealthKey(candidate.ID, model)
+		entry, ok := m.health[key]
+		if ok && expireAccountHealth(&entry, now) {
+			m.health[key] = entry
+			markStateDirty()
+		}
 		candidateDiagnostic := schedulerCandidateDiagnostic{
 			Account: publicAccountID(candidate.ID), Provider: candidate.Provider,
 			Status: candidate.Status, Health: "unknown",
@@ -334,7 +341,9 @@ func (m *accountRoutingManager) observe(record usageRecord, now time.Time) {
 	if strings.TrimSpace(record.AuthID) == "" || model == "" || !providerLooksCodex(record.Provider+" "+record.AuthType) {
 		return
 	}
-	stateLength := responseStateLength(record.ResponseHeaders)
+	stateValue := responseStateValue(record.ResponseHeaders)
+	stateLength := len([]byte(stateValue))
+	healthyUntil := accountStateExpiry(stateValue, now, currentProbeConfig().Config.TTL)
 	key := accountHealthKey(record.AuthID, model)
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -356,17 +365,28 @@ func (m *accountRoutingManager) observe(record usageRecord, now time.Time) {
 
 	switch {
 	case !record.Failed && isAcceptedStateLength(stateLength):
-		entry.State = "healthy"
-		entry.ConsecutiveFailures = 0
-		entry.LastReason = "healthy_state"
-		entry.CooldownUntil = time.Time{}
+		if healthyUntil.After(now) {
+			entry.State = "healthy"
+			entry.TurnStateValue = stateValue
+			entry.HealthyUntil = healthyUntil
+			entry.ConsecutiveFailures = 0
+			entry.LastReason = "healthy_state"
+			entry.CooldownUntil = time.Time{}
+		} else {
+			entry.State = "expired"
+			entry.TurnStateValue = ""
+			entry.HealthyUntil = healthyUntil
+			entry.LastReason = "state_already_expired"
+		}
 	case stateLength > 0 && !isAcceptedStateLength(stateLength):
 		entry.State = "degraded"
+		entry.TurnStateValue = ""
 		entry.ConsecutiveFailures++
 		entry.LastReason = fmt.Sprintf("state_length_%d", stateLength)
 		entry.CooldownUntil = now.Add(m.config.Config.DegradedCooldown)
 	case record.Failed && (record.Failure.StatusCode == http.StatusUnauthorized || record.Failure.StatusCode == http.StatusForbidden):
 		entry.State = "auth_error"
+		entry.TurnStateValue = ""
 		entry.ConsecutiveFailures++
 		entry.LastReason = fmt.Sprintf("http_%d", record.Failure.StatusCode)
 		entry.CooldownUntil = now.Add(m.config.Config.DegradedCooldown)
@@ -377,6 +397,7 @@ func (m *accountRoutingManager) observe(record usageRecord, now time.Time) {
 		entry.LastReason = classifyUsageFailure(record.Failure)
 		if entry.ConsecutiveFailures >= m.config.Config.FailureThreshold {
 			entry.State = "transient_failure"
+			entry.TurnStateValue = ""
 			entry.CooldownUntil = now.Add(m.config.Config.FailureCooldown)
 		}
 	default:
@@ -392,11 +413,12 @@ func (m *accountRoutingManager) observe(record usageRecord, now time.Time) {
 // scheduler. Unlike the generic usage callback, the probe has both the exact
 // host AuthID and the upstream state/model evidence needed for a reliable
 // health decision.
-func (m *accountRoutingManager) observeProbe(authID, requestedModel string, record probeRecord, now time.Time) {
+func (m *accountRoutingManager) observeProbe(authID, requestedModel string, record probeRecord, stateValue string, now time.Time) {
 	model := routingModelKey(requestedModel)
 	if strings.TrimSpace(authID) == "" || model == "" {
 		return
 	}
+	healthyUntil := accountStateExpiry(stateValue, now, currentProbeConfig().Config.TTL)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.health == nil {
@@ -412,23 +434,28 @@ func (m *accountRoutingManager) observeProbe(authID, requestedModel string, reco
 	entry.LastStatusCode = record.StatusCode
 
 	switch {
-	case record.Success && isAcceptedStateLength(record.StateLength) && probeModelConsistent(requestedModel, record.ObservedModel):
+	case record.Success && isAcceptedStateLength(record.StateLength) && probeModelConsistent(requestedModel, record.ObservedModel) && stateValue != "" && healthyUntil.After(now):
 		entry.State = "healthy"
+		entry.TurnStateValue = stateValue
+		entry.HealthyUntil = healthyUntil
 		entry.ConsecutiveFailures = 0
 		entry.LastReason = "probe_healthy"
 		entry.CooldownUntil = time.Time{}
 	case record.StatusCode == http.StatusUnauthorized || record.StatusCode == http.StatusForbidden:
 		entry.State = "auth_error"
+		entry.TurnStateValue = ""
 		entry.ConsecutiveFailures++
 		entry.LastReason = fmt.Sprintf("probe_http_%d", record.StatusCode)
 		entry.CooldownUntil = now.Add(m.config.Config.DegradedCooldown)
 	case record.StateLength > 0 && !isAcceptedStateLength(record.StateLength):
 		entry.State = "degraded"
+		entry.TurnStateValue = ""
 		entry.ConsecutiveFailures++
 		entry.LastReason = fmt.Sprintf("probe_state_length_%d", record.StateLength)
 		entry.CooldownUntil = now.Add(m.config.Config.DegradedCooldown)
 	case record.ObservedModel != "" && !probeModelConsistent(requestedModel, record.ObservedModel):
 		entry.State = "degraded"
+		entry.TurnStateValue = ""
 		entry.ConsecutiveFailures++
 		entry.LastReason = "probe_model_mismatch"
 		entry.CooldownUntil = now.Add(m.config.Config.DegradedCooldown)
@@ -441,18 +468,186 @@ func (m *accountRoutingManager) observeProbe(authID, requestedModel string, reco
 	markStateDirty()
 }
 
-func responseStateLength(headers http.Header) int {
+func responseStateValue(headers http.Header) string {
 	for key, values := range headers {
 		if !strings.EqualFold(key, turnStateHeader) {
 			continue
 		}
 		for i := len(values) - 1; i >= 0; i-- {
 			if value := strings.TrimSpace(values[i]); value != "" {
-				return len([]byte(value))
+				return value
 			}
 		}
 	}
-	return 0
+	return ""
+}
+
+func accountStateExpiry(value string, capturedAt time.Time, ttl time.Duration) time.Time {
+	if strings.TrimSpace(value) == "" {
+		return time.Time{}
+	}
+	if ttl <= 0 {
+		ttl = time.Duration(probeDefaultsTTLMinutes) * time.Minute
+	}
+	if generatedAt, ok := parseTurnStateTimestamp(value); ok {
+		return generatedAt.Add(ttl).UTC()
+	}
+	return capturedAt.Add(ttl).UTC()
+}
+
+func expireAccountHealth(entry *accountModelHealth, now time.Time) bool {
+	if entry == nil || entry.State != "healthy" || entry.HealthyUntil.IsZero() || now.Before(entry.HealthyUntil) {
+		return false
+	}
+	entry.State = "expired"
+	entry.TurnStateValue = ""
+	entry.LastReason = "account_state_ttl_expired"
+	return true
+}
+
+// accountTurnState returns the selected account's own state. The second
+// result reports whether account-scoped routing is enabled; callers must not
+// fall back to a model-global state when it is true.
+func (m *accountRoutingManager) accountTurnState(authID, model string, now time.Time) (string, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if !m.config.Config.Enabled || m.config.Error != "" {
+		return "", false
+	}
+	model = routingModelKey(model)
+	if strings.TrimSpace(authID) == "" || model == "" {
+		return "", true
+	}
+	key := accountHealthKey(authID, model)
+	entry, ok := m.health[key]
+	if !ok {
+		return "", true
+	}
+	if expireAccountHealth(&entry, now) {
+		m.health[key] = entry
+		markStateDirty()
+	}
+	if entry.State != "healthy" || entry.TurnStateValue == "" || !isAcceptedStateLength(len(entry.TurnStateValue)) {
+		return "", true
+	}
+	return entry.TurnStateValue, true
+}
+
+// observeRequestState binds a healthy client-carried state to the AuthID that
+// CPA selected before the request interceptor runs. Unlike response/probe
+// capture, request adoption requires a valid embedded timestamp so an
+// arbitrary length-matched string cannot create a synthetic healthy lease.
+func (m *accountRoutingManager) observeRequestState(authID, model, value string, now time.Time) {
+	model = routingModelKey(model)
+	value = strings.TrimSpace(value)
+	if strings.TrimSpace(authID) == "" || model == "" || !isAcceptedStateLength(len(value)) {
+		return
+	}
+	generatedAt, ok := parseTurnStateTimestamp(value)
+	if !ok {
+		return
+	}
+	ttl := currentProbeConfig().Config.TTL
+	if ttl <= 0 {
+		ttl = time.Duration(probeDefaultsTTLMinutes) * time.Minute
+	}
+	healthyUntil := generatedAt.Add(ttl).UTC()
+	if !healthyUntil.After(now) {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if !m.config.Config.Enabled || m.config.Error != "" {
+		return
+	}
+	if m.health == nil {
+		m.health = map[string]accountModelHealth{}
+	}
+	key := accountHealthKey(authID, model)
+	entry := m.health[key]
+	entry.AuthID = authID
+	entry.Account = publicAccountID(authID)
+	entry.Model = model
+	entry.State = "healthy"
+	entry.TurnStateValue = value
+	entry.HealthyUntil = healthyUntil
+	entry.LastStateLength = len(value)
+	entry.ConsecutiveFailures = 0
+	entry.LastStatusCode = 0
+	entry.LastReason = "healthy_request_state"
+	entry.ObservedAt = now
+	entry.CooldownUntil = time.Time{}
+	m.health[key] = entry
+	markStateDirty()
+}
+
+func (m *accountRoutingManager) accountDegradedReason(authID, model string, now time.Time) (string, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if !m.config.Config.Enabled || m.config.Error != "" {
+		return "", false
+	}
+	model = routingModelKey(model)
+	if strings.TrimSpace(authID) == "" || model == "" {
+		return "", true
+	}
+	key := accountHealthKey(authID, model)
+	entry, ok := m.health[key]
+	if !ok {
+		return "", true
+	}
+	if expireAccountHealth(&entry, now) {
+		m.health[key] = entry
+		markStateDirty()
+	}
+	if entry.CooldownUntil.IsZero() || !now.Before(entry.CooldownUntil) {
+		return "", true
+	}
+	switch entry.State {
+	case "degraded":
+		return "该账号已观测到异常 state 或模型不一致", true
+	case "auth_error":
+		return "该账号鉴权已失效", true
+	case "transient_failure":
+		return "该账号连续请求失败，正在短暂冷却", true
+	default:
+		return "", true
+	}
+}
+
+// degradedRejectMessageForAccount isolates rejection evidence by AuthID when
+// experimental account routing is enabled. A degraded account must never
+// make another account's request fail, while disabling the experiment keeps
+// the legacy model-global behavior intact.
+func degradedRejectMessageForAccount(authID string, models ...string) string {
+	now := time.Now().UTC()
+	scopedMode := false
+	for _, candidate := range models {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" {
+			continue
+		}
+		if reason, scoped := accountRouter.accountDegradedReason(authID, candidate, now); scoped {
+			scopedMode = true
+			if reason == "" {
+				continue
+			}
+			return fmt.Sprintf("账号 %s 的模型 %s 当前不可用：%s。请求已被 O/对抗插件拦截，请稍后重试或切换账号。", publicAccountID(authID), candidate, reason)
+		}
+		return degradedRejectMessage(models...)
+	}
+	if scopedMode {
+		return ""
+	}
+	return ""
+}
+
+func selectedAuthID(metadata map[string]any) string {
+	if len(metadata) == 0 {
+		return ""
+	}
+	value, _ := metadata["selected_auth_id"].(string)
+	return strings.TrimSpace(value)
 }
 
 func classifyUsageFailure(failure usageFailure) string {
@@ -489,9 +684,15 @@ func publicAccountID(authID string) string {
 func accountRoutingSummary() map[string]any {
 	accountRouter.mu.Lock()
 	defer accountRouter.mu.Unlock()
+	now := time.Now().UTC()
 	entries := make([]accountModelHealth, 0, len(accountRouter.health))
-	for _, entry := range accountRouter.health {
+	for key, entry := range accountRouter.health {
+		if expireAccountHealth(&entry, now) {
+			accountRouter.health[key] = entry
+			markStateDirty()
+		}
 		entry.AuthID = ""
+		entry.TurnStateValue = ""
 		entries = append(entries, entry)
 	}
 	sort.Slice(entries, func(i, j int) bool {
